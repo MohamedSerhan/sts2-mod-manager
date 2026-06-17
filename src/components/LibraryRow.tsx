@@ -178,6 +178,8 @@ export interface LibraryRowProps {
   gameRunning?: boolean;
   /** Current STS2 game version, drives the min_game_version warning. */
   gameVersion?: string | null;
+  versionOptions?: Array<{ key: string; version: string; label: string }>;
+  onSelectVersion?: (key: string) => void;
   /** Whether THIS row's update is in flight (per-row spinner). */
   isUpdating?: boolean;
   /** Whether THIS row's repair is in flight. */
@@ -235,6 +237,8 @@ export function LibraryRow({
   audit,
   gameRunning = false,
   gameVersion,
+  versionOptions = [],
+  onSelectVersion = noop,
   isUpdating = false,
   isRepairing = false,
   isRollingBack = false,
@@ -559,6 +563,26 @@ export function LibraryRow({
               >
                 {t('mods.manifestVersion', { version: manifestVersion })}
               </span>
+            )}
+            {versionOptions.length > 1 && (
+              <label
+                className="gf-version-select"
+                title={t('mods.versionSelectorTitle')}
+              >
+                <span>{t('mods.versionSelectorLabel')}</span>
+                <select
+                  value={membershipRowKey(row)}
+                  onChange={(event) => onSelectVersion(event.target.value)}
+                  aria-label={t('mods.versionSelectorTitle')}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {versionOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             )}
             {row.folder_name
               && (row.folder_name !== row.name || !!row.display_name?.trim())

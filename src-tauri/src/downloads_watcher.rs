@@ -12,7 +12,13 @@ use crate::state::AppState;
 /// Payload emitted to the frontend when a mod is auto-installed from Downloads.
 #[derive(Clone, serde::Serialize)]
 pub struct ModAutoInstalled {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_version_id: Option<String>,
     pub mod_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_id: Option<String>,
     pub file_name: String,
     /// If this was an update to an existing mod, the old name
     pub replaced: Option<String>,
@@ -303,12 +309,16 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             });
 
                         match install_outcome {
-                            Ok((mod_info, preserved_configs, lost_configs)) => {
+                            Ok((mut mod_info, preserved_configs, lost_configs)) => {
                                 // Install succeeded — the new mod is in place,
                                 // so drop the stashed copy of the old one.
                                 if let Some(stash) = stashed_existing {
                                     stash.discard();
                                 }
+                                crate::mod_versions::ensure_mod_info_id(
+                                    &mut mod_info,
+                                    &config_path,
+                                );
 
                                 let file_name = path
                                     .file_name()
@@ -378,9 +388,10 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                             .folder_name
                                             .as_deref()
                                             .unwrap_or(mod_info.name.as_str());
-                                        crate::mod_sources::update_installed_version(
+                                        crate::mod_sources::update_installed_version_from_source(
                                             install_key,
                                             &version_to_store,
+                                            "nexus",
                                             &config_path,
                                         );
                                         log::info!(
@@ -450,7 +461,10 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 let _ = app.emit(
                                     "mod-auto-installed",
                                     ModAutoInstalled {
+                                        mod_version_id: mod_info.mod_version_id,
                                         mod_name: mod_info.name,
+                                        folder_name: mod_info.folder_name,
+                                        mod_id: mod_info.mod_id,
                                         file_name,
                                         replaced: replaced_name,
                                         preserved_configs,

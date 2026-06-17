@@ -273,6 +273,8 @@ export interface ModSourceEntry {
    *  bookkeeping driving the post-update "preserved N files" toast —
    *  frontend doesn't read this directly. */
   config_hashes?: Record<string, string>;
+  installed_version?: string | null;
+  installed_version_source?: 'github' | 'nexus' | 'manual' | 'unknown' | string | null;
 }
 
 export interface AutoDetectResult {
@@ -337,6 +339,8 @@ export interface BackupInfo {
 }
 
 export interface ModAuditEntry {
+  /** Stable installed-artifact identity when the backend can resolve one. */
+  mod_version_id?: string | null;
   mod_name: string;
   /** On-disk folder name for this mod. Used to disambiguate two installed
    *  mods that share a display name — pin/unpin keys by folder when present
@@ -388,6 +392,13 @@ export interface ModAuditEntry {
    *  upstream tag advances. Distinct from `pinned`: snooze suppresses
    *  the "update available" badge but doesn't block manual updates. */
   snoozed?: boolean;
+}
+
+export interface ModAuditTarget {
+  mod_version_id?: string | null;
+  folder_name?: string | null;
+  mod_id?: string | null;
+  name: string;
 }
 
 export interface BrowserCard {

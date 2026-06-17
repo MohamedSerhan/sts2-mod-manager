@@ -66,6 +66,7 @@ import {
   setLaunchMode,
   setModSnooze,
   setModTags,
+  selectProfileModVersion,
   setModSource,
   setModSourcesFull,
   setNexusApiKey,
@@ -268,6 +269,45 @@ describe('useTauri wrappers — command names + arg shapes', () => {
         modName: 'BaseLib',
         folderName: 'BaseLib-v2',
         modId: 'baselib-id',
+      },
+    });
+
+    await selectProfileModVersion(
+      'profile-1',
+      { mod_version_id: 'old-version', folder_name: 'BaseLib-old', mod_id: 'baselib', name: 'BaseLib' },
+      { mod_version_id: 'new-version', folder_name: 'BaseLib-new', mod_id: 'baselib', name: 'BaseLib' },
+    );
+    expect(lastCall()).toEqual({
+      cmd: 'select_profile_mod_version',
+      args: {
+        profileId: 'profile-1',
+        currentName: 'BaseLib',
+        currentModVersionId: 'old-version',
+        currentFolderName: 'BaseLib-old',
+        currentModId: 'baselib',
+        selectedName: 'BaseLib',
+        selectedModVersionId: 'new-version',
+        selectedFolderName: 'BaseLib-new',
+        selectedModId: 'baselib',
+      },
+    });
+    await selectProfileModVersion(
+      'profile-1',
+      { name: 'LegacyLib' },
+      { name: 'LegacyLib' },
+    );
+    expect(lastCall()).toEqual({
+      cmd: 'select_profile_mod_version',
+      args: {
+        profileId: 'profile-1',
+        currentName: 'LegacyLib',
+        currentModVersionId: null,
+        currentFolderName: null,
+        currentModId: null,
+        selectedName: 'LegacyLib',
+        selectedModVersionId: null,
+        selectedFolderName: null,
+        selectedModId: null,
       },
     });
 

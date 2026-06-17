@@ -65,9 +65,10 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { useModLibrary } from '../hooks/useModLibrary';
 import { usePinScroll } from '../hooks/usePinScroll';
-import { deleteMod, setProfileModMembership, setProfileModsEnabled, toggleMod } from '../hooks/useTauri';
+import { deleteMod, selectProfileModVersion, setProfileModMembership, setProfileModsEnabled, toggleMod } from '../hooks/useTauri';
 import { identitiesMatch } from '../lib/modIdentity';
-import type { ModInfo, Profile, ShareResult } from '../types';
+import { auditEntryKey, isActionableUpdate } from '../lib/auditState';
+import type { ModInfo, Profile, ProfileMembershipMod, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
 export interface ModpackDetailProps {
@@ -242,12 +243,6 @@ export function ModpackDetail({
     ) setTagFilter('');
   }, [packTagOptions, tagFilter]);
 
-  // Build a set of mod-names that belong to this pack so the updates
-  // affordance is scoped to the pack's own mods.
-  const modNames = useMemo(
-    () => new Set(profile.mods.map((m) => m.name)),
-    [profile.mods],
-  );
   // How many of THIS pack's mods are currently active (enabled) in the game.
   // The status line is scoped to the pack — it must not report the whole
   // library. Matched against the live on-disk state so it agrees with the
@@ -265,18 +260,25 @@ export function ModpackDetail({
   // GitHub-updatable mods in THIS pack (drives the "N updates available"
   // pill + the update-all action).
   const packUpdateNames = useMemo(
-    () =>
-      (auditResults ?? [])
-        .filter(
-          (r) =>
-            r.needs_update
-            && !r.snoozed
-            && r.github_repo
-            && r.latest_release_with_assets_tag
-            && modNames.has(r.mod_name),
+    () => {
+      const packKeys = new Set(
+        profile.mods.flatMap((m) => [
+          m.mod_version_id ?? '',
+          m.folder_name ?? '',
+          m.mod_id ?? '',
+          m.name,
+        ]).filter(Boolean),
+      );
+      return (auditResults ?? [])
+        .filter((r) =>
+          isActionableUpdate(r)
+          && r.github_repo
+          && r.latest_release_with_assets_tag
+          && (packKeys.has(auditEntryKey(r)) || packKeys.has(r.mod_name))
         )
-        .map((r) => r.mod_name),
-    [auditResults, modNames],
+        .map((r) => r.mod_name);
+    },
+    [auditResults, profile.mods],
   );
   const updatesCount = packUpdateNames.length;
 
@@ -412,6 +414,29 @@ export function ModpackDetail({
     } finally {
       setDeletingAll(false);
     }
+  };
+
+  const handleSelectPackVersion = async (
+    current: ProfileMembershipMod,
+    selected: ProfileMembershipMod,
+  ) => {
+    await selectProfileModVersion(
+      profileKey,
+      {
+        mod_version_id: current.mod_version_id ?? null,
+        folder_name: current.folder_name ?? null,
+        mod_id: current.mod_id ?? null,
+        name: current.name,
+      },
+      {
+        mod_version_id: selected.mod_version_id ?? null,
+        folder_name: selected.folder_name ?? null,
+        mod_id: selected.mod_id ?? null,
+        name: selected.name,
+      },
+    );
+    markSharedLocalEdit();
+    await refreshAfterMutation();
   };
 
   // Bug 7: enable/disable EVERY mod in THIS pack (vs. the whole library).
@@ -879,6 +904,7 @@ export function ModpackDetail({
           }}
           onMembershipChanged={refreshAfterMutation}
           onLoadOrderChanged={refreshAfterMutation}
+          onSelectProfileVersion={handleSelectPackVersion}
           onSearchChange={(q) => {
             // One search, both sections: mirror the query into the
             // Add-from-Library filter, and pop the section open so the

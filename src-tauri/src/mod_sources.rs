@@ -36,6 +36,10 @@ pub struct ModSourceEntry {
     /// Tracks the version (release tag) that was last installed via the updater
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
+    /// Source that last wrote installed_version. Legacy entries omit this
+    /// and keep the pre-existing multi-source audit behavior until touched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_version_source: Option<String>,
     /// If true, this mod is pinned — excluded from update checks, audit flags,
     /// and auto-install from Downloads. Must be updated manually.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -250,6 +254,10 @@ fn merge_missing_entry_fields(dest: &mut ModSourceEntry, old: ModSourceEntry) ->
         dest.installed_version = old.installed_version;
         changed = true;
     }
+    if dest.installed_version_source.is_none() && old.installed_version_source.is_some() {
+        dest.installed_version_source = old.installed_version_source;
+        changed = true;
+    }
     if dest.note.is_none() && old.note.is_some() {
         dest.note = old.note;
         changed = true;
@@ -378,9 +386,20 @@ pub fn load_pinned_set(config_path: &Path) -> std::collections::HashSet<String> 
 
 /// Update just the installed_version for a mod in mod_sources.json.
 pub fn update_installed_version(mod_name: &str, version: &str, config_path: &Path) {
+    update_installed_version_from_source(mod_name, version, "unknown", config_path);
+}
+
+/// Update installed_version and remember which source produced it.
+pub fn update_installed_version_from_source(
+    mod_name: &str,
+    version: &str,
+    source: &str,
+    config_path: &Path,
+) {
     let mut db = load_sources(config_path);
     let entry = db.mods.entry(mod_name.to_string()).or_default();
     entry.installed_version = Some(version.to_string());
+    entry.installed_version_source = Some(source.to_string());
     if let Err(e) = save_sources(&db, config_path) {
         log::error!("Failed to save installed_version for '{}': {}", mod_name, e);
     }
@@ -2522,6 +2541,7 @@ mod enrich_priority_tests {
                 nexus_game_domain: Some("slaythespire2".into()),
                 nexus_mod_id: Some(6),
                 installed_version: Some("1.1.3".into()),
+                installed_version_source: None,
                 tags: vec!["utility".into()],
                 ..Default::default()
             },
@@ -2617,6 +2637,7 @@ mod enrich_priority_tests {
                 nexus_game_domain: Some("slaythespire2".into()),
                 nexus_mod_id: Some(1073),
                 installed_version: Some("0.1.7".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -2713,6 +2734,7 @@ mod enrich_priority_tests {
                 nexus_game_domain: Some("sts2".into()),
                 nexus_mod_id: Some(77),
                 installed_version: Some("v1.0.0".into()),
+                installed_version_source: None,
                 pinned: true,
                 note: Some("keep note".into()),
                 custom_url: Some("https://example.test/post".into()),
@@ -2983,6 +3005,7 @@ mod carry_and_attach_tests {
                 nexus_game_domain: Some("slaythespire2".into()),
                 nexus_mod_id: Some(42),
                 installed_version: Some("1.0.0".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -3027,6 +3050,7 @@ mod carry_and_attach_tests {
                 nexus_mod_id: Some(7),
                 pinned: true,
                 installed_version: Some("0.9.0".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -3119,6 +3143,7 @@ mod carry_and_attach_tests {
             "MyMod",
             ModSourceEntry {
                 installed_version: Some("1.2.3".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );

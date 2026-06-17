@@ -980,6 +980,39 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(help?.textContent).not.toMatch(/Drag the handle to set load order/i);
   });
 
+  it('threads optional row action callbacks when matching mod info is available', async () => {
+    seedInstalledMods();
+    const modInfoByKey = new Map([
+      ['BaseLib', mkModInfo({
+        name: 'BaseLib',
+        folder_name: 'BaseLib',
+        mod_id: 'BaseLib',
+        github_url: 'https://github.com/owner/baselib',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/123',
+      })],
+    ]);
+    render(
+      <Wrap
+        modpackName={null}
+        modInfoByKey={modInfoByKey}
+        onUpdate={vi.fn()}
+        onTogglePin={vi.fn()}
+        onSnooze={vi.fn()}
+        onUnsnooze={vi.fn()}
+        onRepair={vi.fn()}
+        onRollback={vi.fn()}
+        onDelete={vi.fn()}
+        onCopyVersion={vi.fn()}
+        onOpenThisModFolder={vi.fn()}
+        onEditSources={vi.fn()}
+        onFindGithubFromNexus={vi.fn()}
+        onOpenExternalUrl={vi.fn()}
+        onAutoDetectSource={vi.fn()}
+      />,
+    );
+    expect(await screen.findAllByText('BaseLib')).not.toHaveLength(0);
+  });
+
   // ── packScoped (dedicated modpack view) ───────────────────────────
   describe('packScoped', () => {
     function seedInPack() {
@@ -1003,19 +1036,542 @@ describe('<LibraryTable modpackName={null}>', () => {
       ]);
     }
 
-    it('hides the sort control, explainer, and In-Modpack badge', async () => {
+    it('shows pack sort modes, hides explainer and In-Modpack badge', async () => {
       const modInfoByKey = seedInPack();
       const { container } = render(<Wrap modpackName="Stable" packScoped modInfoByKey={modInfoByKey} />);
       await screen.findByText('PackMod');
       // Search placeholder is just "Search mods…" (not "N library mods").
       expect(screen.getByPlaceholderText(/^Search mods/i)).toBeInTheDocument();
       expect(screen.queryByPlaceholderText(/library mods/i)).toBeNull();
-      expect(container.querySelector('.gf-sort-control')).toBeNull();
+      const sort = screen.getByRole('combobox', { name: /Sort/i });
+      expect(sort).toHaveValue('loadOrder');
+      expect(within(sort).getByRole('option', { name: /Load order/i })).toBeInTheDocument();
+      expect(within(sort).getByRole('option', { name: /Updates first/i })).toBeInTheDocument();
       expect(container.querySelector('.gf-profile-library-help')).toBeNull();
       expect(container.querySelector('.gf-row-inpack')).toBeNull();
       // The visible row action is "Remove from pack", not the disk trash.
       expect(container.querySelector('.gf-row-remove')).not.toBeNull();
       expect(container.querySelector('.gf-row-delete')).toBeNull();
+    });
+
+    it('defaults pack-scoped rows to the saved load order', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'SecondAlphabetically',
+            version: '1.0.0',
+            folder_name: 'SecondAlphabetically',
+            mod_id: 'SecondAlphabetically',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            name: 'Alpha',
+            version: '1.0.0',
+            folder_name: 'Alpha',
+            mod_id: 'Alpha',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      const { container } = render(<Wrap modpackName="Stable" packScoped />);
+      await screen.findByText('SecondAlphabetically');
+      await waitFor(() => {
+        const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
+        expect(rows[0]).toContain('SecondAlphabetically');
+        expect(rows[1]).toContain('Alpha');
+      });
+    });
+
+    it('moves actionable updates first without hiding non-updating pack rows', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'Alpha',
+            version: '1.0.0',
+            folder_name: 'Alpha',
+            mod_id: 'Alpha',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            name: 'Beta',
+            version: '1.0.0',
+            folder_name: 'Beta',
+            mod_id: 'Beta',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      const auditByKey = new Map([
+        ['Beta', {
+          mod_name: 'Beta',
+          folder_name: 'Beta',
+          github_repo: 'owner/beta',
+          installed_version: '1.0.0',
+          latest_release_tag: 'v2.0.0',
+          latest_release_with_assets_tag: 'v2.0.0',
+          latest_has_assets: true,
+          needs_update: true,
+          asset_names: ['Beta.zip'],
+          releases_scanned: 1,
+          error: null,
+          nexus_url: null,
+          nexus_version: null,
+          nexus_update_available: false,
+          update_source: 'github',
+          github_auto_detected: false,
+          pinned: false,
+          latest_compatible_tag: 'v2.0.0',
+        }],
+      ]);
+      const user = userEvent.setup();
+      const modInfoByKey = new Map([
+        ['Alpha', mkModInfo({ name: 'Alpha', folder_name: 'Alpha', mod_id: 'Alpha' })],
+        ['Beta', mkModInfo({ name: 'Beta', folder_name: 'Beta', mod_id: 'Beta' })],
+      ]);
+      const { container } = render(<Wrap modpackName="Stable" packScoped auditByKey={auditByKey} modInfoByKey={modInfoByKey} />);
+      await screen.findByText('Alpha');
+      await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'updatesFirst');
+      const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
+      expect(rows[0]).toContain('Beta');
+      expect(rows[1]).toContain('Alpha');
+    });
+
+    it('keeps load order as the tie-breaker when every pack row needs an update', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'Beta',
+            version: '1.0.0',
+            folder_name: 'Beta',
+            mod_id: 'Beta',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            name: 'Alpha',
+            version: '1.0.0',
+            folder_name: 'Alpha',
+            mod_id: 'Alpha',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      const updateAudit = (name: string) => ({
+        mod_name: name,
+        folder_name: name,
+        github_repo: `owner/${name.toLowerCase()}`,
+        installed_version: '1.0.0',
+        latest_release_tag: 'v2.0.0',
+        latest_release_with_assets_tag: 'v2.0.0',
+        latest_has_assets: true,
+        needs_update: true,
+        asset_names: [`${name}.zip`],
+        releases_scanned: 1,
+        error: null,
+        nexus_url: null,
+        nexus_version: null,
+        nexus_update_available: false,
+        update_source: 'github',
+        github_auto_detected: false,
+        pinned: false,
+        latest_compatible_tag: 'v2.0.0',
+      });
+      const user = userEvent.setup();
+      const { container } = render(
+        <Wrap
+          modpackName="Stable"
+          packScoped
+          modInfoByKey={new Map([
+            ['Alpha', mkModInfo({ name: 'Alpha', folder_name: 'Alpha', mod_id: 'Alpha' })],
+            ['Beta', mkModInfo({ name: 'Beta', folder_name: 'Beta', mod_id: 'Beta' })],
+          ])}
+          auditByKey={new Map([
+            ['Alpha', updateAudit('Alpha')],
+            ['Beta', updateAudit('Beta')],
+          ])}
+        />,
+      );
+      await screen.findByText('Beta');
+      await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'updatesFirst');
+      const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
+      expect(rows[0]).toContain('Beta');
+      expect(rows[1]).toContain('Alpha');
+    });
+
+    it('collapses multiple installed versions into one row with a selector', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('toggle_mod', () => true);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            mod_version_id: 'watcher-130',
+            name: 'Watcher',
+            version: '1.3.0',
+            folder_name: 'Watcher-old',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+        ],
+      }));
+      const modInfoByKey = new Map([
+        ['Watcher', mkModInfo({ name: 'Watcher', folder_name: 'Watcher', mod_id: 'Watcher', version: '1.4.3' })],
+        ['Watcher-old', mkModInfo({ name: 'Watcher', folder_name: 'Watcher-old', mod_id: 'Watcher', version: '1.3.0', enabled: false })],
+      ]);
+      const { container } = render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+      await screen.findByText('Watcher');
+      expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
+      const user = userEvent.setup();
+      await user.selectOptions(
+        screen.getByRole('combobox', { name: /Choose installed version/i }),
+        'watcher-130',
+      );
+      await waitFor(() => {
+        expect(getInvokeCalls()).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ cmd: 'toggle_mod', args: expect.objectContaining({ name: 'Watcher', folderName: 'Watcher-old', enable: true }) }),
+            expect.objectContaining({ cmd: 'toggle_mod', args: expect.objectContaining({ name: 'Watcher', folderName: 'Watcher', enable: false }) }),
+          ]),
+        );
+      });
+    });
+
+    it('does not collapse same-version installs or legacy rows without artifact ids', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-a',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher-A',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            mod_version_id: 'watcher-b',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher-B',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+          {
+            name: 'Watcher',
+            version: '1.3.0',
+            folder_name: 'Watcher-Legacy',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+        ],
+      }));
+      const { container } = render(<Wrap modpackName="Stable" />);
+      await screen.findAllByText('Watcher');
+      expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(3);
+      expect(screen.queryByRole('combobox', { name: /Choose installed version/i })).toBeNull();
+    });
+
+    it('uses version ordering when collapsed library versions have the same storage state', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-130',
+            name: 'Watcher',
+            version: '1.3.0',
+            folder_name: 'Watcher-old',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+        ],
+      }));
+      const { container } = render(<Wrap modpackName="Stable" />);
+      await screen.findByText('Watcher');
+      expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
+      expect(screen.getByTitle('Version')).toHaveTextContent('v1.4.3');
+    });
+
+    it('uses saved load order when duplicate included pack versions are collapsed', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-130',
+            name: 'Watcher',
+            version: '1.3.0',
+            folder_name: 'Watcher-old',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      const { container } = render(<Wrap modpackName="Stable" packScoped />);
+      await screen.findByText('Watcher');
+      expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
+      expect(screen.getByTitle('Version')).toHaveTextContent('v1.3.0');
+    });
+
+    it('pack-scoped version selector replaces the profile entry and mirrors active-pack disk state', async () => {
+      registerInvokeHandler('get_active_profile', () => 'Stable');
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('toggle_mod', () => true);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            mod_version_id: 'watcher-130',
+            name: 'Watcher',
+            version: '1.3.0',
+            folder_name: 'Watcher-old',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+        ],
+      }));
+      const onSelectProfileVersion = vi.fn(async () => {});
+      const user = userEvent.setup();
+      render(
+        <Wrap
+          modpackName="Stable"
+          packScoped
+          filterRow={(row) => row.profiles.some((profile) => profile.included)}
+          onSelectProfileVersion={onSelectProfileVersion}
+        />,
+      );
+      const picker = await screen.findByRole('combobox', { name: /Choose installed version/i });
+      await waitFor(() => expect(picker).toHaveValue('watcher-143'));
+      await user.selectOptions(picker, 'watcher-130');
+      await waitFor(() => {
+        expect(onSelectProfileVersion).toHaveBeenCalled();
+        expect(getInvokeCalls()).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ cmd: 'toggle_mod', args: expect.objectContaining({ name: 'Watcher', folderName: 'Watcher-old', enable: true }) }),
+            expect.objectContaining({ cmd: 'toggle_mod', args: expect.objectContaining({ name: 'Watcher', folderName: 'Watcher', enable: false }) }),
+          ]),
+        );
+      });
+    });
+
+    it('pack-scoped version selector does not toggle disk state for an inactive pack', async () => {
+      registerInvokeHandler('get_active_profile', () => 'Other Pack');
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('toggle_mod', () => true);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            mod_version_id: 'watcher-130',
+            name: 'Watcher',
+            version: '1.3.0',
+            folder_name: 'Watcher-old',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+        ],
+      }));
+      const onSelectProfileVersion = vi.fn(async () => {});
+      const user = userEvent.setup();
+      render(
+        <Wrap
+          modpackName="Stable"
+          packScoped
+          filterRow={(row) => row.profiles.some((profile) => profile.included)}
+          onSelectProfileVersion={onSelectProfileVersion}
+        />,
+      );
+      await user.selectOptions(
+        await screen.findByRole('combobox', { name: /Choose installed version/i }),
+        'watcher-130',
+      );
+      await waitFor(() => expect(onSelectProfileVersion).toHaveBeenCalled());
+      expect(getInvokeCalls().some((call) => call.cmd === 'toggle_mod')).toBe(false);
+    });
+
+    it('pack-scoped version selector avoids redundant disk toggles when the selected artifact is already active', async () => {
+      registerInvokeHandler('get_active_profile', () => 'Stable');
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('toggle_mod', () => true);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-130',
+            name: 'Watcher',
+            version: '1.3.0',
+            folder_name: 'Watcher-old',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+        ],
+      }));
+      const onSelectProfileVersion = vi.fn(async () => {});
+      const user = userEvent.setup();
+      render(
+        <Wrap
+          modpackName="Stable"
+          packScoped
+          filterRow={(row) => row.profiles.some((profile) => profile.included)}
+          onSelectProfileVersion={onSelectProfileVersion}
+        />,
+      );
+      await user.selectOptions(
+        await screen.findByRole('combobox', { name: /Choose installed version/i }),
+        'watcher-143',
+      );
+      await waitFor(() => expect(onSelectProfileVersion).toHaveBeenCalled());
+      expect(getInvokeCalls().some((call) => call.cmd === 'toggle_mod')).toBe(false);
+    });
+
+    it('version selector failure keeps the row visible and reports the backend error', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            mod_version_id: 'watcher-130',
+            name: 'Watcher',
+            version: '1.3.0',
+            folder_name: 'Watcher-old',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+        ],
+      }));
+      registerInvokeHandler('toggle_mod', () => {
+        throw new Error('disk switch failed');
+      });
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+      await user.selectOptions(
+        await screen.findByRole('combobox', { name: /Choose installed version/i }),
+        'watcher-130',
+      );
+      expect(await screen.findByText(/Could not select that installed version: disk switch failed/i)).toBeInTheDocument();
+      expect(screen.getByText('Watcher')).toBeInTheDocument();
+    });
+
+    it('version selector failure reports non-Error backend failures', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+          {
+            mod_version_id: 'watcher-130',
+            name: 'Watcher',
+            version: '1.3.0',
+            folder_name: 'Watcher-old',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+        ],
+      }));
+      registerInvokeHandler('toggle_mod', () => {
+        throw 'string failure';
+      });
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+      await user.selectOptions(
+        await screen.findByRole('combobox', { name: /Choose installed version/i }),
+        'watcher-130',
+      );
+      expect(await screen.findByText(/Could not select that installed version: string failure/i)).toBeInTheDocument();
     });
 
     it('the visible Remove button removes the mod from the pack', async () => {

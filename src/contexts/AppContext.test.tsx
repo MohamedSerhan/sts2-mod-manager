@@ -285,7 +285,7 @@ describe('<AppProvider>', () => {
     expect(screen.getByText(/Opened AutoPath on Nexus/)).toBeInTheDocument();
     // Grab the handler AppProvider registered for `mod-auto-installed`
     // and fire it directly — covers the dismiss-via-watcher branch.
-    const handler = getListenHandler<{ mod_name: string; file_name: string; replaced: string | null }>(
+    const handler = getListenHandler<{ mod_name: string; file_name: string; replaced: string | null; mod_version_id?: string | null; folder_name?: string | null; mod_id?: string | null }>(
       'mod-auto-installed',
     );
     act(() => {
@@ -509,12 +509,12 @@ describe('<AppProvider>', () => {
 
     // The audit listener re-binds when `auditResults === null` flips, so
     // grab the most-recent listener AFTER runAudit completes.
-    const handler = getListenHandler<{ mod_name: string; file_name: string; replaced: string | null }>(
+    const handler = getListenHandler<{ mod_name: string; file_name: string; replaced: string | null; mod_version_id?: string | null; folder_name?: string | null; mod_id?: string | null }>(
       'mod-auto-installed',
     );
     await act(async () => {
       handler({
-        payload: { mod_name: 'NewMod', file_name: 'NewMod-0.1.zip', replaced: 'A' },
+        payload: { mod_name: 'NewMod', file_name: 'NewMod-0.1.zip', replaced: 'A', mod_version_id: 'artifact-new', folder_name: 'NewModFolder', mod_id: 'newmod' },
       });
       // Let the spawned refreshAuditEntries promise settle.
       await Promise.resolve();
@@ -526,7 +526,10 @@ describe('<AppProvider>', () => {
     expect(captured?.auditResults?.find((r) => r.mod_name === 'A')?.installed_version).toBe('2.0');
     // The targeted audit call should have included BOTH names — the
     // event's mod_name and its replaced field.
-    expect(lastArgs?.only).toEqual(['NewMod', 'A']);
+    expect(lastArgs?.only).toEqual([
+      { mod_version_id: 'artifact-new', folder_name: 'NewModFolder', mod_id: 'newmod', name: 'NewMod' },
+      'A',
+    ]);
   });
 
   it('mod-auto-installed event with replaced === mod_name dedupes to a single name', async () => {
@@ -549,7 +552,7 @@ describe('<AppProvider>', () => {
     await waitFor(() => { expect(captured?.loading).toBe(false); });
     await act(async () => { await captured!.runAudit(); });
 
-    const handler = getListenHandler<{ mod_name: string; file_name: string; replaced: string | null }>(
+    const handler = getListenHandler<{ mod_name: string; file_name: string; replaced: string | null; mod_version_id?: string | null; folder_name?: string | null; mod_id?: string | null }>(
       'mod-auto-installed',
     );
     await act(async () => {
@@ -561,7 +564,7 @@ describe('<AppProvider>', () => {
       expect(captured?.auditResults?.[0].installed_version).toBe('2.0');
     });
     // Only one name passed in (not duplicated) since replaced === mod_name.
-    expect(lastArgs?.only).toEqual(['Same']);
+    expect(lastArgs?.only).toEqual([{ mod_version_id: null, folder_name: null, mod_id: null, name: 'Same' }]);
   });
 
   it('updateAllGithub confirms, invokes update_all_mods, toasts, and refreshes audit rows', async () => {

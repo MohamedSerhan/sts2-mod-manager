@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::download::{fetch_latest_release, fetch_releases};
 use crate::error::Result;
 use crate::mod_sources::{
-    load_sources, lookup_entry, save_sources, update_installed_version, ModSourceEntry,
+    load_sources, lookup_entry, save_sources, update_installed_version_from_source, ModSourceEntry,
 };
 use crate::mods::{scan_mods, ModInfo};
 use crate::state::AppState;
@@ -446,7 +446,7 @@ pub async fn check_all_updates(
                         let manifest_ver = m.version.trim_start_matches('v');
                         let current_ver = if !sources_ver.is_empty() {
                             let sv = sources_ver.trim_start_matches('v');
-                            if is_newer_version(manifest_ver, sv) {
+                            if is_newer_version(sv, manifest_ver) {
                                 sv
                             } else {
                                 manifest_ver
@@ -1022,7 +1022,7 @@ pub async fn update_mod(
         // Write under folder_name when available so the installed_version
         // travels with the same DB key the pin lookup uses (folder-first).
         let install_key = info.folder_name.as_deref().unwrap_or(name.as_str());
-        update_installed_version(install_key, &chosen_tag, &config_path);
+        update_installed_version_from_source(install_key, &chosen_tag, "github", &config_path);
         if info.name != name {
             // When the install renamed the mod (manifest's Name field changed
             // between releases — e.g. "STS2-ShowPlayerHandCards" → "Highlight
@@ -1030,7 +1030,7 @@ pub async fn update_mod(
             // version over so the audit doesn't lose track and report "no
             // source" on the freshly-installed copy.
             crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
-            update_installed_version(&info.name, &chosen_tag, &config_path);
+            update_installed_version_from_source(&info.name, &chosen_tag, "github", &config_path);
         }
 
         // Overlay user-edited configs + refresh snapshot. Emits the
@@ -1231,10 +1231,20 @@ pub async fn repair_mod(
     if install_healthy {
         // Folder-first key for the same reason as update_mod above.
         let install_key = info.folder_name.as_deref().unwrap_or(name.as_str());
-        crate::mod_sources::update_installed_version(install_key, &chosen.tag, &config_path);
+        crate::mod_sources::update_installed_version_from_source(
+            install_key,
+            &chosen.tag,
+            "github",
+            &config_path,
+        );
         if info.name != name {
             crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
-            crate::mod_sources::update_installed_version(&info.name, &chosen.tag, &config_path);
+            crate::mod_sources::update_installed_version_from_source(
+                &info.name,
+                &chosen.tag,
+                "github",
+                &config_path,
+            );
         }
 
         // Overlay user-edited configs + refresh snapshot. Repair is a
@@ -1350,10 +1360,20 @@ pub async fn rollback_mod(
     let install_healthy = info.version != "unknown" && !info.version.is_empty();
     if install_healthy {
         let install_key = info.folder_name.as_deref().unwrap_or(name.as_str());
-        crate::mod_sources::update_installed_version(install_key, &chosen.tag, &config_path);
+        crate::mod_sources::update_installed_version_from_source(
+            install_key,
+            &chosen.tag,
+            "github",
+            &config_path,
+        );
         if info.name != name {
             crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
-            crate::mod_sources::update_installed_version(&info.name, &chosen.tag, &config_path);
+            crate::mod_sources::update_installed_version_from_source(
+                &info.name,
+                &chosen.tag,
+                "github",
+                &config_path,
+            );
         }
 
         let outcome = crate::mods::finalize_update_with_preserved_configs(
@@ -2273,6 +2293,7 @@ mod version_helper_tests {
             "STS2-RitsuLib".into(),
             ModSourceEntry {
                 installed_version: Some("v0.2.32".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -2304,6 +2325,7 @@ mod version_helper_tests {
             "STS2-RitsuLib".into(),
             ModSourceEntry {
                 installed_version: Some("v0.2.31".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -2382,6 +2404,7 @@ mod version_helper_tests {
             "RitsuLib".into(),
             ModSourceEntry {
                 installed_version: Some("v0.2.31".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -2396,6 +2419,7 @@ mod version_helper_tests {
             "RitsuLib".into(),
             ModSourceEntry {
                 installed_version: Some("unknown".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -2419,6 +2443,7 @@ mod version_helper_tests {
             "UnifiedSavePath".into(),
             ModSourceEntry {
                 installed_version: Some("v1.1.3".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -2446,6 +2471,7 @@ mod version_helper_tests {
             "RitsuLib".into(),
             ModSourceEntry {
                 installed_version: Some("v0.2.31".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -2466,6 +2492,7 @@ mod version_helper_tests {
             "RitsuLib".into(),
             ModSourceEntry {
                 installed_version: Some("v0.2.31".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -2562,6 +2589,7 @@ mod version_helper_tests {
                 nexus_game_domain: Some("slaythespire2".into()),
                 nexus_mod_id: Some(99),
                 installed_version: Some("1.0.0".into()),
+                installed_version_source: None,
                 ..Default::default()
             },
         );
@@ -2600,6 +2628,7 @@ mod version_helper_tests {
                 nexus_game_domain: Some("slaythespire2".into()),
                 nexus_mod_id: Some(42),
                 installed_version: Some("2.0.0".into()),
+                installed_version_source: None,
                 pinned: false,
                 ..Default::default()
             },
@@ -2716,6 +2745,7 @@ mod version_helper_tests {
             "Pack".into(),
             ModSourceEntry {
                 installed_version: Some("v1.5.0".into()),
+                installed_version_source: None,
                 pinned: false,
                 ..Default::default()
             },
@@ -2765,6 +2795,11 @@ mod version_helper_tests {
 /// Detailed audit entry for a single mod's version status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModAuditEntry {
+    /// Stable installed-artifact identity. Profiles use this to pin a
+    /// specific local/shared mod version, and the UI uses it to refresh the
+    /// exact row that changed instead of replacing every same-named mod.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_version_id: Option<String>,
     pub mod_name: String,
     /// On-disk folder name for the installed mod. Surfaced so the UI can
     /// disambiguate (and pin/unpin) two mods that share a display name
@@ -2851,6 +2886,50 @@ pub struct ModAuditEntry {
     pub snoozed: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ModAuditSelector {
+    Name(String),
+    Target(ModAuditTarget),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModAuditTarget {
+    #[serde(default)]
+    pub mod_version_id: Option<String>,
+    #[serde(default)]
+    pub folder_name: Option<String>,
+    #[serde(default)]
+    pub mod_id: Option<String>,
+    pub name: String,
+}
+
+impl ModAuditSelector {
+    fn matches(&self, info: &ModInfo) -> bool {
+        match self {
+            ModAuditSelector::Name(name) => info.name == *name,
+            ModAuditSelector::Target(target) => {
+                target
+                    .mod_version_id
+                    .as_deref()
+                    .filter(|id| !id.trim().is_empty())
+                    .is_some_and(|id| info.mod_version_id.as_deref() == Some(id))
+                    || target
+                        .folder_name
+                        .as_deref()
+                        .filter(|folder| !folder.trim().is_empty())
+                        .is_some_and(|folder| info.folder_name.as_deref() == Some(folder))
+                    || target
+                        .mod_id
+                        .as_deref()
+                        .filter(|mod_id| !mod_id.trim().is_empty())
+                        .is_some_and(|mod_id| info.mod_id.as_deref() == Some(mod_id))
+                    || info.name == target.name
+            }
+        }
+    }
+}
+
 /// Valid mod asset extensions for STS2 mods.
 fn is_mod_asset(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
@@ -2925,7 +3004,7 @@ const AUDIT_CONCURRENCY: usize = 8;
 /// every time). When `None` we audit every installed mod.
 #[tauri::command]
 pub async fn audit_mod_versions(
-    only: Option<Vec<String>>,
+    only: Option<Vec<ModAuditSelector>>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModAuditEntry>, String> {
     let (mods_path, disabled_path, config_path, cache_path, token) = {
@@ -2944,13 +3023,13 @@ pub async fn audit_mod_versions(
         let disabled = scan_mods(dp);
         all_mods.extend(disabled);
     }
+    crate::mod_versions::enrich_mods_with_versions(&mut all_mods, &config_path);
 
     // If the caller asked for a subset, prune everything else up front so
     // we skip the (slow) per-mod GitHub/Nexus calls for mods we don't care
     // about right now.
     if let Some(filter) = only.as_ref() {
-        let want: std::collections::HashSet<&str> = filter.iter().map(|s| s.as_str()).collect();
-        all_mods.retain(|m| want.contains(m.name.as_str()));
+        all_mods.retain(|m| filter.iter().any(|selector| selector.matches(m)));
     }
 
     let sources_db = load_sources(&config_path);
@@ -3337,6 +3416,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         let installed_source_version =
             installed_source_version_for_display(m, &ctx.sources_db.mods);
         return ModAuditEntry {
+            mod_version_id: m.mod_version_id.clone(),
             mod_name: m.name.clone(),
             folder_name: m.folder_name.clone(),
             github_repo: None,
@@ -3385,6 +3465,29 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         (ctx.user_game_version, min_game_version.as_deref()),
         (Some(gv), Some(req)) if !game_version_satisfies(gv, req)
     );
+
+    match source_entry.and_then(|e| e.installed_version_source.as_deref()) {
+        Some("nexus") if nexus_version.is_some() => {
+            if github_needs_update {
+                log::info!(
+                    "audit: suppressing GitHub update for '{}' because Nexus was the last installed source",
+                    m.name
+                );
+            }
+            github_needs_update = false;
+        }
+        Some("github") if latest_release_with_assets_tag.is_some() || final_error.is_none() => {
+            if nexus_update_available {
+                log::info!(
+                    "audit: suppressing Nexus update for '{}' because GitHub was the last installed source",
+                    m.name
+                );
+            }
+            nexus_update_available = false;
+        }
+        _ => {}
+    }
+
     // Compute needs_update + update_source AFTER the walk-back has had
     // a chance to drop github_needs_update (it does so when the only
     // newer release is incompatible, or when the walked-back tag is
@@ -3412,6 +3515,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         .unwrap_or_else(|| m.version.clone());
     let installed_source_version = installed_source_version_for_display(m, &ctx.sources_db.mods);
     ModAuditEntry {
+        mod_version_id: m.mod_version_id.clone(),
         mod_name: m.name.clone(),
         folder_name: m.folder_name.clone(),
         github_repo: display_github,

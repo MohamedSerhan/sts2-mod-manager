@@ -3,9 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { getActiveProfileId, getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions, updateAllMods } from '../hooks/useTauri';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { GameInfo, ModInfo, ModAuditEntry, SubscriptionUpdate } from '../types';
+import type { GameInfo, ModInfo, ModAuditEntry, ModAuditTarget, SubscriptionUpdate } from '../types';
 import { useToast } from './ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
+import { auditEntryKey, auditTargetKey, type AuditRefreshTarget } from '../lib/auditState';
 
 interface AppContextType {
   gameInfo: GameInfo | null;
@@ -22,8 +23,8 @@ interface AppContextType {
    *  pills without forcing the user to dig into Settings to discover them. */
   auditResults: ModAuditEntry[] | null;
   auditing: boolean;
-  runAudit: (only?: string[]) => Promise<void>;
-  refreshAuditEntries: (names: string[]) => Promise<void>;
+  runAudit: (only?: AuditRefreshTarget[]) => Promise<void>;
+  refreshAuditEntries: (targets: AuditRefreshTarget[]) => Promise<void>;
   refreshGameInfo: () => Promise<void>;
   refreshMods: () => Promise<void>;
   refreshAll: () => Promise<void>;
@@ -208,7 +209,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    *  mod). Result is cached in context so Settings and Mods can share it
    *  without refetching. Errors surface as a toast and leave the prior
    *  results in place. */
-  const runAudit = useCallback(async (only?: string[]) => {
+  const runAudit = useCallback(async (only?: AuditRefreshTarget[]) => {
     try {
       setAuditing(true);
       // `only` scopes the audit to specific mods (the modpack view audits
@@ -224,11 +225,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // stand on their own.
         setAuditResults((prev) => {
           if (!prev) return results;
-          const byName = new Map(results.map((e) => [e.mod_name, e]));
-          const existingNames = new Set(prev.map((e) => e.mod_name));
-          const merged = prev.map((e) => byName.get(e.mod_name) ?? e);
+          const byKey = new Map(results.map((e) => [auditEntryKey(e), e]));
+          const existingKeys = new Set(prev.map(auditEntryKey));
+          const merged = prev.map((e) => byKey.get(auditEntryKey(e)) ?? e);
           for (const e of results) {
-            if (!existingNames.has(e.mod_name)) merged.push(e);
+            if (!existingKeys.has(auditEntryKey(e))) merged.push(e);
           }
           return merged;
         });
@@ -247,17 +248,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
    *  flip from "X → Y" to "(latest)" without rescanning every mod. New
    *  entries (e.g. a mod that just landed via the Downloads watcher) get
    *  appended. */
-  const refreshAuditEntries = useCallback(async (names: string[]) => {
-    if (names.length === 0) return;
+  const refreshAuditEntries = useCallback(async (targets: AuditRefreshTarget[]) => {
+    if (targets.length === 0) return;
     try {
-      const fresh = await auditModVersions(names);
-      const byName = new Map(fresh.map((e) => [e.mod_name, e]));
+      const fresh = await auditModVersions(targets);
+      const freshKeys = new Set(fresh.map(auditEntryKey));
+      const requestedKeys = new Set(targets.map(auditTargetKey));
+      const byKey = new Map(fresh.map((e) => [auditEntryKey(e), e]));
       setAuditResults((prev) => {
         if (!prev) return prev;
-        const existingNames = new Set(prev.map((e) => e.mod_name));
-        const merged = prev.map((e) => byName.get(e.mod_name) ?? e);
+        const existingKeys = new Set(prev.map(auditEntryKey));
+        const merged = prev
+          .filter((e) => !requestedKeys.has(auditEntryKey(e)) || freshKeys.has(auditEntryKey(e)))
+          .map((e) => byKey.get(auditEntryKey(e)) ?? e);
         for (const e of fresh) {
-          if (!existingNames.has(e.mod_name)) merged.push(e);
+          if (!existingKeys.has(auditEntryKey(e))) merged.push(e);
         }
         return merged;
       });
@@ -307,15 +312,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // — only if an audit is currently loaded (don't surprise the user by
   // populating a fresh audit they didn't ask for).
   useEffect(() => {
-    const unlisten = listen<{ mod_name: string; file_name: string; replaced: string | null }>(
+    const unlisten = listen<{
+      mod_name: string;
+      file_name: string;
+      replaced: string | null;
+      mod_version_id?: string | null;
+      folder_name?: string | null;
+      mod_id?: string | null;
+    }>(
       'mod-auto-installed',
       (event) => {
         if (auditResults === null) return;
-        const names = [event.payload.mod_name];
+        const targets: AuditRefreshTarget[] = [{
+          mod_version_id: event.payload.mod_version_id ?? null,
+          folder_name: event.payload.folder_name ?? null,
+          mod_id: event.payload.mod_id ?? null,
+          name: event.payload.mod_name,
+        } satisfies ModAuditTarget];
         if (event.payload.replaced && event.payload.replaced !== event.payload.mod_name) {
-          names.push(event.payload.replaced);
+          targets.push(event.payload.replaced);
         }
-        refreshAuditEntries(names);
+        refreshAuditEntries(targets);
       },
     );
     return () => {

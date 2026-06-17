@@ -99,6 +99,7 @@ jobs:
           with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as target:
               for name in names:
                   info = zipfile.ZipInfo(name)
+                  info.compress_type = zipfile.ZIP_DEFLATED
                   info.external_attr = 0o644 << 16
                   target.writestr(info, payload[name])
           os.replace(tmp_path, zip_path)

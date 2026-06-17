@@ -261,6 +261,7 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
         await setProfileModMembership(
           created.id || created.name,
           pm.name,
+          pm.mod_version_id ?? null,
           pm.folder_name ?? null,
           pm.mod_id ?? null,
           false,
@@ -276,6 +277,7 @@ export function CreateModpackWizard({ onClose, onCreated }: Props) {
         await setProfileModMembership(
           created.id || created.name,
           mod.name,
+          mod.mod_version_id ?? null,
           mod.folder_name ?? null,
           mod.mod_id ?? null,
           true,

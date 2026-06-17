@@ -15,6 +15,7 @@
 
 interface IdentityFields {
   name: string;
+  mod_version_id?: string | null;
   folder_name?: string | null;
   mod_id?: string | null;
 }
@@ -59,6 +60,9 @@ function keysIntersect(a: string[], b: string[]): boolean {
  * (which includes the normalized name).
  */
 export function identitiesMatch(a: IdentityFields, b: IdentityFields): boolean {
+  if (a.mod_version_id && b.mod_version_id && a.mod_version_id === b.mod_version_id) {
+    return true;
+  }
   const aStrong = strongIdentityKeys(a);
   const bStrong = strongIdentityKeys(b);
   if (aStrong.length > 0 && bStrong.length > 0) {

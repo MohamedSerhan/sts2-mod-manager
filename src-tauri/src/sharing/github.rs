@@ -3593,6 +3593,7 @@ mod github_api_stress_tests {
                 0x5354_5332 ^ idx as u64,
             )?;
             mods.push(ProfileMod {
+                mod_version_id: None,
                 name: folder.clone(),
                 version,
                 source: None,

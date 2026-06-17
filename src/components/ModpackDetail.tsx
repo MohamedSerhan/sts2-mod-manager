@@ -108,11 +108,10 @@ export interface ModpackDetailProps {
   renameExistingNames?: string[];
 }
 
-/** Identity key for a profile mod / installed mod: prefer the on-disk
- *  folder name, fall back to the manifest name. Matches the convention
+/** Identity key for a profile mod / installed mod. Matches the convention
  *  used across the membership grid. */
-function modKey(mod: { folder_name: string | null; name: string }): string {
-  return mod.folder_name ?? mod.name;
+function modKey(mod: { mod_version_id?: string | null; folder_name: string | null; mod_id?: string | null; name: string }): string {
+  return mod.mod_version_id ?? mod.folder_name ?? mod.mod_id ?? mod.name;
 }
 
 /** Source badges for a row, derived from the matching installed
@@ -218,7 +217,9 @@ export function ModpackDetail({
     const seen = new Map<string, string>();
     for (const pm of profile.mods) {
       const info =
+        lib.modInfoByKey.get(pm.mod_version_id ?? '') ??
         lib.modInfoByKey.get(pm.folder_name ?? pm.name) ??
+        lib.modInfoByKey.get(pm.mod_id ?? '') ??
         lib.modInfoByKey.get(pm.name);
       for (const tag of info?.tags ?? []) {
         const trimmed = tag.trim();
@@ -341,6 +342,7 @@ export function ModpackDetail({
       await setProfileModMembership(
         profileKey,
         mod.name,
+        mod.mod_version_id ?? null,
         mod.folder_name ?? null,
         mod.mod_id ?? null,
         true,
@@ -384,10 +386,14 @@ export function ModpackDetail({
     setDeletingAll(true);
     try {
       // Snapshot the list first — refreshing mid-loop would mutate it.
-      const targets = profile.mods.map((m) => ({ name: m.name, folder_name: m.folder_name ?? null }));
+      const targets = profile.mods.map((m) => ({
+        name: m.name,
+        mod_version_id: m.mod_version_id ?? null,
+        folder_name: m.folder_name ?? null,
+      }));
       for (const m of targets) {
         await deleteMod(m.name, m.folder_name);
-        await setProfileModMembership(profileKey, m.name, m.folder_name, null, false);
+        await setProfileModMembership(profileKey, m.name, m.mod_version_id, m.folder_name, null, false);
       }
       await refreshAfterMutation();
       toast.success(
@@ -855,7 +861,9 @@ export function ModpackDetail({
             if (!included) return false;
             if (!tagFilter) return true;
             const info =
+              lib.modInfoByKey.get(row.mod_version_id ?? '') ??
               lib.modInfoByKey.get(row.folder_name ?? row.name) ??
+              lib.modInfoByKey.get(row.mod_id ?? '') ??
               lib.modInfoByKey.get(row.name);
             return (info?.tags ?? []).some(
               (tg) => tg.toLocaleLowerCase() === tagFilter.toLocaleLowerCase(),

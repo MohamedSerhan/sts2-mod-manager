@@ -69,7 +69,7 @@ import type {
 } from '../types';
 
 export function membershipRowKey(row: ProfileMembershipMod): string {
-  return row.folder_name ?? row.mod_id ?? row.name;
+  return row.mod_version_id ?? row.folder_name ?? row.mod_id ?? row.name;
 }
 
 export function membershipDisplayName(row: ProfileMembershipMod): string {

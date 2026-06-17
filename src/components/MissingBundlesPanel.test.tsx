@@ -352,6 +352,7 @@ describe('<MissingBundlesPanel>', () => {
         {
           profileId: 'profile-1',
           modName: 'A',
+          modVersionId: null,
           folderName: 'AFolder',
           modId: 'A-id',
           included: false,
@@ -360,6 +361,7 @@ describe('<MissingBundlesPanel>', () => {
         {
           profileId: 'profile-1',
           modName: 'B',
+          modVersionId: null,
           folderName: 'BFolder',
           modId: 'B-id',
           included: false,

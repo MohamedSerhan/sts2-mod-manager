@@ -150,6 +150,14 @@ function findGroupId(groups, asset) {
   return match?.id ? String(match.id) : null;
 }
 
+export function configuredGroupIdForAsset(asset, env = process.env) {
+  return String(env[asset.groupEnv] || '').trim();
+}
+
+export function allAssetsHaveConfiguredGroups(assets, env = process.env) {
+  return assets.every((asset) => Boolean(configuredGroupIdForAsset(asset, env)));
+}
+
 async function createMultipartUpload(api, filename, sizeBytes) {
   const body = await api('/uploads/multipart', {
     method: 'POST',
@@ -273,7 +281,7 @@ async function createNewModFile(api, body) {
 
 async function publishAsset({ api, modId, groups, version, assetDir, asset, allowBootstrap }) {
   const filename = path.join(assetDir, filenameForAsset(version, asset));
-  const configuredGroupId = process.env[asset.groupEnv]?.trim() || '';
+  const configuredGroupId = configuredGroupIdForAsset(asset);
   const discoveredGroupId = configuredGroupId || findGroupId(groups, asset);
   const uploadId = await createUpload(api, filename);
 
@@ -299,8 +307,14 @@ export async function main(argv = process.argv.slice(2)) {
   const allowBootstrap = (args.get('allow-bootstrap') || process.env.NEXUS_ALLOW_BOOTSTRAP || 'true') !== 'false';
   const assets = orderedReleaseAssets(args.get('only') || process.env.NEXUS_RELEASE_ASSET_ONLY || '');
   const api = createApiClient(requireValue(process.env.NEXUS_API_KEY, 'NEXUS_API_KEY'), process.env.NEXUSMODS_API_BASE || DEFAULT_API_BASE);
-  const modId = await getModUuid(api, gameDomain, gameScopedModId);
-  const groups = await getUpdateGroups(api, modId);
+  let modId = '';
+  let groups = [];
+  if (allAssetsHaveConfiguredGroups(assets)) {
+    console.log('Using configured Nexus file group ids; skipping file update group discovery');
+  } else {
+    modId = await getModUuid(api, gameDomain, gameScopedModId);
+    groups = await getUpdateGroups(api, modId);
+  }
 
   for (const asset of assets) {
     console.log(`Publishing ${asset.label} to Nexus`);

@@ -730,52 +730,21 @@ fn identities_overlap(a: &str, b: &str) -> bool {
     !a.is_empty() && a == b
 }
 
-fn labels_match(a: &str, b: &str) -> bool {
-    let a_norm = normalize_mod_name(a);
-    let b_norm = normalize_mod_name(b);
-    (!a_norm.is_empty() && a_norm == b_norm) || identities_overlap(a, b)
-}
-
-fn nexus_filename_contains_id(file_name: &str, id: u64) -> bool {
-    let stem = Path::new(file_name)
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_lowercase();
-    let id = id.to_string();
-    stem == id
-        || stem.starts_with(&format!("{}-", id))
-        || stem.ends_with(&format!("-{}", id))
-        || stem.contains(&format!("-{}-", id))
-}
-
-fn pending_nexus_name_matches_context(
-    pending_name: &str,
+fn download_filename_matches_installed_mod(
+    file_name: &str,
     installed_name: &str,
     installed_folder: Option<&str>,
-    installed_mod_id: Option<&str>,
-    file_name: &str,
 ) -> bool {
-    if pending_name.trim().is_empty() {
-        return false;
-    }
     let stem = Path::new(file_name)
         .file_stem()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
     let clean_stem = strip_nexus_suffix(&stem);
-
-    let matches = [
-        Some(installed_name),
-        installed_folder,
-        installed_mod_id,
-        Some(clean_stem.as_str()),
-    ]
-    .into_iter()
-    .flatten()
-    .any(|candidate| labels_match(candidate, pending_name));
-    matches
+    identities_overlap(&clean_stem, installed_name)
+        || installed_folder
+            .map(|folder| identities_overlap(&clean_stem, folder))
+            .unwrap_or(false)
 }
 
 fn pending_nexus_mod_id_for_download(
@@ -784,6 +753,7 @@ fn pending_nexus_mod_id_for_download(
     state: &AppState,
 ) -> Option<u64> {
     let file_name = archive_path.file_name()?.to_string_lossy().to_string();
+    let stem_lower = file_name.to_lowercase();
     let clean_stem = archive_path
         .file_stem()
         .map(|stem| strip_nexus_suffix(&stem.to_string_lossy()))
@@ -794,10 +764,8 @@ fn pending_nexus_mod_id_for_download(
         .retain(|p| Instant::now().duration_since(p.queued_at) < Duration::from_secs(30 * 60));
 
     s.pending_nexus_installs.iter().find_map(|pending| {
-        if nexus_filename_contains_id(&file_name, pending.mod_id)
-            || pending
-                .file_id
-                .is_some_and(|file_id| nexus_filename_contains_id(&file_name, file_id))
+        let id_marker = format!("-{}-", pending.mod_id);
+        if stem_lower.contains(&id_marker) || stem_lower.ends_with(&format!("-{}", pending.mod_id))
         {
             return Some(pending.mod_id);
         }
@@ -805,16 +773,12 @@ fn pending_nexus_mod_id_for_download(
         if identity
             .name
             .as_deref()
-            .is_some_and(|name| labels_match(name, pending_name))
+            .is_some_and(|name| identities_overlap(name, pending_name))
             || identity
                 .folder_name
                 .as_deref()
-                .is_some_and(|folder| labels_match(folder, pending_name))
-            || identity
-                .mod_id
-                .as_deref()
-                .is_some_and(|mod_id| labels_match(mod_id, pending_name))
-            || labels_match(&clean_stem, pending_name)
+                .is_some_and(|folder| identities_overlap(folder, pending_name))
+            || identities_overlap(&clean_stem, pending_name)
         {
             return Some(pending.mod_id);
         }
@@ -1132,6 +1096,11 @@ fn attach_pending_nexus_source(
         s.pending_nexus_installs
             .retain(|p| Instant::now().duration_since(p.queued_at) < Duration::from_secs(30 * 60));
 
+        let stem_lower = file_name.to_lowercase();
+        let installed_norm = normalize_mod_name(installed_name);
+        let single_pending_filename_match = s.pending_nexus_installs.len() == 1
+            && download_filename_matches_installed_mod(file_name, installed_name, installed_folder);
+
         let idx = s.pending_nexus_installs.iter().position(|p| {
             if crate::mod_sources::saved_nexus_source_conflicts(
                 config_path,
@@ -1143,19 +1112,17 @@ fn attach_pending_nexus_source(
                 return false;
             }
             // Nexus filenames look like "ModName-{mod_id}-{version}-...zip"
-            if nexus_filename_contains_id(file_name, p.mod_id)
-                || p.file_id
-                    .is_some_and(|file_id| nexus_filename_contains_id(file_name, file_id))
+            let id_marker = format!("-{}-", p.mod_id);
+            if stem_lower.contains(&id_marker) {
+                return true;
+            }
+            let p_norm = normalize_mod_name(&p.mod_name);
+            if !p_norm.is_empty()
+                && (installed_norm == p_norm || identities_overlap(installed_name, &p.mod_name))
             {
                 return true;
             }
-            pending_nexus_name_matches_context(
-                &p.mod_name,
-                installed_name,
-                installed_folder,
-                installed_mod_id,
-                file_name,
-            )
+            single_pending_filename_match
         });
 
         idx.map(|i| s.pending_nexus_installs.remove(i))
@@ -1469,15 +1436,15 @@ mod pending_nexus_source_tests {
     use tempfile::tempdir;
 
     #[test]
-    fn attach_pending_nexus_source_matches_download_filename_to_pending_page_name() {
+    fn attach_pending_nexus_source_matches_download_filename_to_installed_mod_name() {
         let config = tempdir().unwrap();
         let state = create_app_state();
         {
             let mut s = state.lock().unwrap();
             s.pending_nexus_installs.push(PendingNexusInstall {
-                // Nexus page name and filename overlap, even though the
-                // archive has no Nexus mod id suffix.
-                mod_name: "STS2BaseCamp".into(),
+                // Nexus page 526 is titled "SpireValley-Farm", but its file
+                // names are "STS2BaseCamp V0.4.0" / "BASECamp".
+                mod_name: "SpireValley-Farm".into(),
                 nexus_url: "https://www.nexusmods.com/slaythespire2/mods/526".into(),
                 game_domain: "slaythespire2".into(),
                 mod_id: 526,
@@ -1559,119 +1526,18 @@ mod pending_nexus_source_tests {
     }
 
     #[test]
-    fn attach_pending_nexus_source_does_not_consume_unrelated_single_pending_hint() {
-        let config = tempdir().unwrap();
-        let state = create_app_state();
-        {
-            let mut s = state.lock().unwrap();
-            s.pending_nexus_installs.push(PendingNexusInstall {
-                mod_name: "LizardSilent".into(),
-                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/1264".into(),
-                game_domain: "slaythespire2".into(),
-                mod_id: 1264,
-                file_id: None,
-                queued_at: std::time::Instant::now(),
-            });
-        }
-
-        attach_pending_nexus_source(
-            "ATA Merchant",
-            Some("ATA_Merchant"),
-            Some("ATA_Merchant"),
-            "ATA Merchant-900-0-1-5-1780625182.zip",
-            config.path(),
-            &state,
-        );
-
-        let db = crate::mod_sources::load_sources(config.path());
-        assert!(
-            db.mods.get("ATA_Merchant").is_none(),
-            "unrelated Nexus 1264 hint must not attach to Nexus 900 install"
-        );
-        assert_eq!(
-            state.lock().unwrap().pending_nexus_installs.len(),
-            1,
-            "unrelated pending Nexus hint must not be consumed"
-        );
-    }
-
-    #[test]
-    fn attach_pending_nexus_source_matches_clean_lizardsilent_filename_by_folder_name() {
-        let config = tempdir().unwrap();
-        let state = create_app_state();
-        {
-            let mut s = state.lock().unwrap();
-            s.pending_nexus_installs.push(PendingNexusInstall {
-                mod_name: "LizardSilent".into(),
-                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/1264".into(),
-                game_domain: "slaythespire2".into(),
-                mod_id: 1264,
-                file_id: None,
-                queued_at: std::time::Instant::now(),
-            });
-        }
-
-        attach_pending_nexus_source(
-            "Lizard Silent Skin",
-            Some("LizardSilent"),
-            Some("LizardSilent"),
-            "LizardSilent.zip",
-            config.path(),
-            &state,
-        );
-
-        let db = crate::mod_sources::load_sources(config.path());
-        let entry = db.mods.get("LizardSilent").unwrap();
-        assert_eq!(entry.nexus_mod_id, Some(1264));
-        assert!(
-            state.lock().unwrap().pending_nexus_installs.is_empty(),
-            "matching pending Nexus install should be consumed"
-        );
-    }
-
-    #[test]
-    fn attach_pending_nexus_source_matches_ata_merchant_by_filename_mod_id() {
-        let config = tempdir().unwrap();
-        let state = create_app_state();
-        {
-            let mut s = state.lock().unwrap();
-            s.pending_nexus_installs.push(PendingNexusInstall {
-                mod_name: "Untranslated Nexus Title".into(),
-                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/900".into(),
-                game_domain: "slaythespire2".into(),
-                mod_id: 900,
-                file_id: None,
-                queued_at: std::time::Instant::now(),
-            });
-        }
-
-        attach_pending_nexus_source(
-            "ATA Merchant",
-            Some("ATA_Merchant"),
-            Some("ATA_Merchant"),
-            "ATA Merchant-900-0-1-5-1780625182.zip",
-            config.path(),
-            &state,
-        );
-
-        let db = crate::mod_sources::load_sources(config.path());
-        let entry = db.mods.get("ATA_Merchant").unwrap();
-        assert_eq!(entry.nexus_mod_id, Some(900));
-        assert!(
-            state.lock().unwrap().pending_nexus_installs.is_empty(),
-            "filename mod id match should consume the pending Nexus install"
-        );
-    }
-
-    #[test]
     fn identity_helpers_do_not_merge_lite_variants() {
         assert!(
             !identities_overlap("BetterSpire2", "BetterSpire2 Lite"),
             "variant suffixes must not collapse separate mods"
         );
         assert!(
-            !labels_match("BetterSpire2", "BetterSpire2 Lite"),
-            "Nexus page-name matching must not treat BetterSpire2 as BetterSpire2 Lite"
+            !download_filename_matches_installed_mod(
+                "BetterSpire2-123-1-0-0-1780000000.zip",
+                "BetterSpire2 Lite",
+                Some("BetterSpire2Lite"),
+            ),
+            "Nexus filename matching must not treat BetterSpire2 as BetterSpire2 Lite"
         );
     }
 

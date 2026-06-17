@@ -85,6 +85,40 @@ jobs:
             console.log(JSON.stringify(value, null, 2).slice(0, 20000));
           }
 
+          function compactFile(file) {
+            return {
+              file_id: file?.file_id,
+              name: file?.name,
+              version: file?.version,
+              mod_version: file?.mod_version,
+              category_name: file?.category_name,
+              is_primary: file?.is_primary,
+              file_name: file?.file_name,
+              size_kb: file?.size_kb ?? file?.size,
+              uploaded_time: file?.uploaded_time,
+              external_virus_scan_url: file?.external_virus_scan_url,
+            };
+          }
+
+          function compactUpdate(update) {
+            return {
+              old_file_id: update?.old_file_id,
+              new_file_id: update?.new_file_id,
+              old_file_name: update?.old_file_name,
+              new_file_name: update?.new_file_name,
+              uploaded_time: update?.uploaded_time,
+            };
+          }
+
+          function timestampSort(left, right) {
+            return String(right?.uploaded_time || '').localeCompare(String(left?.uploaded_time || ''));
+          }
+
+          function isRecentOrTargetVersion(row) {
+            const text = JSON.stringify(row);
+            return /1\.7\.(?:9|10|11)\b/.test(text) || /2026-06-(?:15|16|17)T/.test(text);
+          }
+
           const gameDomain = process.env.NEXUSMODS_GAME_DOMAIN || 'slaythespire2';
           const gameScopedModId = process.env.NEXUSMODS_MOD_ID || '856';
           const configuredGroupId = String(process.env.NEXUS_FILE_GROUP_ID || '').trim();
@@ -127,10 +161,17 @@ jobs:
           }
 
           try {
-            print(
-              'legacy-files',
-              await request(legacyApiBase, `/games/${encodeURIComponent(gameDomain)}/mods/${encodeURIComponent(gameScopedModId)}/files.json`),
-            );
+            const legacyFiles = await request(legacyApiBase, `/games/${encodeURIComponent(gameDomain)}/mods/${encodeURIComponent(gameScopedModId)}/files.json`);
+            const files = Array.isArray(legacyFiles?.files) ? legacyFiles.files : [];
+            const updates = Array.isArray(legacyFiles?.file_updates) ? legacyFiles.file_updates : [];
+            print('legacy-files-summary', {
+              file_count: files.length,
+              file_update_count: updates.length,
+              latest_files: files.toSorted(timestampSort).slice(0, 12).map(compactFile),
+              target_files: files.filter(isRecentOrTargetVersion).toSorted(timestampSort).map(compactFile),
+              latest_updates: updates.toSorted(timestampSort).slice(0, 12).map(compactUpdate),
+              target_updates: updates.filter(isRecentOrTargetVersion).toSorted(timestampSort).map(compactUpdate),
+            });
           } catch (error) {
             print('legacy-files error', error instanceof Error ? error.message : String(error));
           }

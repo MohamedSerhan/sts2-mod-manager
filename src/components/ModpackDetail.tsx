@@ -59,7 +59,7 @@ import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { EditModpackModal } from './EditModpackModal';
 import { RenameModpackModal } from './RenameModpackModal';
 import { AddModsMenu } from './AddModsMenu';
-import { LibraryTable } from './LibraryTable';
+import { LibraryTable, NO_TAGS_FILTER_VALUE } from './LibraryTable';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
@@ -235,7 +235,11 @@ export function ModpackDetail({
   // Clear a stale tagFilter when the tag it references is no longer present
   // among the pack's mods (e.g. after removing the last mod that carried it).
   useEffect(() => {
-    if (tagFilter && !packTagOptions.includes(tagFilter)) setTagFilter('');
+    if (
+      tagFilter
+      && tagFilter !== NO_TAGS_FILTER_VALUE
+      && !packTagOptions.includes(tagFilter)
+    ) setTagFilter('');
   }, [packTagOptions, tagFilter]);
 
   // Build a set of mod-names that belong to this pack so the updates
@@ -468,7 +472,7 @@ export function ModpackDetail({
   // methods are consolidated into the one dropdown to keep the row calm.
   const packToolbarActions = (
     <>
-      {packTagOptions.length > 0 && (
+      {profile.mods.length > 0 && (
         <label className="gf-sort-control">
           <span>{t('mods.tags.label')}</span>
           <select
@@ -477,6 +481,7 @@ export function ModpackDetail({
             onChange={(e) => setTagFilter(e.target.value)}
           >
             <option value="">{t('mods.tags.all')}</option>
+            <option value={NO_TAGS_FILTER_VALUE}>{t('mods.tags.noTags')}</option>
             {packTagOptions.map((tag) => (
               <option key={tag} value={tag}>
                 {tag}
@@ -865,6 +870,9 @@ export function ModpackDetail({
               lib.modInfoByKey.get(row.folder_name ?? row.name) ??
               lib.modInfoByKey.get(row.mod_id ?? '') ??
               lib.modInfoByKey.get(row.name);
+            if (tagFilter === NO_TAGS_FILTER_VALUE) {
+              return !(info?.tags ?? []).some((tg) => tg.trim().length > 0);
+            }
             return (info?.tags ?? []).some(
               (tg) => tg.toLocaleLowerCase() === tagFilter.toLocaleLowerCase(),
             );

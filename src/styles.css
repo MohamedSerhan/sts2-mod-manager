@@ -376,33 +376,26 @@ body {
 .gf-resize-se { right: 0; bottom: 0; cursor: se-resize; }
 .gf-resize-sw { left: 0; bottom: 0; cursor: sw-resize; }
 
-/* ── Sidebar ─────────────────────────────────────────────────────── */
-.gf-sidebar {
-  width: var(--gf-sidebar-width, 248px);
-  flex-shrink: 0;
-  position: relative;
-  background: var(--indigo-side);
-  border-inline-end: 1px solid var(--indigo-line);
-  display: flex; flex-direction: column;
-  padding: 14px 10px;
+/* ── Top navigation ──────────────────────────────────────────────────
+   Primary nav moved from a left sidebar into a horizontal row at the
+   start of the topbar. `.gf-topnav` is a single flex item inside
+   `.gf-top` (which wraps), so the nav cluster stays together. */
+.gf-topnav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
-/* Drag handle on the sidebar's inner edge (#119). Sits below the Tauri
-   window-resize handles (z-index 80); inline-end so it mirrors in RTL. */
-.gf-sidebar-resize {
-  position: absolute;
-  inset-inline-end: 0;
-  top: 0; bottom: 0;
-  width: 6px;
-  z-index: 70;
-  cursor: col-resize;
-  background: transparent;
-  transition: background 0.12s ease;
+/* Horizontal nav items override the sidebar-era full-width / start-aligned
+   `.gf-nav` defaults below. The active indicator becomes an underline
+   instead of the sidebar's inline-start bar. */
+.gf-topnav .gf-nav { width: auto; }
+.gf-topnav .gf-nav.active::before {
+  inset-inline-start: 8px;
+  inset-inline-end: 8px;
+  top: auto; bottom: 0;
+  width: auto; height: 2px;
 }
-.gf-sidebar-resize:hover,
-.gf-sidebar-resize:focus-visible {
-  background: var(--gf-line);
-  outline: none;
-}
+.gf-topnav .gf-nav-badge { margin-inline-start: 2px; }
 .gf-nav {
   position: relative;
   display: flex; align-items: center; gap: 10px;
@@ -1533,8 +1526,6 @@ body {
   .gf-profile-library-toolbar-actions { align-items: flex-start; flex-wrap: wrap; justify-content: flex-start; }
   .gf-profile-library-sort { align-self: flex-start; }
 }
-.gf-side-foot { margin-top: auto; padding-top: 12px; display: flex; flex-direction: column; gap: 1px; }
-
 /* ── Top bar ─────────────────────────────────────────────────────── */
 .gf-top {
   display: flex; align-items: center;
@@ -1553,11 +1544,10 @@ body {
   container-type: inline-size;
   container-name: topbar;
 }
-/* Push everything after the modpack chip to the right edge. This keeps the
-   status + launch cluster right-aligned (replacing the old
-   justify-content:space-between, which would have stranded the status pill
-   in the middle once the cluster was flattened). */
-.gf-top-chip { margin-inline-end: auto; }
+/* Push everything after the nav to the right edge, so the top nav anchors
+   the start of the bar and the profile chip + status + launch cluster
+   right-align together. */
+.gf-topnav { margin-inline-end: auto; }
 /* Launch controls grouped (help + vanilla + modded launch) so they wrap as
    one unit; flex-end keeps them right-aligned when they take a full row. */
 .gf-top-launch { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }

@@ -521,9 +521,7 @@ pub(crate) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo
         if identity_lists_intersect(&profile_strong, &installed_strong) {
             return true;
         }
-        return profile_source.as_ref().is_some_and(|source| {
-            crate::mod_sources::mod_info_source_matches_entry(installed, source)
-        });
+        return false;
     }
 
     mod_identity_keys(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref())

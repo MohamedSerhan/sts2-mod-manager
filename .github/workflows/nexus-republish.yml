@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      diagnose_only:
+        description: "Only print Nexus Windows file group state; do not upload"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: nexus-republish-windows-${{ inputs.version }}
@@ -38,7 +43,86 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Diagnose Windows Nexus state
+        if: ${{ inputs.diagnose_only }}
+        env:
+          NEXUS_API_KEY:         ${{ secrets.NEXUS_API_KEY }}
+          NEXUS_FILE_GROUP_ID:   ${{ secrets.NEXUS_FILE_GROUP_ID }}
+          NEXUSMODS_MOD_ID:      ${{ vars.NEXUSMODS_MOD_ID || '856' }}
+          NEXUSMODS_GAME_DOMAIN: slaythespire2
+        run: |
+          node --input-type=module <<'NODE'
+          const apiBase = process.env.NEXUSMODS_API_BASE || 'https://api.nexusmods.com/v3';
+
+          async function request(endpoint) {
+            const response = await fetch(`${apiBase}${endpoint}`, {
+              headers: {
+                accept: 'application/json',
+                apikey: process.env.NEXUS_API_KEY,
+                'user-agent': 'sts2-mod-manager-nexus-diagnostic',
+              },
+            });
+            const text = await response.text();
+            let body = text;
+            try {
+              body = text ? JSON.parse(text) : null;
+            } catch {
+              // Keep plain text body.
+            }
+            if (!response.ok) {
+              throw new Error(`${endpoint} failed with ${response.status}: ${text}`);
+            }
+            return body;
+          }
+
+          function groupsFrom(body) {
+            return body?.data?.groups || body?.data?.data?.groups || body?.groups || [];
+          }
+
+          function print(label, value) {
+            console.log(`\n## ${label}`);
+            console.log(JSON.stringify(value, null, 2).slice(0, 20000));
+          }
+
+          const gameDomain = process.env.NEXUSMODS_GAME_DOMAIN || 'slaythespire2';
+          const gameScopedModId = process.env.NEXUSMODS_MOD_ID || '856';
+          const configuredGroupId = String(process.env.NEXUS_FILE_GROUP_ID || '').trim();
+
+          const mod = await request(`/games/${encodeURIComponent(gameDomain)}/mods/${encodeURIComponent(gameScopedModId)}`);
+          print('mod', mod);
+          const modId = mod?.data?.id || mod?.id;
+          if (!modId) {
+            throw new Error('Nexus mod UUID was not present in mod response');
+          }
+
+          const groupsBody = await request(`/mods/${encodeURIComponent(modId)}/file-update-groups`);
+          print('file-update-groups', groupsBody);
+          const groups = groupsFrom(groupsBody);
+          const windowsGroup = groups.find((group) => (
+            String(group?.id || '') === configuredGroupId
+            || /windows|portable/i.test(String(group?.name || ''))
+          ));
+          print('selected-windows-group', windowsGroup || null);
+
+          const groupId = windowsGroup?.id || configuredGroupId;
+          if (!groupId) {
+            throw new Error('Could not determine Windows Nexus file group id');
+          }
+
+          for (const endpoint of [
+            `/mod-file-update-groups/${encodeURIComponent(groupId)}`,
+            `/mod-file-update-groups/${encodeURIComponent(groupId)}/versions`,
+          ]) {
+            try {
+              print(endpoint, await request(endpoint));
+            } catch (error) {
+              print(`${endpoint} error`, error instanceof Error ? error.message : String(error));
+            }
+          }
+          NODE
+
       - name: Download GitHub Windows portable zip
+        if: ${{ !inputs.diagnose_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -57,6 +141,7 @@ jobs:
             -p "$ASSET"
 
       - name: Verify Windows portable zip
+        if: ${{ !inputs.diagnose_only }}
         run: |
           set -euo pipefail
           ZIP="nexus-assets/${ASSET}"
@@ -83,7 +168,7 @@ jobs:
           PY
 
       - name: Repack Windows portable zip
-        if: ${{ inputs.repack_windows_zip }}
+        if: ${{ !inputs.diagnose_only && inputs.repack_windows_zip }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -110,6 +195,7 @@ jobs:
           echo "Repacked ${ASSET} as ${REPACKED_SHA}"
 
       - name: Publish Windows portable zip to Nexus
+        if: ${{ !inputs.diagnose_only }}
         env:
           NEXUS_API_KEY:             ${{ secrets.NEXUS_API_KEY }}
           NEXUS_FILE_GROUP_ID:       ${{ secrets.NEXUS_FILE_GROUP_ID }}
@@ -119,6 +205,7 @@ jobs:
         run: node scripts/nexus-publish-release.mjs --version "$VERSION" --asset-dir nexus-assets --only windows
 
       - name: Summarize republish
+        if: ${{ !inputs.diagnose_only }}
         run: |
           {
             echo "### Nexus Windows republish"

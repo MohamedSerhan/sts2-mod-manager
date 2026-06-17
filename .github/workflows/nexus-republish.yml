@@ -53,13 +53,14 @@ jobs:
         run: |
           node --input-type=module <<'NODE'
           const apiBase = process.env.NEXUSMODS_API_BASE || 'https://api.nexusmods.com/v3';
+          const legacyApiBase = process.env.NEXUSMODS_LEGACY_API_BASE || 'https://api.nexusmods.com/v1';
 
-          async function request(endpoint) {
-            const response = await fetch(`${apiBase}${endpoint}`, {
+          async function request(baseUrl, endpoint) {
+            const response = await fetch(`${baseUrl}${endpoint}`, {
               headers: {
-                accept: 'application/json',
+                'Content-Type': 'application/json',
                 apikey: process.env.NEXUS_API_KEY,
-                'user-agent': 'sts2-mod-manager-nexus-diagnostic',
+                'User-Agent': 'sts2-mod-manager-nexus-diagnostic',
               },
             });
             const text = await response.text();
@@ -88,16 +89,21 @@ jobs:
           const gameScopedModId = process.env.NEXUSMODS_MOD_ID || '856';
           const configuredGroupId = String(process.env.NEXUS_FILE_GROUP_ID || '').trim();
 
-          const mod = await request(`/games/${encodeURIComponent(gameDomain)}/mods/${encodeURIComponent(gameScopedModId)}`);
+          const mod = await request(apiBase, `/games/${encodeURIComponent(gameDomain)}/mods/${encodeURIComponent(gameScopedModId)}`);
           print('mod', mod);
           const modId = mod?.data?.id || mod?.id;
           if (!modId) {
             throw new Error('Nexus mod UUID was not present in mod response');
           }
 
-          const groupsBody = await request(`/mods/${encodeURIComponent(modId)}/file-update-groups`);
-          print('file-update-groups', groupsBody);
-          const groups = groupsFrom(groupsBody);
+          let groups = [];
+          try {
+            const groupsBody = await request(apiBase, `/mods/${encodeURIComponent(modId)}/file-update-groups`);
+            print('file-update-groups', groupsBody);
+            groups = groupsFrom(groupsBody);
+          } catch (error) {
+            print('file-update-groups error', error instanceof Error ? error.message : String(error));
+          }
           const windowsGroup = groups.find((group) => (
             String(group?.id || '') === configuredGroupId
             || /windows|portable/i.test(String(group?.name || ''))
@@ -114,10 +120,19 @@ jobs:
             `/mod-file-update-groups/${encodeURIComponent(groupId)}/versions`,
           ]) {
             try {
-              print(endpoint, await request(endpoint));
+              print(endpoint, await request(apiBase, endpoint));
             } catch (error) {
               print(`${endpoint} error`, error instanceof Error ? error.message : String(error));
             }
+          }
+
+          try {
+            print(
+              'legacy-files',
+              await request(legacyApiBase, `/games/${encodeURIComponent(gameDomain)}/mods/${encodeURIComponent(gameScopedModId)}/files.json`),
+            );
+          } catch (error) {
+            print('legacy-files error', error instanceof Error ? error.message : String(error));
           }
           NODE
 

@@ -6,7 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import type { GameInfo, ModInfo, ModAuditEntry, ModAuditTarget, SubscriptionUpdate } from '../types';
 import { useToast } from './ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
-import { auditEntryKey, auditTargetKey, type AuditRefreshTarget } from '../lib/auditState';
+import { auditEntryKey, auditTargetForMod, auditTargetKey, type AuditRefreshTarget } from '../lib/auditState';
 
 interface AppContextType {
   gameInfo: GameInfo | null;
@@ -295,10 +295,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           : t('app.updated', { count: updated.length }),
       );
       await refreshAll();
-      const names = Array.from(
-        new Set([...githubUpdateNames, ...updated.map((m) => m.name)]),
-      );
-      await refreshAuditEntries(names);
+      await refreshAuditEntries([
+        ...githubUpdateNames,
+        ...updated.map((m) => auditTargetForMod(m)),
+      ]);
       return updated;
     } catch (e) {
       toast.error(t('app.updateFailed', { error: e instanceof Error ? e.message : String(e) }));

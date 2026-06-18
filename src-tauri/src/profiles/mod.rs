@@ -189,6 +189,8 @@ pub struct ProfileMembershipState {
     pub included: bool,
     pub enabled: bool,
     pub editable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

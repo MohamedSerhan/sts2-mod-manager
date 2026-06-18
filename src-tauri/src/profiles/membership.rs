@@ -76,13 +76,15 @@ pub(crate) fn profile_membership_matrix(
                     let matched = profile
                         .mods
                         .iter()
-                        .find(|pm| profile_mod_matches_installed(pm, &installed));
+                        .enumerate()
+                        .find(|(_, pm)| profile_mod_matches_installed(pm, &installed));
                     ProfileMembershipState {
                         profile_id: profile.id.clone(),
                         profile_name: profile.name.clone(),
                         included: matched.is_some(),
                         enabled: matched.is_some(),
                         editable: profile_row.editable,
+                        order_index: matched.map(|(index, _)| index),
                     }
                 })
                 .collect();
@@ -992,14 +994,20 @@ mod profile_membership_tests {
             .iter()
             .find(|m| m.folder_name.as_deref() == Some("BaseLib"))
             .unwrap();
-        assert!(base
+        let alpha_state = base
             .profiles
             .iter()
-            .any(|p| p.profile_name == "Alpha" && p.included && p.enabled));
-        assert!(base
+            .find(|p| p.profile_name == "Alpha")
+            .unwrap();
+        assert!(alpha_state.included && alpha_state.enabled);
+        assert_eq!(alpha_state.order_index, Some(0));
+        let beta_state = base
             .profiles
             .iter()
-            .any(|p| p.profile_name == "Beta" && !p.included));
+            .find(|p| p.profile_name == "Beta")
+            .unwrap();
+        assert!(!beta_state.included);
+        assert_eq!(beta_state.order_index, None);
 
         let auto = grid
             .mods

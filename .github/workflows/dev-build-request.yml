@@ -1,0 +1,38 @@
+name: Dispatch fork dev build
+
+# Fork PRs can be stopped by GitHub's "approval required" gate before the
+# regular pull_request build jobs are created. This owner-only target workflow
+# treats applying `dev-build` as an explicit approval to build that exact fork
+# SHA through Build & Release's workflow_dispatch path.
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+jobs:
+  dispatch:
+    if: >-
+      ${{ github.event.label.name == 'dev-build'
+          && github.event.pull_request.head.repo.full_name != github.repository
+          && github.event.sender.login == github.repository_owner }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Build & Release for exact fork SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          gh workflow run build.yml \
+            --repo "$REPO" \
+            --ref main \
+            -f dev_pr="$PR" \
+            -f dev_head_sha="$HEAD_SHA" \
+            -f dev_head_repository="$HEAD_REPOSITORY"
+          echo "Dispatched Build & Release for PR #${PR} at ${HEAD_REPOSITORY}@${HEAD_SHA}."

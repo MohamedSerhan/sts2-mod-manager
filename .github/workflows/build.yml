@@ -19,9 +19,22 @@ on:
       - ".gitignore"
       - "LICENSE"
   workflow_dispatch:
+    inputs:
+      dev_pr:
+        description: "PR number for an owner-approved fork dev build"
+        required: false
+        type: string
+      dev_head_sha:
+        description: "Exact PR head SHA to build for dev-pr<N>"
+        required: false
+        type: string
+      dev_head_repository:
+        description: "owner/repo containing the exact PR head SHA"
+        required: false
+        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.dev_pr != '' && format('dev-pr{0}', inputs.dev_pr) || github.ref }}
   cancel-in-progress: ${{ !(github.event_name == 'pull_request' && github.event.action == 'labeled') }}
 
 permissions:
@@ -61,7 +74,16 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
+      - name: Checkout dispatched dev-build head
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dev_pr != '' && inputs.dev_head_sha != '' && inputs.dev_head_repository != '' }}
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.dev_head_repository }}
+          ref: ${{ inputs.dev_head_sha }}
+          persist-credentials: false
+
       - name: Checkout repository
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dev_pr == '' }}
         uses: actions/checkout@v6
 
       - name: Install system dependencies (Linux only)
@@ -101,11 +123,17 @@ jobs:
         run: npm ci
 
       - name: Stamp dev version + identity (labeled-PR dev builds only)
-        if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'dev-build') }}
+        if: >-
+          ${{ (github.event_name == 'pull_request'
+                && contains(github.event.pull_request.labels.*.name, 'dev-build'))
+              || (github.event_name == 'workflow_dispatch'
+                && inputs.dev_pr != ''
+                && inputs.dev_head_sha != ''
+                && inputs.dev_head_repository != '') }}
         shell: bash
         env:
-          DEV_PR_NUMBER: ${{ github.event.pull_request.number }}
-          DEV_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DEV_PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.dev_pr || github.event.pull_request.number }}
+          DEV_HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.dev_head_sha || github.event.pull_request.head.sha }}
         run: |
           SHORT=$(printf '%s' "$DEV_HEAD_SHA" | cut -c1-7)
           DEV_SHORT_SHA="$SHORT" node scripts/dev-build-stamp.mjs --stamp
@@ -172,7 +200,14 @@ jobs:
           gh release upload "$env:TAG" $zip --clobber
 
       - name: Package portable zip (dev builds, Windows only)
-        if: matrix.platform == 'windows-latest' && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'dev-build')
+        if: >-
+          ${{ matrix.platform == 'windows-latest'
+              && ((github.event_name == 'pull_request'
+                    && contains(github.event.pull_request.labels.*.name, 'dev-build'))
+                || (github.event_name == 'workflow_dispatch'
+                    && inputs.dev_pr != ''
+                    && inputs.dev_head_sha != ''
+                    && inputs.dev_head_repository != '')) }}
         shell: pwsh
         run: |
           # Read the (already dev-stamped) version from tauri.conf.json.
@@ -427,8 +462,12 @@ jobs:
       ${{ always()
           && needs.build.result != 'skipped'
           && needs.build.result != 'cancelled'
-          && github.event_name == 'pull_request'
-          && contains(github.event.pull_request.labels.*.name, 'dev-build') }}
+          && ((github.event_name == 'pull_request'
+                && contains(github.event.pull_request.labels.*.name, 'dev-build'))
+              || (github.event_name == 'workflow_dispatch'
+                && inputs.dev_pr != ''
+                && inputs.dev_head_sha != ''
+                && inputs.dev_head_repository != '')) }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -453,13 +492,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event_name == 'workflow_dispatch' && inputs.dev_pr || github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.dev_head_sha || github.event.pull_request.head.sha }}
+          HEAD_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.dev_head_repository || github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           SHORT=$(printf '%s' "$HEAD_SHA" | cut -c1-7)
           TAG="dev-pr${PR}"
+          RELEASE_TARGET="$HEAD_SHA"
+          if [ "$HEAD_REPOSITORY" != "$REPO" ]; then
+            # A release tag in the base repo cannot target a commit that only
+            # exists in a fork. Keep the real PR SHA in the dev version/comment,
+            # but anchor the rolling tag to the trusted workflow ref.
+            RELEASE_TARGET="$GITHUB_SHA"
+          fi
 
           # Flatten downloaded artifacts into one dir of release-able files.
           mkdir -p dev-artifacts dist
@@ -482,7 +529,7 @@ jobs:
             gh release create "$TAG" "${files[@]}" \
               --repo "$REPO" \
               --prerelease \
-              --target "$HEAD_SHA" \
+              --target "$RELEASE_TARGET" \
               --title "Dev build — PR #${PR} (g${SHORT})" \
               --notes "Automated dev build for PR #${PR}. Prerelease — not for end users."
             # Assemble + attach latest.json so the in-app switcher can install

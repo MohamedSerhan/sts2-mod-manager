@@ -1179,9 +1179,10 @@ describe('<LibraryTable modpackName={null}>', () => {
 
     render(<Wrap modpackName={null} />);
 
-    const picker = await screen.findByRole('combobox', { name: /Choose version/i });
-    expect(within(picker).getByRole('option', { name: /1\.4\.3 \(stored\)/i })).toBeInTheDocument();
-    expect(within(picker).getByRole('option', { name: /1\.4\.2 \(active\)/i })).toBeInTheDocument();
+    const user = userEvent.setup();
+    const listbox = await openSelect(user, /Choose version/i);
+    expect(within(listbox).getByRole('option', { name: /1\.4\.3 \(stored\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /1\.4\.2 \(active\)/i })).toBeInTheDocument();
   });
 
   it('renders rows without the storage chip or per-row Store button', async () => {

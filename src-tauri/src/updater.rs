@@ -13,9 +13,13 @@ use std::path::Path;
 // ── Version Comparison ─────────────────────────────────────────────────────
 
 /// Try to parse a version string into a semver::Version.
-/// Handles common variants: "1.2.3", "v1.2.3", "1.2", "1".
+/// Handles common variants: "1.2.3", "v1.2.3", "V29", "1.2", "1".
+fn strip_version_prefix(v: &str) -> &str {
+    v.trim().trim_start_matches(['v', 'V'])
+}
+
 fn parse_version(v: &str) -> Option<semver::Version> {
-    let stripped = v.trim().trim_start_matches('v');
+    let stripped = strip_version_prefix(v);
     // Try direct parse first
     if let Ok(ver) = semver::Version::parse(stripped) {
         return Some(ver);
@@ -371,8 +375,8 @@ pub async fn check_all_updates(
             continue;
         }
 
-        let latest = release.tag_name.trim_start_matches('v');
-        let current = m.version.trim_start_matches('v');
+        let latest = strip_version_prefix(&release.tag_name);
+        let current = strip_version_prefix(&m.version);
 
         // Check if the installed_version in mod_sources.json matches latest
         // Folder-first so a bundle keyed by folder_name is not missed here.
@@ -383,7 +387,7 @@ pub async fn check_all_updates(
             m.mod_id.as_deref(),
         )
         .and_then(|e| e.installed_version.as_deref().map(str::to_owned))
-        .map(|iv| iv.trim_start_matches('v').to_owned() == latest)
+        .map(|iv| strip_version_prefix(&iv).to_owned() == latest)
         .unwrap_or(false);
 
         // Skip if versions match exactly, or version is unknown
@@ -476,10 +480,10 @@ pub async fn check_all_updates(
                     if let Some(ref nv) = info.version {
                         // Best known installed version (same logic as audit)
                         let sources_ver = source_entry.installed_version.as_deref().unwrap_or("");
-                        let manifest_ver = m.version.trim_start_matches('v');
+                        let manifest_ver = strip_version_prefix(&m.version);
                         let current_ver = if !sources_ver.is_empty() {
-                            let sv = sources_ver.trim_start_matches('v');
-                            if is_newer_version(sv, manifest_ver) {
+                            let sv = strip_version_prefix(sources_ver);
+                            if is_newer_version(manifest_ver, sv) {
                                 sv
                             } else {
                                 manifest_ver
@@ -487,7 +491,7 @@ pub async fn check_all_updates(
                         } else {
                             manifest_ver
                         };
-                        let nexus_ver = nv.trim_start_matches('v');
+                        let nexus_ver = strip_version_prefix(nv);
 
                         if current_ver != "unknown"
                             && current_ver != "0.0.0"
@@ -2095,6 +2099,7 @@ mod version_helper_tests {
         use std::cmp::Ordering;
         assert_eq!(compare_versions("1.0.0", "1.0.0"), Some(Ordering::Equal));
         assert_eq!(compare_versions("1.0.0", "v2.0.0"), Some(Ordering::Less));
+        assert_eq!(compare_versions("29", "V29"), Some(Ordering::Equal));
         assert_eq!(compare_versions("v2.0.0", "1.0.0"), Some(Ordering::Greater));
         assert_eq!(compare_versions("dev-build", "1.0.0"), None);
     }
@@ -2849,6 +2854,22 @@ mod version_helper_tests {
         assert!(!is_newer_version("2.2.0", "2.1.0")); // downgrade also false
     }
 
+    #[test]
+    fn nexus_source_version_wins_over_stale_manifest_version() {
+        let sources_ver = strip_version_prefix("29");
+        let manifest_ver = strip_version_prefix("v1.15.4");
+        let current_ver = if is_newer_version(manifest_ver, sources_ver) {
+            sources_ver
+        } else {
+            manifest_ver
+        };
+        assert_eq!(current_ver, "29");
+        assert!(
+            !is_newer_version(current_ver, strip_version_prefix("V29")),
+            "a Nexus install tracked as 29 should not keep reporting upstream V29"
+        );
+    }
+
     /// Phase 1 (GitHub) pin check: a mod whose source entry is keyed by
     /// `folder_name` (e.g. a bundle keyed by its container folder "Pack") must
     /// be recognised as pinned even when `m.name` differs from the map key.
@@ -3514,10 +3535,10 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                         let sources_ver = source_entry
                             .and_then(|e| e.installed_version.as_deref())
                             .unwrap_or("");
-                        let manifest_ver = m.version.trim_start_matches('v');
+                        let manifest_ver = strip_version_prefix(&m.version);
                         let current_ver = if !sources_ver.is_empty() {
                             // Use whichever is higher: sources DB or manifest
-                            let sv = sources_ver.trim_start_matches('v');
+                            let sv = strip_version_prefix(sources_ver);
                             if is_newer_version(manifest_ver, sv) {
                                 sv
                             } else {
@@ -3526,7 +3547,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                         } else {
                             manifest_ver
                         };
-                        let nexus_ver = nv.trim_start_matches('v');
+                        let nexus_ver = strip_version_prefix(nv);
                         if current_ver != "unknown" && current_ver != "0.0.0" {
                             nexus_update_available = is_newer_version(current_ver, nexus_ver);
                         }
@@ -3550,7 +3571,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                                 latest_release_with_assets_tag
                                     .as_deref()
                                     .unwrap_or("")
-                                    .trim_start_matches('v'),
+                                    .trim_start_matches(['v', 'V']),
                                 nexus_ver,
                             )
                         {

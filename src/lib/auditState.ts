@@ -2,13 +2,25 @@ import type { ModAuditEntry, ModAuditTarget } from '../types';
 
 export type AuditRefreshTarget = string | ModAuditTarget;
 
+function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+export function auditEntryKeys(entry: ModAuditEntry): string[] {
+  return uniqueNonEmpty([entry.mod_version_id, entry.folder_name, entry.mod_name]);
+}
+
 export function auditEntryKey(entry: ModAuditEntry): string {
-  return entry.mod_version_id ?? entry.folder_name ?? entry.mod_name;
+  return auditEntryKeys(entry)[0] ?? entry.mod_name;
+}
+
+export function auditTargetKeys(target: AuditRefreshTarget): string[] {
+  if (typeof target === 'string') return uniqueNonEmpty([target]);
+  return uniqueNonEmpty([target.mod_version_id, target.folder_name, target.mod_id, target.name]);
 }
 
 export function auditTargetKey(target: AuditRefreshTarget): string {
-  if (typeof target === 'string') return target;
-  return target.mod_version_id ?? target.folder_name ?? target.mod_id ?? target.name;
+  return auditTargetKeys(target)[0] ?? '';
 }
 
 export function auditTargetForMod(mod: {

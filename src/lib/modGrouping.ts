@@ -10,7 +10,7 @@ export function logicalModKey(
 ): string {
   const modId = normalize(mod.mod_id);
   const name = normalize(info?.name ?? mod.name);
-  if (modId) return `mod_id:${modId}|name:${name}`;
+  if (modId) return `mod_id:${modId}`;
   const source = normalize(info?.source ?? info?.github_url ?? info?.nexus_url);
   if (source) return `source:${source}|name:${name}`;
   return `name:${name}`;

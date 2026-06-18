@@ -31,7 +31,7 @@ import { SourceEditor } from '../components/SourceEditor';
 import { AutoDetectModal } from '../components/AutoDetectModal';
 import { nexusFilesUrl } from '../lib/nexusUrl';
 import { loadAutoAddInstallsToModpack } from '../lib/installPolicy';
-import { auditEntryKey, auditTargetForMod } from '../lib/auditState';
+import { auditEntryKeys, auditTargetForMod } from '../lib/auditState';
 import type { ModAuditEntry, ModInfo } from '../types';
 import {
   deleteMod,
@@ -156,9 +156,9 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     const m = new Map<string, NonNullable<typeof auditResults>[number]>();
     if (auditResults) {
       for (const a of auditResults) {
-        m.set(auditEntryKey(a), a);
-        if (a.folder_name) m.set(a.folder_name, a);
-        m.set(a.mod_name, a);
+        for (const key of auditEntryKeys(a)) {
+          m.set(key, a);
+        }
       }
     }
     return m;

@@ -6,7 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import type { GameInfo, ModInfo, ModAuditEntry, ModAuditTarget, SubscriptionUpdate } from '../types';
 import { useToast } from './ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
-import { auditEntryKey, auditTargetForMod, auditTargetKey, type AuditRefreshTarget } from '../lib/auditState';
+import { auditEntryKeys, auditTargetForMod, auditTargetKeys, type AuditRefreshTarget } from '../lib/auditState';
 
 interface AppContextType {
   gameInfo: GameInfo | null;
@@ -53,6 +53,72 @@ interface AppContextType {
       afterUpdate?: (updated: ModInfo[]) => Promise<void> | void;
     },
   ) => Promise<ModInfo[]>;
+}
+
+function indexAuditEntries(entries: ModAuditEntry[]): Map<string, ModAuditEntry> {
+  const byKey = new Map<string, ModAuditEntry>();
+  for (const entry of entries) {
+    for (const key of auditMergeKeys(entry)) {
+      byKey.set(key, entry);
+    }
+  }
+  return byKey;
+}
+
+function auditMergeKeys(entry: ModAuditEntry): string[] {
+  // Display names are only safe as a merge key for legacy audit rows that
+  // lack artifact/folder identity; same-named local mods must stay distinct.
+  const strongKeys = auditEntryKeys(entry).filter(
+    (key) => key === entry.mod_version_id || key === entry.folder_name,
+  );
+  return strongKeys.length > 0 ? strongKeys : auditEntryKeys(entry);
+}
+
+function firstAuditReplacement(
+  entry: ModAuditEntry,
+  byKey: Map<string, ModAuditEntry>,
+): ModAuditEntry | undefined {
+  for (const key of auditMergeKeys(entry)) {
+    const replacement = byKey.get(key);
+    if (replacement) return replacement;
+  }
+  return undefined;
+}
+
+function mergeAuditResults(
+  prev: ModAuditEntry[],
+  fresh: ModAuditEntry[],
+  requestedKeys?: Set<string>,
+): ModAuditEntry[] {
+  const byKey = indexAuditEntries(fresh);
+  const existingKeys = new Set(prev.flatMap(auditMergeKeys));
+  const usedFresh = new Set<ModAuditEntry>();
+  const merged: ModAuditEntry[] = [];
+
+  for (const entry of prev) {
+    const replacement = firstAuditReplacement(entry, byKey);
+    if (replacement) {
+      if (!usedFresh.has(replacement)) {
+        merged.push(replacement);
+        usedFresh.add(replacement);
+      }
+      continue;
+    }
+    if (requestedKeys && auditMergeKeys(entry).some((key) => requestedKeys.has(key))) {
+      continue;
+    }
+    merged.push(entry);
+  }
+
+  for (const entry of fresh) {
+    const overlapsExisting = auditMergeKeys(entry).some((key) => existingKeys.has(key));
+    if (!usedFresh.has(entry) && !overlapsExisting) {
+      merged.push(entry);
+      usedFresh.add(entry);
+    }
+  }
+
+  return merged;
 }
 
 /** Failsafe — if the watcher never fires (user closed the browser without
@@ -225,13 +291,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // stand on their own.
         setAuditResults((prev) => {
           if (!prev) return results;
-          const byKey = new Map(results.map((e) => [auditEntryKey(e), e]));
-          const existingKeys = new Set(prev.map(auditEntryKey));
-          const merged = prev.map((e) => byKey.get(auditEntryKey(e)) ?? e);
-          for (const e of results) {
-            if (!existingKeys.has(auditEntryKey(e))) merged.push(e);
-          }
-          return merged;
+          return mergeAuditResults(prev, results);
         });
       } else {
         setAuditResults(results);
@@ -252,19 +312,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (targets.length === 0) return;
     try {
       const fresh = await auditModVersions(targets);
-      const freshKeys = new Set(fresh.map(auditEntryKey));
-      const requestedKeys = new Set(targets.map(auditTargetKey));
-      const byKey = new Map(fresh.map((e) => [auditEntryKey(e), e]));
+      const requestedKeys = new Set(targets.flatMap(auditTargetKeys));
       setAuditResults((prev) => {
         if (!prev) return prev;
-        const existingKeys = new Set(prev.map(auditEntryKey));
-        const merged = prev
-          .filter((e) => !requestedKeys.has(auditEntryKey(e)) || freshKeys.has(auditEntryKey(e)))
-          .map((e) => byKey.get(auditEntryKey(e)) ?? e);
-        for (const e of fresh) {
-          if (!existingKeys.has(auditEntryKey(e))) merged.push(e);
-        }
-        return merged;
+        return mergeAuditResults(prev, fresh, requestedKeys);
       });
     } catch {
       /* non-fatal — leaves existing rows in place */

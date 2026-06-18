@@ -532,6 +532,115 @@ describe('<AppProvider>', () => {
     ]);
   });
 
+  it('mod-auto-installed event replaces stale audit rows when the artifact id changes', async () => {
+    let auditCalls = 0;
+    let lastArgs: Record<string, unknown> | undefined;
+    registerInvokeHandler('audit_mod_versions', (args) => {
+      auditCalls += 1;
+      lastArgs = args;
+      if (auditCalls === 1) {
+        return [{
+          mod_name: 'StS2 Card Advisor',
+          folder_name: 'Sts2CardAdvisor',
+          mod_version_id: 'artifact-old',
+          installed_version: '1.15.4',
+          needs_update: true,
+          pinned: false,
+          nexus_update_available: true,
+          nexus_version: 'V29',
+          update_source: 'nexus',
+        }];
+      }
+      return [{
+        mod_name: 'StS2 Card Advisor',
+        folder_name: 'Sts2CardAdvisor',
+        mod_version_id: 'artifact-new',
+        installed_version: '29',
+        needs_update: false,
+        pinned: false,
+        nexus_update_available: false,
+        nexus_version: 'V29',
+        update_source: 'nexus',
+      }];
+    });
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => { expect(captured?.loading).toBe(false); });
+    await act(async () => { await captured!.runAudit(); });
+    expect(captured?.auditResults?.[0].mod_version_id).toBe('artifact-old');
+
+    const handler = getListenHandler<{ mod_name: string; file_name: string; replaced: string | null; mod_version_id?: string | null; folder_name?: string | null; mod_id?: string | null }>(
+      'mod-auto-installed',
+    );
+    await act(async () => {
+      handler({
+        payload: {
+          mod_name: 'StS2 Card Advisor',
+          file_name: 'Sts2CardAdvisor-29.zip',
+          replaced: null,
+          mod_version_id: 'artifact-new',
+          folder_name: 'Sts2CardAdvisor',
+          mod_id: 'Sts2CardAdvisor',
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(captured?.auditResults?.[0].mod_version_id).toBe('artifact-new');
+    });
+    expect(captured?.auditResults).toHaveLength(1);
+    expect(captured?.auditResults?.[0].needs_update).toBe(false);
+    expect(lastArgs?.only).toEqual([{
+      mod_version_id: 'artifact-new',
+      folder_name: 'Sts2CardAdvisor',
+      mod_id: 'Sts2CardAdvisor',
+      name: 'StS2 Card Advisor',
+    }]);
+  });
+
+  it('refreshAuditEntries does not replace distinct same-named rows by display name alone', async () => {
+    let auditCalls = 0;
+    registerInvokeHandler('audit_mod_versions', (args) => {
+      auditCalls += 1;
+      if (!args || !args.only) {
+        return [
+          { mod_name: 'Twin', folder_name: 'TwinA', mod_version_id: 'twin-a-old', installed_version: '1.0', needs_update: true, pinned: false },
+          { mod_name: 'Twin', folder_name: 'TwinB', mod_version_id: 'twin-b', installed_version: '1.0', needs_update: true, pinned: false },
+        ];
+      }
+      return [
+        { mod_name: 'Twin', folder_name: 'TwinA', mod_version_id: 'twin-a-new', installed_version: '2.0', needs_update: false, pinned: false },
+      ];
+    });
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => { expect(captured?.loading).toBe(false); });
+    await act(async () => { await captured!.runAudit(); });
+
+    await act(async () => {
+      await captured!.refreshAuditEntries([{
+        mod_version_id: 'twin-a-new',
+        folder_name: 'TwinA',
+        mod_id: 'twin',
+        name: 'Twin',
+      }]);
+    });
+
+    expect(auditCalls).toBe(2);
+    expect(captured?.auditResults).toHaveLength(2);
+    expect(captured?.auditResults?.find((r) => r.folder_name === 'TwinA')?.installed_version).toBe('2.0');
+    expect(captured?.auditResults?.find((r) => r.folder_name === 'TwinB')?.installed_version).toBe('1.0');
+  });
+
   it('mod-auto-installed event with replaced === mod_name dedupes to a single name', async () => {
     let lastArgs: Record<string, unknown> | undefined;
     let auditCalls = 0;

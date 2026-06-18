@@ -323,7 +323,7 @@ jobs:
           NEXUS_FILE_GROUP_ID:       ${{ secrets.NEXUS_FILE_GROUP_ID }}
           NEXUS_FILE_GROUP_ID_MACOS: ${{ secrets.NEXUS_FILE_GROUP_ID_MACOS }}
           NEXUS_FILE_GROUP_ID_LINUX: ${{ secrets.NEXUS_FILE_GROUP_ID_LINUX }}
-          NEXUS_ALLOW_BOOTSTRAP:     ${{ inputs.asset == 'windows' && 'false' || 'true' }}
+          NEXUS_ALLOW_BOOTSTRAP:     "false"
           NEXUSMODS_MOD_ID:          ${{ vars.NEXUSMODS_MOD_ID || '856' }}
           NEXUSMODS_GAME_DOMAIN:     slaythespire2
         run: node scripts/nexus-publish-release.mjs --version "$VERSION" --asset-dir nexus-assets --only "$ASSET_KEY"

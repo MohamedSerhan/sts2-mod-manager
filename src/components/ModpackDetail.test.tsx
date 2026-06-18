@@ -18,6 +18,7 @@ import userEvent from '@testing-library/user-event';
 
 import { ModpackDetail } from './ModpackDetail';
 import { AllProviders } from '../__test__/providers';
+import { chooseOption } from '../__test__/selectHelpers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from '../lib/installPolicy';
 import type { ModInfo, Profile, ProfileMod, ShareResult } from '../types';
@@ -1290,13 +1291,13 @@ describe('<ModpackDetail>', () => {
           modInfo({ name: 'UiMod', folder_name: 'UiMod', tags: ['ui'] }),
         ],
       });
+      const user = userEvent.setup();
       render(<Wrap {...baseProps()} profile={profile} />);
       // Both rows present initially.
       expect((await screen.findAllByText('CombatMod')).length).toBeGreaterThan(0);
       expect(screen.getAllByText('UiMod').length).toBeGreaterThan(0);
       // Filter to "combat".
-      const tagSelect = screen.getByLabelText(/tag/i) as HTMLSelectElement;
-      fireEvent.change(tagSelect, { target: { value: 'combat' } });
+      await chooseOption(user, /tag/i, 'combat');
       await waitFor(() => expect(screen.queryByText('UiMod')).toBeNull());
       expect(screen.getAllByText('CombatMod').length).toBeGreaterThan(0);
     });
@@ -1309,13 +1310,15 @@ describe('<ModpackDetail>', () => {
           modInfo({ name: 'UntaggedMod', folder_name: 'UntaggedMod', tags: [] }),
         ],
       });
+      const user = userEvent.setup();
       render(<Wrap {...baseProps()} profile={profile} />);
       expect((await screen.findAllByText('TaggedMod')).length).toBeGreaterThan(0);
       expect(screen.getAllByText('UntaggedMod').length).toBeGreaterThan(0);
 
-      const tagSelect = screen.getByRole('combobox', { name: 'Tag' }) as HTMLSelectElement;
-      expect(within(tagSelect).getByRole('option', { name: /No tags/i })).toBeInTheDocument();
-      fireEvent.change(tagSelect, { target: { value: '__no_tags__' } });
+      await user.click(screen.getByRole('combobox', { name: 'Tag' }));
+      const listbox = await screen.findByRole('listbox');
+      expect(within(listbox).getByRole('option', { name: /No tags/i })).toBeInTheDocument();
+      await user.click(within(listbox).getByRole('option', { name: /No tags/i }));
 
       await waitFor(() => expect(screen.queryByText('TaggedMod')).toBeNull());
       expect(screen.getAllByText('UntaggedMod').length).toBeGreaterThan(0);

@@ -17,6 +17,7 @@ import {
   GripVertical,
 } from 'lucide-react';
 import { Card } from '../components/Card';
+import { Select } from '../components/Select';
 import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
 import { useApp } from '../contexts/AppContext';
@@ -1289,17 +1290,18 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         {profiles.length > 1 && (
           <label className="gf-sort-control" style={{ marginLeft: 'auto' }}>
             <span>{t('profiles.sort.label')}</span>
-            <select
+            <Select
               aria-label={t('profiles.sort.label')}
               value={modpackSort}
-              onChange={(e) => changeModpackSort(e.target.value as ModpackSort)}
-            >
-              <option value="recent">{t('profiles.sort.recent')}</option>
-              <option value="edited">{t('profiles.sort.edited')}</option>
-              <option value="created">{t('profiles.sort.created')}</option>
-              <option value="name">{t('profiles.sort.name')}</option>
-              <option value="mods">{t('profiles.sort.mods')}</option>
-            </select>
+              onChange={(v) => changeModpackSort(v as ModpackSort)}
+              options={[
+                { value: 'recent', label: t('profiles.sort.recent') },
+                { value: 'edited', label: t('profiles.sort.edited') },
+                { value: 'created', label: t('profiles.sort.created') },
+                { value: 'name', label: t('profiles.sort.name') },
+                { value: 'mods', label: t('profiles.sort.mods') },
+              ]}
+            />
           </label>
         )}
       </div>

@@ -8,8 +8,13 @@ import { downloadDir as pathDownloadDir } from '@tauri-apps/api/path';
 
 import { SettingsView } from './Settings';
 import { AllProviders } from '../__test__/providers';
+import { chooseOption } from '../__test__/selectHelpers';
 import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from '../__test__/setup';
 import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from '../lib/installPolicy';
+import {
+  NAVIGATION_LAYOUT_CHANGE_EVENT,
+  NAVIGATION_LAYOUT_STORAGE_KEY,
+} from '../display/navigationLayout';
 
 function Wrap() {
   return (
@@ -21,11 +26,11 @@ function Wrap() {
 
 /**
  * Settings is the second-most-trafficked view. Tests cover the tab
- * strip, the General-tab game-path field, the API key forms in
- * Accounts, and the Audit-tab empty + populated states.
+ * strip, the General-tab game-path field, the Customize preferences,
+ * and account/backup/advanced actions.
  */
 describe('<SettingsView>', () => {
-  it('renders the tab strip with the four canonical Settings tabs', async () => {
+  it('renders the tab strip with Customize immediately after General', async () => {
     // 1.7.0 cleanup: the redundant Help tab was removed — Help is now
     // reachable from the topbar `?` drawer (the canonical surface).
     // Later cleanup: the Audit tab was removed too — the Library view
@@ -36,11 +41,16 @@ describe('<SettingsView>', () => {
       expect(screen.getByText('Settings')).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: /General/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Customize/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Accounts/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Backups/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Advanced/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Help$/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Audit$/ })).toBeNull();
+    const labels = screen.getAllByRole('button')
+      .filter((button) => button.className.includes('gf-tab'))
+      .map((button) => button.textContent?.replace(/\d+$/, '').trim());
+    expect(labels).toEqual(['General', 'Customize', 'Accounts', 'Backups', 'Advanced']);
   });
 
   it('starts on the General tab and shows the Game Path field', async () => {
@@ -50,10 +60,35 @@ describe('<SettingsView>', () => {
     });
   });
 
-  it('shows the language override on the General tab', async () => {
+  it('shows the language override on the Customize tab', async () => {
+    const user = userEvent.setup();
     render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Customize/ }));
 
-    expect(await screen.findByLabelText('Language')).toHaveValue('auto');
+    expect(await screen.findByRole('combobox', { name: 'Language' })).toHaveTextContent('Auto');
+  });
+
+  it('saves the navigation layout preference from the Customize display controls', async () => {
+    const user = userEvent.setup();
+    const onLayoutChange = vi.fn();
+    window.addEventListener(NAVIGATION_LAYOUT_CHANGE_EVENT, onLayoutChange);
+
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Customize/ }));
+
+    const select = await screen.findByRole('combobox', { name: /Navigation layout/i });
+    expect(select).toHaveTextContent('Top bar');
+
+    await chooseOption(user, /Navigation layout/i, /Left sidebar/i);
+
+    await waitFor(() => {
+      expect(localStorage.getItem(NAVIGATION_LAYOUT_STORAGE_KEY)).toBe('sidebar');
+    });
+    expect(onLayoutChange).toHaveBeenCalledWith(expect.objectContaining({
+      detail: { value: 'sidebar' },
+    }));
+
+    window.removeEventListener(NAVIGATION_LAYOUT_CHANGE_EVENT, onLayoutChange);
   });
 
   it('clicking Accounts shows the Nexus + GitHub key fields', async () => {
@@ -98,10 +133,12 @@ describe('<SettingsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /Backups/ }));
-    const select = await screen.findByLabelText(/Backups to keep/i);
-    expect(select).toHaveValue('3');
+    const select = await screen.findByRole('combobox', { name: /Backups to keep/i });
+    expect(select).toHaveTextContent('3');
     // The "Off" option (value 0) is offered.
-    expect(within(select as HTMLSelectElement).getByRole('option', { name: /Off/i })).toBeInTheDocument();
+    await user.click(select);
+    const listbox = await screen.findByRole('listbox');
+    expect(within(listbox).getByRole('option', { name: /Off/i })).toBeInTheDocument();
   });
 
   it('changing the retention select invokes set_backup_retention with the new count', async () => {
@@ -112,14 +149,32 @@ describe('<SettingsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /Backups/ }));
-    const select = await screen.findByLabelText(/Backups to keep/i);
-    expect(within(select as HTMLSelectElement).getByRole('option', { name: '10' })).toBeInTheDocument();
-    await user.selectOptions(select, '0');
+    expect(await screen.findByRole('combobox', { name: /Backups to keep/i })).toHaveTextContent('10');
+    await chooseOption(user, /Backups to keep/i, 'Off');
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'set_backup_retention' && c.args?.count === 0,
       )).toBe(true);
     });
+  });
+
+  it('retention save errors keep the previous value visible', async () => {
+    registerInvokeHandler('list_backups_cmd', () => []);
+    registerInvokeHandler('get_backup_retention', () => 10);
+    registerInvokeHandler('set_backup_retention', () => { throw new Error('retention blocked'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Backups/ }));
+    const select = await screen.findByRole('combobox', { name: /Backups to keep/i });
+    expect(select).toHaveTextContent('10');
+
+    await chooseOption(user, /Backups to keep/i, 'Off');
+
+    await waitFor(() => {
+      expect(screen.queryByText(/retention blocked/)).toBeInTheDocument();
+    });
+    expect(select).toHaveTextContent('10');
   });
 
   it('Advanced tab shows a Check-for-updates button', async () => {
@@ -1330,6 +1385,24 @@ describe('<SettingsView>', () => {
     });
   });
 
+  it('Nexus Download Dir Reset errors leave the custom folder visible', async () => {
+    registerInvokeHandler('get_nexus_download_dir', () => '/custom/downloads');
+    registerInvokeHandler('set_nexus_download_dir', () => { throw new Error('reset blocked'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const nexusCard = await screen.findByTestId('nexus-download-dir-card');
+    await waitFor(() => {
+      expect(within(nexusCard).getByDisplayValue('/custom/downloads')).toBeInTheDocument();
+    });
+
+    await user.click(within(nexusCard).getByRole('button', { name: /Reset to default/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/reset blocked/)).toBeInTheDocument();
+    });
+    expect(within(nexusCard).getByDisplayValue('/custom/downloads')).toBeInTheDocument();
+  });
+
   it('Nexus Download Dir Browse error surfaces an error toast', async () => {
     const openMock = vi.mocked(openDialog);
     openMock.mockResolvedValueOnce('/bad/path' as never);
@@ -1395,11 +1468,14 @@ describe('<SettingsView>', () => {
     await waitFor(() => {
       expect(scrollSpy).toHaveBeenCalled();
     });
+    expect(screen.getByRole('button', { name: /Customize/ })).toHaveClass('active');
     expect(screen.getByTestId('row-menu-card')).toHaveClass('gf-row-menu-card-flash');
   });
 
-  it('shows the Display size slider on the General tab', async () => {
+  it('shows the Display size slider on the Customize tab', async () => {
+    const user = userEvent.setup();
     render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Customize/ }));
     const interfaceSlider = (await screen.findByLabelText('Interface scale')) as HTMLInputElement;
     const fontSlider = screen.getByLabelText('Text size') as HTMLInputElement;
     expect(interfaceSlider.value).toBe('100');

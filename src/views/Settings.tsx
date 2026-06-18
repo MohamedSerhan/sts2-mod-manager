@@ -22,6 +22,7 @@ import { downloadDir } from '@tauri-apps/api/path';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { Card } from '../components/Card';
+import { Select } from '../components/Select';
 import { Button } from '../components/Button';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
@@ -39,6 +40,11 @@ import {
   loadAutoAddInstallsToModpack,
   saveAutoAddInstallsToModpack,
 } from '../lib/installPolicy';
+import {
+  loadNavigationLayout,
+  saveNavigationLayout,
+  type NavigationLayout,
+} from '../display/navigationLayout';
 import {
   detectGamePath,
   setGamePath,
@@ -64,7 +70,7 @@ import {
 import type { LaunchMode } from '../hooks/useTauri';
 import type { BackupInfo } from '../types';
 
-type Tab = 'general' | 'accounts' | 'backups' | 'advanced';
+type Tab = 'general' | 'customize' | 'accounts' | 'backups' | 'advanced';
 
 // v5 — tabbed Settings shell. Tabs are stateful; tab content is rendered
 // inline beneath the tab strip. All existing handlers preserved.
@@ -97,6 +103,7 @@ export function SettingsView({
   const [autoAddInstallsToModpack, setAutoAddInstallsToModpack] = useState(
     loadAutoAddInstallsToModpack,
   );
+  const [navigationLayout, setNavigationLayout] = useState<NavigationLayout>(() => loadNavigationLayout());
   const [nexusDownloadDir, setNexusDownloadDirValue] = useState<string | null>(null);
   // The OS default Downloads folder, resolved once on mount. Shown in the
   // read-only path box when no custom folder is set, so the box always names
@@ -126,11 +133,11 @@ export function SettingsView({
   }, []);
 
   // ── Deep-link from "Customize menu…" kebab item ──────
-  // When the signal bumps, switch to the General tab and scroll/highlight the customizer card.
+  // When the signal bumps, switch to Customize and scroll/highlight the customizer card.
   useEffect(() => {
     if (openRowMenuSettingsSignal === 0) return;
-    setTab('general');
-    // Defer one frame so the general tab content is mounted before we scroll.
+    setTab('customize');
+    // Defer one frame so the Customize tab content is mounted before we scroll.
     const id = setTimeout(() => {
       rowMenuCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setRowMenuFlash(true);
@@ -208,6 +215,12 @@ export function SettingsView({
     } finally {
       setSavingRetention(false);
     }
+  }
+
+  function handleNavigationLayoutChange(value: string) {
+    const next: NavigationLayout = value === 'topbar' ? 'topbar' : 'sidebar';
+    setNavigationLayout(next);
+    saveNavigationLayout(next);
   }
 
   async function handleRestoreBackup(name: string) {
@@ -432,6 +445,7 @@ export function SettingsView({
 
   const TABS: { id: Tab; label: string; count?: number }[] = [
     { id: 'general',  label: t('settings.tabs.general') },
+    { id: 'customize', label: t('settings.tabs.customize') },
     { id: 'accounts', label: t('settings.tabs.accounts') },
     { id: 'backups',  label: t('settings.tabs.backups'),  count: backups.length || undefined },
     { id: 'advanced', label: t('settings.tabs.advanced') },
@@ -669,7 +683,17 @@ export function SettingsView({
               </div>
             </Card>
 
-            <Card className="space-y-4" style={{ marginTop: 8 }}>
+            {/* 1.7.0 v7 — About card relocated from the Home page footer.
+                Home is now the single-block launcher; reference info +
+                support links live in Settings → General where they're
+                discoverable but out of the way. */}
+            <AboutCard />
+          </>
+        )}
+
+        {tab === 'customize' && (
+          <>
+            <Card className="space-y-4">
               <h3 className="text-base font-semibold text-text flex items-center gap-2">
                 <Key size={16} />
                 {t('settings.language.label')}
@@ -693,6 +717,22 @@ export function SettingsView({
               <div className="gf-set-desc" style={{ marginTop: -6 }}>
                 {t('settings.display.desc')}
               </div>
+              <label htmlFor="navigation-layout-select" className="gf-set-label" style={{ fontSize: 13 }}>
+                {t('settings.display.navigationLabel')}
+              </label>
+              <Select
+                id="navigation-layout-select"
+                value={navigationLayout}
+                onChange={handleNavigationLayoutChange}
+                aria-label={t('settings.display.navigationLabel')}
+                options={[
+                  { value: 'sidebar', label: t('settings.display.navigationSidebar') },
+                  { value: 'topbar', label: t('settings.display.navigationTopbar') },
+                ]}
+              />
+              <div className="gf-help muted">
+                <span>{t('settings.display.navigationDesc')}</span>
+              </div>
               <UiScaleSlider />
             </Card>
 
@@ -709,11 +749,6 @@ export function SettingsView({
                 <RowMenuCustomizer />
               </Card>
             </div>
-            {/* 1.7.0 v7 — About card relocated from the Home page footer.
-                Home is now the single-block launcher; reference info +
-                support links live in Settings → General where they're
-                discoverable but out of the way. */}
-            <AboutCard />
           </>
         )}
 
@@ -848,20 +883,17 @@ export function SettingsView({
                 <label htmlFor="backup-retention-select" className="gf-set-label" style={{ fontSize: 13 }}>
                   {t('settings.backups.retentionLabel')}
                 </label>
-                <select
+                <Select
                   id="backup-retention-select"
-                  className="gf-set-input"
-                  value={backupRetention}
+                  value={String(backupRetention)}
                   disabled={savingRetention}
-                  onChange={(e) => handleChangeBackupRetention(Number(e.target.value))}
+                  onChange={(v) => handleChangeBackupRetention(Number(v))}
                   style={{ width: 'auto', minWidth: 140 }}
-                >
-                  {Array.from({ length: 11 }, (_, n) => n).map((n) => (
-                    <option key={n} value={n}>
-                      {n === 0 ? t('settings.backups.retentionOff') : String(n)}
-                    </option>
-                  ))}
-                </select>
+                  options={Array.from({ length: 11 }, (_, n) => ({
+                    value: String(n),
+                    label: n === 0 ? t('settings.backups.retentionOff') : String(n),
+                  }))}
+                />
               </div>
               {backupRetention === 0 && (
                 <div className="gf-help muted">

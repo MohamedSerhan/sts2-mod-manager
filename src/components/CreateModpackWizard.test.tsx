@@ -21,6 +21,7 @@ import i18n from '../i18n';
 
 import { CreateModpackWizard } from './CreateModpackWizard';
 import { AllProviders } from '../__test__/providers';
+import { chooseOption } from '../__test__/selectHelpers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import type { GameInfo, ModAuditEntry, ModInfo, Profile } from '../types';
 
@@ -585,10 +586,10 @@ describe('<CreateModpackWizard>', () => {
           baseMod({ name: 'Enabled', enabled: true, folder_name: 'e' }),
         ],
       });
+      const user = userEvent.setup();
       render(<Wrap />);
       fireEvent.click(await screen.findByRole('button', { name: /start empty/i }));
-      const sortSelect = await screen.findByLabelText(/sort/i) as HTMLSelectElement;
-      fireEvent.change(sortSelect, { target: { value: 'enabled' } });
+      await chooseOption(user, /sort/i, 'Active first');
       const labels = await screen.findAllByText(/^(Disabled|Enabled)$/);
       expect(labels[0]).toHaveTextContent('Enabled');
       expect(labels[1]).toHaveTextContent('Disabled');
@@ -619,6 +620,7 @@ describe('<CreateModpackWizard>', () => {
           },
         ],
       });
+      const user = userEvent.setup();
       render(<Wrap />);
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /clone an existing modpack/i })).toBeInTheDocument();
@@ -628,7 +630,7 @@ describe('<CreateModpackWizard>', () => {
       // 2. The clone-pick dropdown appears.
       const pick = await screen.findByLabelText(/pick a modpack to clone/i);
       // 3. Choose the existing pack.
-      fireEvent.change(pick, { target: { value: 'Source Pack' } });
+      await chooseOption(user, /pick a modpack to clone/i, 'Source Pack');
       // 4. Click the dedicated Next button below the dropdown.
       const allNexts = screen.getAllByRole('button', { name: /^next$/i });
       // The dropdown's Next button is the one inside the clone-pick div.

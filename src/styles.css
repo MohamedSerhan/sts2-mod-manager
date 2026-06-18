@@ -376,22 +376,27 @@ body {
 .gf-resize-se { right: 0; bottom: 0; cursor: se-resize; }
 .gf-resize-sw { left: 0; bottom: 0; cursor: sw-resize; }
 
-/* ── Sidebar ─────────────────────────────────────────────────────── */
+/* Sidebar */
 .gf-sidebar {
   width: var(--gf-sidebar-width, 248px);
   flex-shrink: 0;
   position: relative;
   background: var(--indigo-side);
   border-inline-end: 1px solid var(--indigo-line);
-  display: flex; flex-direction: column;
+  display: flex;
+  flex-direction: column;
   padding: 14px 10px;
 }
-/* Drag handle on the sidebar's inner edge (#119). Sits below the Tauri
-   window-resize handles (z-index 80); inline-end so it mirrors in RTL. */
+.gf-side-foot {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--indigo-line);
+}
 .gf-sidebar-resize {
   position: absolute;
   inset-inline-end: 0;
-  top: 0; bottom: 0;
+  top: 0;
+  bottom: 0;
   width: 6px;
   z-index: 70;
   cursor: col-resize;
@@ -403,6 +408,27 @@ body {
   background: var(--gf-line);
   outline: none;
 }
+
+/* ── Top navigation ──────────────────────────────────────────────────
+   Primary nav moved from a left sidebar into a horizontal row at the
+   start of the topbar. `.gf-topnav` is a single flex item inside
+   `.gf-top` (which wraps), so the nav cluster stays together. */
+.gf-topnav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Horizontal nav items override the sidebar-era full-width / start-aligned
+   `.gf-nav` defaults below. The active indicator becomes an underline
+   instead of the sidebar's inline-start bar. */
+.gf-topnav .gf-nav { width: auto; }
+.gf-topnav .gf-nav.active::before {
+  inset-inline-start: 8px;
+  inset-inline-end: 8px;
+  top: auto; bottom: 0;
+  width: auto; height: 2px;
+}
+.gf-topnav .gf-nav-badge { margin-inline-start: 2px; }
 .gf-nav {
   position: relative;
   display: flex; align-items: center; gap: 10px;
@@ -1281,24 +1307,13 @@ body {
 .gf-version-select span {
   flex: 0 0 auto;
 }
-.gf-version-select select {
-  min-width: 112px;
-  max-width: 170px;
+.gf-version-select .gf-select-wrap { flex: 1 1 auto; min-width: 112px; max-width: 170px; }
+.gf-version-select .gf-select {
   height: 24px;
-  border: 1px solid var(--indigo-line);
-  border-radius: 6px;
-  background: var(--indigo-side);
-  color: var(--ink);
-  color-scheme: var(--app-color-scheme);
-  font: inherit;
+  min-width: 112px;
+  font-size: 11.5px;
   font-weight: 600;
-  outline: none;
-  padding: 0 24px 0 8px;
-}
-.gf-version-select select:focus { border-color: var(--gf-line); }
-.gf-version-select select option {
-  background-color: var(--indigo-panel);
-  color: var(--ink);
+  padding: 0 7px 0 8px;
 }
 .gf-profile-library-muted { font-size: 12px; color: var(--ink-dim); }
 .gf-profile-library {
@@ -1567,8 +1582,6 @@ body {
   .gf-profile-library-toolbar-actions { align-items: flex-start; flex-wrap: wrap; justify-content: flex-start; }
   .gf-profile-library-sort { align-self: flex-start; }
 }
-.gf-side-foot { margin-top: auto; padding-top: 12px; display: flex; flex-direction: column; gap: 1px; }
-
 /* ── Top bar ─────────────────────────────────────────────────────── */
 .gf-top {
   display: flex; align-items: center;
@@ -1587,11 +1600,11 @@ body {
   container-type: inline-size;
   container-name: topbar;
 }
-/* Push everything after the modpack chip to the right edge. This keeps the
-   status + launch cluster right-aligned (replacing the old
-   justify-content:space-between, which would have stranded the status pill
-   in the middle once the cluster was flattened). */
-.gf-top-chip { margin-inline-end: auto; }
+/* Push everything after the nav to the right edge, so the top nav anchors
+   the start of the bar and the profile chip + status + launch cluster
+   right-align together. */
+.gf-top.has-topnav .gf-topnav { margin-inline-end: auto; }
+.gf-top:not(.has-topnav) .gf-top-chip { margin-inline-end: auto; }
 /* Launch controls grouped (help + vanilla + modded launch) so they wrap as
    one unit; flex-end keeps them right-aligned when they take a full row. */
 .gf-top-launch { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
@@ -1997,6 +2010,100 @@ body {
 .gf-sort-control select option {
   background-color: var(--indigo-panel);
   color: var(--ink);
+}
+
+/* ── Custom dropdown (Select component) ───────────────────────────────
+   Replaces native <select>, which the OS draws and which therefore can't
+   be bordered, themed, or animated. The trigger is a bordered button; the
+   panel is an absolutely-positioned listbox that fades + slides in. */
+.gf-select-wrap { position: relative; display: block; }
+.gf-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 9px 0 12px;
+  background: var(--indigo-side);
+  border: 1px solid var(--indigo-line);
+  border-radius: 7px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.gf-select:hover:not(:disabled) {
+  border-color: var(--indigo-line2);
+  background: var(--indigo-hover);
+}
+.gf-select:focus-visible,
+.gf-select.is-open {
+  outline: none;
+  border-color: var(--gf-line);
+  box-shadow: 0 0 0 3px var(--gf-tint);
+}
+.gf-select:disabled { opacity: 0.5; cursor: not-allowed; }
+.gf-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-select-value.is-placeholder { color: var(--ink-dim); }
+.gf-select-chevron {
+  flex-shrink: 0;
+  color: var(--ink-mute);
+  transition: transform 0.18s ease, color 0.15s ease;
+}
+.gf-select.is-open .gf-select-chevron { transform: rotate(180deg); color: var(--gf-text); }
+
+.gf-select-panel {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 5px);
+  inset-inline-start: 0;
+  min-width: 100%;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--indigo-panel);
+  border: 1px solid var(--indigo-line);
+  border-radius: 9px;
+  box-shadow: 0 12px 32px -10px var(--scrim-strong), 0 3px 10px -4px var(--scrim);
+  transform-origin: top;
+  animation: gf-select-in 0.15s ease;
+}
+@keyframes gf-select-in {
+  from { opacity: 0; transform: translateY(-5px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.gf-select-option {
+  display: flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ink);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.gf-select-option.is-active { background: var(--indigo-nav-hover); }
+.gf-select-option.is-selected { color: var(--gf-text); font-weight: 600; }
+.gf-select-option.is-disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Compact variant for inline toolbar filters (sort / tag selects). */
+.gf-sort-control .gf-select-wrap { display: inline-block; }
+.gf-sort-control .gf-select { height: 32px; min-width: 142px; font-size: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gf-select-panel { animation: none; }
+  .gf-select-chevron { transition: color 0.15s ease; }
 }
 
 /* ── Inputs ───────────────────────────────────────────────────────── */

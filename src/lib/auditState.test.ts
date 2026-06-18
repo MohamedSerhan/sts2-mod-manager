@@ -5,6 +5,7 @@ import {
   auditTargetForMod,
   auditTargetKey,
   isActionableUpdate,
+  isGithubBulkUpdate,
   isUpToDate,
   countGithubUpdates,
 } from './auditState';
@@ -125,8 +126,8 @@ describe('isUpToDate', () => {
 describe('countGithubUpdates', () => {
   it('counts only GitHub rows that have installable assets and a pending update', () => {
     const rows: ModAuditEntry[] = [
-      entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, latest_release_with_assets_tag: 'v2' }),
-      entry({ mod_name: 'B', github_repo: 'b/b', needs_update: true, latest_release_with_assets_tag: null }),
+      entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2' }),
+      entry({ mod_name: 'B', github_repo: 'b/b', needs_update: true, update_source: 'github', latest_release_with_assets_tag: null }),
       entry({ mod_name: 'C', github_repo: null, nexus_url: 'x', needs_update: true }),
       entry({ mod_name: 'D', github_repo: 'd/d', needs_update: false, latest_release_with_assets_tag: 'v1' }),
     ];
@@ -135,7 +136,7 @@ describe('countGithubUpdates', () => {
 
   it('does not count a GitHub row that lacks installable assets', () => {
     expect(countGithubUpdates([
-      entry({ github_repo: 'a/a', needs_update: true, latest_release_with_assets_tag: null }),
+      entry({ github_repo: 'a/a', needs_update: true, update_source: 'github', latest_release_with_assets_tag: null }),
     ])).toBe(0);
   });
 
@@ -143,6 +144,20 @@ describe('countGithubUpdates', () => {
     expect(countGithubUpdates([
       entry({ nexus_url: 'x', needs_update: true }),
     ])).toBe(0);
+  });
+
+  it('does not count a Nexus-sourced update just because the row also has GitHub metadata', () => {
+    const row = entry({
+      github_repo: 'BAKAOLC/STS2-RitsuLib',
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/137',
+      needs_update: true,
+      update_source: 'nexus',
+      latest_release_with_assets_tag: 'v0.4.23',
+      nexus_update_available: true,
+    });
+
+    expect(isGithubBulkUpdate(row)).toBe(false);
+    expect(countGithubUpdates([row])).toBe(0);
   });
 });
 
@@ -194,8 +209,8 @@ describe('snooze', () => {
 
   it('excludes snoozed rows from the GitHub update count', () => {
     const rows: ModAuditEntry[] = [
-      entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, latest_release_with_assets_tag: 'v2' }),
-      entry({ mod_name: 'B', github_repo: 'b/b', needs_update: true, latest_release_with_assets_tag: 'v2', snoozed: true }),
+      entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2' }),
+      entry({ mod_name: 'B', github_repo: 'b/b', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2', snoozed: true }),
     ];
     expect(countGithubUpdates(rows)).toBe(1);
   });
@@ -208,6 +223,7 @@ describe('snooze', () => {
     const row = entry({
       github_repo: 'a/b',
       needs_update: true,
+      update_source: 'github',
       latest_release_with_assets_tag: 'v3',
       snoozed: false,
     });

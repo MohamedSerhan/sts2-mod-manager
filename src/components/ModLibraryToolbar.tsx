@@ -15,7 +15,7 @@ import { ClipboardCheck, Download, RefreshCw } from 'lucide-react';
 
 import { Button } from './Button';
 import { AddModsMenu } from './AddModsMenu';
-import { countGithubUpdates } from '../lib/auditState';
+import { countGithubUpdates, isGithubBulkUpdate } from '../lib/auditState';
 import type { ModLibrary } from '../hooks/useModLibrary';
 
 export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
@@ -39,7 +39,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
         const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
         const ghUpdateNames = auditResults
           ? auditResults
-              .filter((r) => r.needs_update && !r.snoozed && r.github_repo && r.latest_release_with_assets_tag)
+              .filter(isGithubBulkUpdate)
               .map((r) => r.mod_name)
           : [];
 

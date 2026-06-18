@@ -242,6 +242,11 @@ function sourceHintForRow(
   return info?.source ?? info?.github_url ?? info?.nexus_url ?? null;
 }
 
+function cleanDisplayVersion(version: string): string {
+  const cleaned = version.trim().replace(/^v/i, '');
+  return cleaned || '?';
+}
+
 export function LibraryTable({
   modpackName,
   modpackLabel,
@@ -1187,7 +1192,12 @@ export function LibraryTable({
               versionOptions={versionRows.map((option) => ({
                 key: option.mod_version_id,
                 version: option.version,
-                label: `${option.version.replace(/^v/i, 'v')}${option.installed_enabled ? ` ${t('mods.versionActiveSuffix')}` : ` ${t('mods.versionStoredSuffix')}`}`,
+                label: t('mods.savedVersionOption', {
+                  version: cleanDisplayVersion(option.version),
+                  state: option.installed_enabled
+                    ? t('mods.versionActiveSuffix')
+                    : t('mods.versionStoredSuffix'),
+                }),
               }))}
               onSelectVersion={(selectedKey) => handleSelectRowVersion(row, selectedKey)}
               sourceEditorSlot={sourceEditorSlot}

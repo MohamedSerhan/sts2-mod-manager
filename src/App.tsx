@@ -216,9 +216,27 @@ function AppInner() {
       file_name: string;
       replaced: string | null;
       preserved_configs?: string[];
+      incompatible?: {
+        min_game_version: string;
+        user_game_version: string;
+      } | null;
     }>('mod-auto-installed', (event) => {
-      const { mod_name, file_name, replaced, preserved_configs } = event.payload;
-      if (replaced) {
+      const { mod_name, file_name, replaced, preserved_configs, incompatible } = event.payload;
+      if (incompatible) {
+        const args = {
+          mod: mod_name,
+          name: mod_name,
+          replaced: replaced ?? mod_name,
+          file: file_name,
+          version: incompatible.min_game_version,
+          gameVersion: incompatible.user_game_version || '?',
+        };
+        toast.error(
+          replaced
+            ? t('app.toast.replacedModUnsupported', args)
+            : t('app.toast.autoInstalledUnsupported', args),
+        );
+      } else if (replaced) {
         toast.success(t('app.toast.replacedMod', { replaced, mod: mod_name, file: file_name }));
       } else {
         toast.success(t('app.toast.autoInstalled', { name: mod_name, file: file_name }));

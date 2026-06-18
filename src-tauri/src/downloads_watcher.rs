@@ -29,12 +29,36 @@ pub struct ModAutoInstalled {
     /// was actually user-edited.
     #[serde(default)]
     pub preserved_configs: Vec<String>,
+    /// Present when the archive installed cleanly but declares a
+    /// `min_game_version` newer than the user's detected STS2 build.
+    /// The file remains available to manage, but the game will skip it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incompatible: Option<ModAutoInstalledIncompatible>,
+}
+
+#[derive(Clone, serde::Serialize, PartialEq, Eq, Debug)]
+pub struct ModAutoInstalledIncompatible {
+    pub min_game_version: String,
+    pub user_game_version: String,
 }
 
 #[derive(Clone, serde::Serialize)]
 pub struct ModAutoInstallFailed {
     pub file_name: String,
     pub error: String,
+}
+
+fn incompatible_install_payload(
+    info: &ModInfo,
+    user_game_version: Option<&str>,
+) -> Option<ModAutoInstalledIncompatible> {
+    if !crate::updater::install_is_incompatible(info, user_game_version) {
+        return None;
+    }
+    Some(ModAutoInstalledIncompatible {
+        min_game_version: info.min_game_version.clone().unwrap_or_default(),
+        user_game_version: user_game_version.unwrap_or_default().to_string(),
+    })
 }
 
 /// Determine which directory the watcher should monitor.
@@ -145,7 +169,14 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
 
                         recent.insert(path.clone(), Instant::now());
 
-                        let (mods_path, disabled_path, profiles_path, cache_path, config_path) = {
+                        let (
+                            mods_path,
+                            disabled_path,
+                            profiles_path,
+                            cache_path,
+                            config_path,
+                            game_version,
+                        ) = {
                             let s = match state.lock() {
                                 Ok(s) => s,
                                 Err(_) => continue,
@@ -158,7 +189,8 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                             let pp = s.profiles_path.clone();
                             let cache = s.cache_path.clone();
                             let cp = s.config_path.clone();
-                            (mp, dp, pp, cache, cp)
+                            let gv = s.game_version.clone();
+                            (mp, dp, pp, cache, cp, gv)
                         };
 
                         log::info!("Downloads watcher: detected mod zip {:?}", path);
@@ -335,6 +367,10 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
 
                             match cache_result {
                                 Ok(mod_info) => {
+                                    let incompatible = incompatible_install_payload(
+                                        &mod_info,
+                                        game_version.as_deref(),
+                                    );
                                     log::info!(
                                         "Downloads watcher: cached '{}' from {} as an available version for existing '{}'",
                                         mod_info.name,
@@ -351,6 +387,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                             file_name,
                                             replaced: Some(existing.name.clone()),
                                             preserved_configs: Vec::new(),
+                                            incompatible,
                                         },
                                     );
                                 }
@@ -576,6 +613,10 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 }
 
                                 let replaced_name = replaced_identity.map(|(name, _)| name);
+                                let incompatible = incompatible_install_payload(
+                                    &mod_info,
+                                    game_version.as_deref(),
+                                );
                                 log::info!(
                                     "Auto-installed mod '{}' from {} (replaced: {:?})",
                                     mod_info.name,
@@ -598,6 +639,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                         file_name,
                                         replaced: replaced_name,
                                         preserved_configs,
+                                        incompatible,
                                     },
                                 );
                             }
@@ -1397,6 +1439,75 @@ mod watcher_dir_tests {
         // nexus_download_dir is None by default in a fresh AppStateInner
         let result = resolve_watch_dir(&state);
         assert_eq!(result, dirs::download_dir());
+    }
+}
+
+#[cfg(test)]
+mod compatibility_payload_tests {
+    use super::*;
+
+    fn mod_info_with_min_game_version(min_game_version: Option<&str>) -> ModInfo {
+        ModInfo {
+            mod_version_id: None,
+            name: "Future Mod".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec![],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: Some("FutureMod".into()),
+            mod_id: Some("future_mod".into()),
+            github_url: None,
+            github_auto_detected: false,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: min_game_version.map(str::to_string),
+            author: None,
+            note: None,
+            custom_url: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            bundle_members: vec![],
+        }
+    }
+
+    #[test]
+    fn incompatible_install_payload_names_required_and_detected_game_versions() {
+        let info = mod_info_with_min_game_version(Some("0.110.0"));
+
+        let payload = incompatible_install_payload(&info, Some("0.105.0"))
+            .expect("newer min_game_version should be reported");
+
+        assert_eq!(
+            payload,
+            ModAutoInstalledIncompatible {
+                min_game_version: "0.110.0".into(),
+                user_game_version: "0.105.0".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn incompatible_install_payload_fails_open_when_versions_are_missing_or_compatible() {
+        assert!(incompatible_install_payload(
+            &mod_info_with_min_game_version(Some("0.100.0")),
+            Some("0.105.0"),
+        )
+        .is_none());
+        assert!(incompatible_install_payload(
+            &mod_info_with_min_game_version(Some("0.110.0")),
+            None,
+        )
+        .is_none());
+        assert!(incompatible_install_payload(
+            &mod_info_with_min_game_version(None),
+            Some("0.105.0")
+        )
+        .is_none());
     }
 }
 

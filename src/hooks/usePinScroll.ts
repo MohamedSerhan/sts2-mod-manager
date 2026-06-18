@@ -6,9 +6,9 @@ import { useCallback, useRef } from 'react';
  * Attach the returned `ref` to a component's root element, then call
  * `pinScroll()` *before* a mutation that re-renders / reflows the list
  * (a toggle, an add, an enable-all). It captures the nearest scrollable
- * ancestor's `scrollTop` and re-pins it for ~12 frames (~200ms) so neither
- * the synchronous re-render nor any focus-driven scroll the engine schedules
- * right after can yank the user to the top.
+ * ancestor's `scrollTop` and re-pins it for a short async window so neither
+ * the synchronous re-render nor the refresh/load cycle a row mutation may
+ * schedule can yank the user to the top.
  *
  * Inert under jsdom (scrollHeight/clientHeight are 0 there), so it doesn't
  * touch the test suite unless a test fakes a real scroll container. This is
@@ -36,9 +36,9 @@ export function usePinScroll<T extends HTMLElement = HTMLDivElement>(): {
     let frame = 0;
     const hold = () => {
       if (scroller.scrollTop !== top) scroller.scrollTop = top;
-      // ~12 frames (~200ms) covers the synchronous re-render plus any async
-      // focus-driven scroll the engine schedules just after.
-      if (++frame < 12) requestAnimationFrame(hold);
+      // ~120 frames (~2s) covers slower refresh/load cycles such as version
+      // switching while still ending quickly after the mutation settles.
+      if (++frame < 120) requestAnimationFrame(hold);
     };
     requestAnimationFrame(hold);
   }, []);

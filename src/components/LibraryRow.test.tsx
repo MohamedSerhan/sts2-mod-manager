@@ -93,7 +93,7 @@ describe('<LibraryRow>', () => {
     });
     expect(screen.getByText('Readable Name')).toBeInTheDocument();
     expect(screen.getByText('raw-manifest-name')).toBeInTheDocument();
-    expect(screen.getByText('v9.9.9')).toBeInTheDocument();
+    expect(screen.getByText('manifest v9.9.9')).toBeInTheDocument();
     expect(screen.getByText('readable-folder')).toBeInTheDocument();
   });
 
@@ -806,7 +806,7 @@ describe('<LibraryRow> modpackName=null mode', () => {
     renderRow({ modpackName: null, state: undefined, inPack: false, inPackIndex: -1 });
     // Mod is still identifiable by name + version.
     expect(screen.getByText('BaseLib')).toBeInTheDocument();
-    expect(screen.getByText('v1.2.3')).toBeInTheDocument();
+    expect(screen.getByText('manifest v1.2.3')).toBeInTheDocument();
     // The active/stored chip + per-row Store/Activate button are gone.
     expect(document.querySelector('.gf-profile-library-storage')).toBeNull();
     expect(screen.queryByRole('button', { name: /Store BaseLib/i })).toBeNull();
@@ -1190,7 +1190,7 @@ describe('<LibraryRow> Nexus-only update pill', () => {
       audit: undefined,
     });
 
-    expect(screen.getByText('v1.1.3')).toBeInTheDocument();
+    expect(screen.getByText('manifest v1.1.3')).toBeInTheDocument();
     expect(screen.queryByText('v1.0.0')).not.toBeInTheDocument();
   });
 });

@@ -178,7 +178,7 @@ describe('<ModpackDetail>', () => {
 
     render(<Wrap profile={profile} onBack={vi.fn()} />);
 
-    expect(await screen.findByText('v1.1.3')).toBeInTheDocument();
+    expect(await screen.findByText('manifest v1.1.3')).toBeInTheDocument();
     expect(screen.queryByText('v1.0.0')).not.toBeInTheDocument();
   });
 

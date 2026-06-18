@@ -554,7 +554,7 @@ export function LibraryRow({
             <span className="gf-meta-version" title={t('mods.versionLabel')}>
               {showInstalledSourceVersion
                 ? `${sourceVersionLabel} v${installedSourceVersion}`
-                : `v${manifestVersion}`}
+                : t('mods.manifestVersion', { version: manifestVersion })}
             </span>
             {showInstalledSourceVersion && (
               <span

@@ -1277,14 +1277,20 @@ body {
   flex: 0 0 auto;
 }
 .gf-version-select select {
-  min-width: 82px;
-  max-width: 150px;
+  min-width: 128px;
+  max-width: 210px;
   height: 22px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
   color: var(--ink);
+  color-scheme: dark;
   font-size: 11px;
+  padding: 0 4px;
+}
+.gf-version-select select option {
+  background: var(--panel);
+  color: var(--ink);
 }
 .gf-profile-library-muted { font-size: 12px; color: var(--ink-dim); }
 .gf-profile-library {

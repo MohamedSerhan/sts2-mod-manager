@@ -1415,7 +1415,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           {
             mod_version_id: 'watcher-143',
             name: 'Watcher',
-            version: '1.4.3',
+            version: 'v1.4.3',
             folder_name: 'Watcher',
             mod_id: 'Watcher',
             installed_enabled: true,
@@ -1424,8 +1424,17 @@ describe('<LibraryTable modpackName={null}>', () => {
           {
             mod_version_id: 'watcher-130',
             name: 'Watcher',
-            version: '1.3.0',
+            version: 'V1.3.0',
             folder_name: 'Watcher-old',
+            mod_id: 'Watcher',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+          {
+            mod_version_id: 'watcher-unknown',
+            name: 'Watcher',
+            version: '  ',
+            folder_name: 'Watcher-unknown',
             mod_id: 'Watcher',
             installed_enabled: false,
             profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
@@ -1433,12 +1442,16 @@ describe('<LibraryTable modpackName={null}>', () => {
         ],
       }));
       const modInfoByKey = new Map([
-        ['Watcher', mkModInfo({ name: 'Watcher', folder_name: 'Watcher', mod_id: 'Watcher', version: '1.4.3' })],
-        ['Watcher-old', mkModInfo({ name: 'Watcher', folder_name: 'Watcher-old', mod_id: 'Watcher', version: '1.3.0', enabled: false })],
+        ['Watcher', mkModInfo({ name: 'Watcher', folder_name: 'Watcher', mod_id: 'Watcher', version: 'v1.4.3' })],
+        ['Watcher-old', mkModInfo({ name: 'Watcher', folder_name: 'Watcher-old', mod_id: 'Watcher', version: 'V1.3.0', enabled: false })],
+        ['Watcher-unknown', mkModInfo({ name: 'Watcher', folder_name: 'Watcher-unknown', mod_id: 'Watcher', version: '  ', enabled: false })],
       ]);
       const { container } = render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
       await screen.findByText('Watcher');
       expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
+      expect(screen.getByRole('option', { name: /saved v1\.4\.3 \(active\)/i })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /saved v1\.3\.0 \(stored\)/i })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /saved v\? \(stored\)/i })).toBeInTheDocument();
       const user = userEvent.setup();
       await user.selectOptions(
         screen.getByRole('combobox', { name: /Choose version/i }),
@@ -1585,7 +1598,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       const { container } = render(<Wrap modpackName="Stable" />);
       await screen.findByText('Watcher');
       expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
-      expect(screen.getByTitle('Version')).toHaveTextContent('v1.4.3');
+      expect(screen.getByTitle('Version')).toHaveTextContent('manifest v1.4.3');
     });
 
     it('uses saved load order when duplicate included pack versions are collapsed', async () => {
@@ -1616,7 +1629,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       const { container } = render(<Wrap modpackName="Stable" packScoped />);
       await screen.findByText('Watcher');
       expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
-      expect(screen.getByTitle('Version')).toHaveTextContent('v1.3.0');
+      expect(screen.getByTitle('Version')).toHaveTextContent('manifest v1.3.0');
     });
 
     it('pack-scoped version selector replaces the profile entry and mirrors active-pack disk state', async () => {
@@ -2148,7 +2161,7 @@ describe('<LibraryTable modpackName={null}>', () => {
 
     render(<Wrap modpackName="MyPack" modInfoByKey={modInfoByKey} />);
 
-    expect(await screen.findByText('v1.1.3')).toBeInTheDocument();
+    expect(await screen.findByText('manifest v1.1.3')).toBeInTheDocument();
     expect(screen.queryByText('v1.0.0')).not.toBeInTheDocument();
   });
 

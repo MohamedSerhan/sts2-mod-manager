@@ -915,6 +915,42 @@ describe('<App>', () => {
     });
   });
 
+  it('mod-auto-installed event with incompatible game version shows warning instead of success', async () => {
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-auto-installed', {
+      mod_name: 'Stats the Spire',
+      file_name: 'stats.zip',
+      replaced: null,
+      incompatible: {
+        min_game_version: '0.110.0',
+        user_game_version: '0.105.0',
+      },
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Stats the Spire.*needs game v0\.110\.0.*you have v0\.105\.0/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/auto-installed from stats\.zip/i)).toBeNull();
+  });
+
+  it('mod-auto-installed event with incompatible cached update warns with a game-version fallback', async () => {
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await fireTauriEvent('mod-auto-installed', {
+      mod_name: 'Stats the Spire v0.16.2',
+      file_name: 'stats.zip',
+      replaced: 'Stats the Spire v0.105.0',
+      incompatible: {
+        min_game_version: '0.110.0',
+        user_game_version: '',
+      },
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Stats the Spire v0\.16\.2.*needs game v0\.110\.0.*you have v\?/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Saved "Stats the Spire v0\.16\.2" from stats\.zip in Versions/i)).toBeNull();
+  });
+
   it('modpack-mods-skipped event with multiple mods shows plural summary', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });

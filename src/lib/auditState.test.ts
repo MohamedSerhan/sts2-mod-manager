@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import type { ModAuditEntry } from '../types';
-import { isUpToDate, countGithubUpdates } from './auditState';
+import {
+  auditEntryKey,
+  auditTargetForMod,
+  auditTargetKey,
+  isActionableUpdate,
+  isUpToDate,
+  countGithubUpdates,
+} from './auditState';
 
 function entry(over: Partial<ModAuditEntry>): ModAuditEntry {
   return {
@@ -136,6 +143,38 @@ describe('countGithubUpdates', () => {
     expect(countGithubUpdates([
       entry({ nexus_url: 'x', needs_update: true }),
     ])).toBe(0);
+  });
+});
+
+describe('audit identity helpers', () => {
+  it('keys audit entries and refresh targets by the strongest available identity', () => {
+    expect(auditEntryKey(entry({ mod_version_id: 'artifact', folder_name: 'Folder', mod_name: 'Name' }))).toBe('artifact');
+    expect(auditEntryKey(entry({ folder_name: 'Folder', mod_name: 'Name' }))).toBe('Folder');
+    expect(auditTargetKey('Legacy')).toBe('Legacy');
+    expect(auditTargetKey({ mod_version_id: null, folder_name: null, mod_id: 'mod-id', name: 'Name' })).toBe('mod-id');
+    expect(auditTargetForMod({ mod_version_id: 'artifact', folder_name: 'Folder', mod_id: 'mod-id', name: 'Name' })).toEqual({
+      mod_version_id: 'artifact',
+      folder_name: 'Folder',
+      mod_id: 'mod-id',
+      name: 'Name',
+    });
+  });
+});
+
+describe('isActionableUpdate', () => {
+  it('requires a non-pinned, non-snoozed update with an actionable target', () => {
+    expect(isActionableUpdate(undefined)).toBe(false);
+    expect(isActionableUpdate(entry({ needs_update: true, pinned: true, latest_release_with_assets_tag: 'v2' }))).toBe(false);
+    expect(isActionableUpdate(entry({ needs_update: true, snoozed: true, latest_release_with_assets_tag: 'v2' }))).toBe(false);
+    expect(isActionableUpdate(entry({ needs_update: true, game_version_too_old: true, latest_release_with_assets_tag: 'v2' }))).toBe(false);
+    expect(isActionableUpdate(entry({ needs_update: true, latest_release_blocked_by_game_version: true, latest_release_with_assets_tag: 'v2' }))).toBe(false);
+    expect(isActionableUpdate(entry({ needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2' }))).toBe(true);
+    expect(isActionableUpdate(entry({ needs_update: true, update_source: 'github', latest_release_with_assets_tag: null }))).toBe(false);
+    expect(isActionableUpdate(entry({ needs_update: true, update_source: 'nexus', nexus_update_available: true }))).toBe(true);
+    expect(isActionableUpdate(entry({ needs_update: true, update_source: 'both', nexus_update_available: true }))).toBe(true);
+    expect(isActionableUpdate(entry({ needs_update: true, update_source: 'both', latest_release_with_assets_tag: 'v2' }))).toBe(true);
+    expect(isActionableUpdate(entry({ needs_update: true, update_source: null, latest_compatible_tag: 'v2' }))).toBe(true);
+    expect(isActionableUpdate(entry({ needs_update: false, latest_release_with_assets_tag: 'v2' }))).toBe(false);
   });
 });
 

@@ -1266,6 +1266,26 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.gf-version-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+  color: var(--ink-mute);
+}
+.gf-version-select span {
+  flex: 0 0 auto;
+}
+.gf-version-select select {
+  min-width: 82px;
+  max-width: 150px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 11px;
+}
 .gf-profile-library-muted { font-size: 12px; color: var(--ink-dim); }
 .gf-profile-library {
   display: flex;

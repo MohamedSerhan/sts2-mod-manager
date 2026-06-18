@@ -209,6 +209,80 @@ pub(crate) fn set_profile_mod_membership_from_paths(
     Ok(hide_app_created_by(profile))
 }
 
+pub(crate) fn select_profile_mod_version_from_paths(
+    profile_name: &str,
+    current_name: &str,
+    current_mod_version_id: Option<&str>,
+    current_folder_name: Option<&str>,
+    current_mod_id: Option<&str>,
+    selected_name: &str,
+    selected_mod_version_id: Option<&str>,
+    selected_folder_name: Option<&str>,
+    selected_mod_id: Option<&str>,
+    mods_path: &Path,
+    disabled_path: &Path,
+    profiles_path: &Path,
+    config_path: &Path,
+) -> Result<super::Profile> {
+    if profile_is_edit_locked(profile_name, profiles_path, config_path) {
+        return Err(AppError::Other(format!(
+            "Cannot edit subscribed profile '{}'. Duplicate it first to make a local copy.",
+            profile_name
+        )));
+    }
+
+    let mut profile = load_profile(profile_name, profiles_path)?;
+    let mut installed_mods =
+        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
+
+    let selected = installed_mods
+        .iter()
+        .find(|m| {
+            installed_mod_matches_target(
+                m,
+                selected_name,
+                selected_mod_version_id,
+                selected_folder_name,
+                selected_mod_id,
+            )
+        })
+        .ok_or_else(|| {
+            AppError::ModNotFound(format!(
+                "Installed mod '{}' was not found; refresh the mod list and try again.",
+                selected_name
+            ))
+        })?;
+
+    let index = profile
+        .mods
+        .iter()
+        .position(|pm| {
+            profile_mod_matches_target(
+                pm,
+                current_name,
+                current_mod_version_id,
+                current_folder_name,
+                current_mod_id,
+            )
+        })
+        .ok_or_else(|| {
+            AppError::ModNotFound(format!(
+                "Profile '{}' does not contain '{}'. Refresh the modpack and try again.",
+                profile_name, current_name
+            ))
+        })?;
+
+    let enabled = profile.mods[index].enabled;
+    let mut next_entry = profile_mod_from_installed(selected);
+    next_entry.enabled = enabled;
+    profile.mods[index] = next_entry;
+    profile.updated_at = chrono::Utc::now();
+    save_profile(&profile, profiles_path)?;
+    Ok(hide_app_created_by(profile))
+}
+
 /// Result of bulk enable/disable of a profile's mods.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetProfileModsEnabledResult {

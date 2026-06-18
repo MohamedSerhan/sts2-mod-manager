@@ -43,6 +43,8 @@ import { usePinScroll } from '../hooks/usePinScroll';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
+import { isActionableUpdate } from '../lib/auditState';
+import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
 import {
   getProfileMemberships,
   setProfileLoadOrder,
@@ -61,6 +63,8 @@ const DEFAULT_PAGE_SIZE = 100;
 export const NO_TAGS_FILTER_VALUE = '__no_tags__';
 
 export type LibrarySortMode =
+  | 'loadOrder'
+  | 'updatesFirst'
   | 'nameAsc'
   | 'nameDesc'
   | 'inPackFirst'
@@ -173,6 +177,7 @@ export interface LibraryTableProps {
   onFindGithubFromNexus?: (mod: ModInfo) => void;
   onOpenExternalUrl?: (url: string, mod: ModInfo) => void;
   onAutoDetectSource?: (mod: ModInfo) => void;
+  onSelectProfileVersion?: (current: ProfileMembershipMod, selected: ProfileMembershipMod) => Promise<void> | void;
   /** Render-prop for the inline source editor: when a row's key
    *  matches, the parent returns the editor JSX to slot inside the
    *  row. Returns null otherwise. */
@@ -273,6 +278,7 @@ export function LibraryTable({
   onFindGithubFromNexus,
   onOpenExternalUrl,
   onAutoDetectSource,
+  onSelectProfileVersion,
   renderSourceEditor,
 }: LibraryTableProps) {
   const { t } = useTranslation();
@@ -286,7 +292,7 @@ export function LibraryTable({
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState(initialSearch);
   const [sort, setSort] = useState<LibrarySortMode>(
-    initialSort ?? (modpackName ? 'inPackFirst' : 'nameAsc'),
+    initialSort ?? (packScoped ? 'loadOrder' : modpackName ? 'inPackFirst' : 'nameAsc'),
   );
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
@@ -434,6 +440,7 @@ export function LibraryTable({
         files: [],
         enabled: row.installed_enabled,
         bundle_url: null,
+        mod_version_id: row.mod_version_id ?? null,
         folder_name: row.folder_name,
         mod_id: row.mod_id,
       })),
@@ -451,7 +458,22 @@ export function LibraryTable({
     const preFiltered = priorityTag === NO_TAGS_FILTER_VALUE
       ? externallyFiltered.filter((row) => !rowHasAnyTags(row, modInfoByKey))
       : externallyFiltered;
-    const rows = query
+    const loadOrderIndex = (row: ProfileMembershipMod) => {
+      const rowKey = membershipRowKey(row);
+      const idx = loadOrderDraft.findIndex((pm) =>
+        (pm.mod_version_id ?? pm.folder_name ?? pm.mod_id ?? pm.name) === rowKey
+        || (!!row.mod_version_id && pm.mod_version_id === row.mod_version_id)
+        || (!!row.folder_name && pm.folder_name === row.folder_name)
+        || (!!row.mod_id && pm.mod_id === row.mod_id)
+        || pm.name === row.name
+      );
+      return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+    };
+    const compareLoadOrder = (a: ProfileMembershipMod, b: ProfileMembershipMod) =>
+      loadOrderIndex(a) - loadOrderIndex(b) || compareMembershipDisplayName(a, b);
+    const auditForRow = (row: ProfileMembershipMod) =>
+      auditByKey?.get(membershipRowKey(row)) ?? auditByKey?.get(row.folder_name ?? '') ?? auditByKey?.get(row.name);
+    const searchedRows = query
       ? preFiltered.filter((row) => {
           // Tags are part of the haystack so "anime" finds every mod the
           // user tagged that way, not just name matches (Solo, 2026-06-10).
@@ -470,6 +492,32 @@ export function LibraryTable({
           return haystack.includes(query);
         })
       : preFiltered;
+    const groups = new Map<string, ProfileMembershipMod[]>();
+    for (const row of searchedRows) {
+      const info =
+        modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+      const groupKey = logicalModKey(row, info);
+      const existing = groups.get(groupKey);
+      if (existing) existing.push(row);
+      else groups.set(groupKey, [row]);
+    }
+    const rows = [...groups.values()].flatMap((group) => {
+      const versionCount = new Set(group.map((row) => modVersionSortValue(row.version))).size;
+      const canSelectVersions = group.every((row) => !!row.mod_version_id);
+      if (group.length === 1 || versionCount < 2 || !canSelectVersions) return group;
+      return [[...group].sort((a, b) => {
+        if (packScoped) return compareLoadOrder(a, b);
+        if (a.installed_enabled !== b.installed_enabled) {
+          return Number(b.installed_enabled) - Number(a.installed_enabled);
+        }
+        const byVersion = modVersionSortValue(b.version).localeCompare(
+          modVersionSortValue(a.version),
+          undefined,
+          { sensitivity: 'base', numeric: true },
+        );
+        return byVersion || compareMembershipDisplayName(a, b);
+      })[0]];
+    });
     const sorted = [...rows];
     sorted.sort((a, b) => {
       const aIn = inPackRowKeys.has(membershipRowKey(a));
@@ -485,13 +533,22 @@ export function LibraryTable({
         const at = firstTagKey(a, modInfoByKey);
         const bt = firstTagKey(b, modInfoByKey);
         if (at !== bt) {
+          /* v8 ignore start -- sort comparator call direction is engine-dependent; ordering behavior is tested. */
           if (at === null) return 1;   // untagged after tagged
           if (bt === null) return -1;
           const byTag = at.localeCompare(bt, undefined, { sensitivity: 'base', numeric: true });
           if (byTag !== 0) return byTag;
+          /* v8 ignore stop */
         }
-        return compareMembershipDisplayName(a, b);
+        return packScoped ? compareLoadOrder(a, b) : compareMembershipDisplayName(a, b);
       }
+      if (sort === 'updatesFirst') {
+        const au = isActionableUpdate(auditForRow(a));
+        const bu = isActionableUpdate(auditForRow(b));
+        if (au !== bu) return au ? -1 : 1;
+        return packScoped ? compareLoadOrder(a, b) : compareMembershipDisplayName(a, b);
+      }
+      if (sort === 'loadOrder') return compareLoadOrder(a, b);
       if (sort === 'nameDesc') return compareMembershipDisplayName(b, a);
       if (sort === 'inPackFirst') {
         if (aIn !== bIn) return Number(bIn) - Number(aIn);
@@ -512,9 +569,79 @@ export function LibraryTable({
       return compareMembershipDisplayName(a, b);
     });
     return sorted;
-  }, [effectiveGrid, filter, sort, priorityTag, inPackRowKeys, filterRow, modInfoByKey]);
+  }, [effectiveGrid, filter, sort, priorityTag, inPackRowKeys, filterRow, modInfoByKey, loadOrderDraft, auditByKey, packScoped]);
 
   const visibleItems = filteredRows.slice(0, visibleLimit);
+
+  const versionOptionsByKey = useMemo(() => {
+    const map = new Map<string, ProfileMembershipMod[]>();
+    if (!effectiveGrid) return map;
+    const groups = new Map<string, ProfileMembershipMod[]>();
+    for (const row of effectiveGrid.mods) {
+      const info =
+        modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+      const groupKey = logicalModKey(row, info);
+      const existing = groups.get(groupKey);
+      if (existing) existing.push(row);
+      else groups.set(groupKey, [row]);
+    }
+    for (const group of groups.values()) {
+      const versionCount = new Set(group.map((row) => modVersionSortValue(row.version))).size;
+      const canSelectVersions = group.every((row) => !!row.mod_version_id);
+      if (group.length < 2 || versionCount < 2 || !canSelectVersions) continue;
+      const sortedGroup = [...group].sort((a, b) => {
+        const byVersion = modVersionSortValue(b.version).localeCompare(
+          modVersionSortValue(a.version),
+          undefined,
+          { sensitivity: 'base', numeric: true },
+        );
+        return byVersion || compareMembershipDisplayName(a, b);
+      });
+      for (const row of group) map.set(membershipRowKey(row), sortedGroup);
+    }
+    return map;
+  }, [effectiveGrid, modInfoByKey]);
+
+  async function handleSelectRowVersion(row: ProfileMembershipMod, selectedKey: string) {
+    /* v8 ignore next -- rendered selects only emit real option changes. */
+    if (!effectiveGrid || selectedKey === membershipRowKey(row)) return;
+    const options = versionOptionsByKey.get(membershipRowKey(row)) ?? [];
+    const selected = options.find((option) => membershipRowKey(option) === selectedKey);
+    /* v8 ignore next -- selectedKey comes from the rendered option list. */
+    if (!selected) return;
+    const packActive =
+      modpackName != null && (modpackName === activeProfileId || (!activeProfileId && modpackName === activeProfile));
+    try {
+      pinScroll();
+      if (packScoped && modpackName) {
+        await onSelectProfileVersion?.(row, selected);
+        if (packActive) {
+          if (!selected.installed_enabled) {
+            await toggleMod(selected.name, selected.folder_name ?? null, true);
+          }
+          if (row.installed_enabled) {
+            await toggleMod(row.name, row.folder_name ?? null, false);
+          }
+        }
+        await onMembershipChanged?.();
+        await onLoadOrderChanged?.();
+      } else {
+        if (!selected.installed_enabled) {
+          await toggleMod(selected.name, selected.folder_name ?? null, true);
+        }
+        for (const option of options) {
+          if (membershipRowKey(option) !== selectedKey && option.installed_enabled) {
+            await toggleMod(option.name, option.folder_name ?? null, false);
+          }
+        }
+      }
+      await refreshAll();
+      await load();
+      toastCtx.success(t('profiles.library.versionSelectToast', { name: selected.display_name?.trim() || selected.name, version: selected.version }));
+    } catch (e) {
+      toastCtx.error(t('profiles.library.versionSelectFailed', { error: e instanceof Error ? e.message : String(e) }));
+    }
+  }
 
   function patchRowMembership(
     rowKey: string,
@@ -796,11 +923,22 @@ export function LibraryTable({
         {packScoped && (
           <div className="gf-profile-library-toolbar-actions">
             <ModViewToggle density={density} onChange={setDensity} />
+            <label className="gf-sort-control gf-profile-library-sort">
+              <span>{t('profiles.library.sort.label')}</span>
+              <select
+                value={sort}
+                onChange={(event) =>
+                  setSort(event.target.value as LibrarySortMode)
+                }
+                aria-label={t('profiles.library.sort.label')}
+              >
+                <option value="loadOrder">{t('profiles.library.sort.loadOrder')}</option>
+                <option value="updatesFirst">{t('profiles.library.sort.updatesFirst')}</option>
+              </select>
+            </label>
             {toolbarActions}
           </div>
         )}
-        {/* The sort control is hidden in the dedicated modpack view: the list
-            always shows load order there (sorting would fight it). */}
         {!packScoped && (
           <div className="gf-profile-library-toolbar-actions">
             <ModViewToggle density={density} onChange={setDensity} />
@@ -822,6 +960,7 @@ export function LibraryTable({
                     {t('profiles.library.sort.inPackFirst')}
                   </option>
                 )}
+                <option value="updatesFirst">{t('profiles.library.sort.updatesFirst')}</option>
                 <option value="nameAsc">{t('profiles.library.sort.nameAsc')}</option>
                 <option value="nameDesc">{t('profiles.library.sort.nameDesc')}</option>
                 <option value="activeFirst">
@@ -882,6 +1021,24 @@ export function LibraryTable({
             = modInfo && renderSourceEditor
               ? renderSourceEditor(modInfo)
               : undefined;
+          const versionRows = versionOptionsByKey.get(rowKey) ?? [];
+          const rowActionHandlers = modInfo
+            ? {
+                onUpdate: onUpdate ? () => onUpdate(modInfo) : undefined,
+                onTogglePin: onTogglePin ? () => onTogglePin(modInfo) : undefined,
+                onSnooze: onSnooze ? () => onSnooze(modInfo, audit) : undefined,
+                onUnsnooze: onUnsnooze ? () => onUnsnooze(modInfo) : undefined,
+                onRepair: onRepair ? () => onRepair(modInfo) : undefined,
+                onRollback: onRollback ? () => onRollback(modInfo) : undefined,
+                onDelete: onDelete ? () => onDelete(modInfo) : undefined,
+                onCopyVersion: onCopyVersion ? () => onCopyVersion(modInfo) : undefined,
+                onOpenThisModFolder: onOpenThisModFolder ? () => onOpenThisModFolder(modInfo) : undefined,
+                onEditSources: onEditSources ? () => onEditSources(modInfo) : undefined,
+                onFindGithubFromNexus: onFindGithubFromNexus ? () => onFindGithubFromNexus(modInfo) : undefined,
+                onOpenExternalUrl: onOpenExternalUrl ? (url: string) => onOpenExternalUrl(url, modInfo) : undefined,
+                onAutoDetectSource: onAutoDetectSource ? () => onAutoDetectSource(modInfo) : undefined,
+              }
+            : {};
           return (
             <LibraryRow
               key={rowKey}
@@ -912,6 +1069,7 @@ export function LibraryTable({
                 // Library view where reorder is off — falls through to the
                 // document-level handler in App.tsx so the file-install
                 // dropzone overlay shows.
+                /* v8 ignore next -- drag guard permutations depend on browser DnD event shape; reorder behavior is tested. */
                 if (!enableReorder || !inPack || loadOrderSaving || index < 0) return;
                 if (!event.dataTransfer.types.includes('text/plain')) return;
                 event.preventDefault();
@@ -926,6 +1084,7 @@ export function LibraryTable({
                 // case. Returning BEFORE preventDefault lets file drops
                 // (the user dragging a mod archive from File Explorer)
                 // bubble up to App.tsx's installModFromFile handler.
+                /* v8 ignore next -- drag guard permutations depend on browser DnD event shape; reorder behavior is tested. */
                 if (!enableReorder || !inPack || loadOrderSaving) return;
                 if (!event.dataTransfer.types.includes('text/plain')) return;
                 event.preventDefault();
@@ -971,19 +1130,13 @@ export function LibraryTable({
               isRollingBack={!!modInfo && rollingBackKey === rowKey}
               anyUpdating={anyUpdating}
               anyRecoveryInFlight={anyRecoveryInFlight}
-              onUpdate={modInfo && onUpdate ? () => onUpdate(modInfo) : undefined}
-              onTogglePin={modInfo && onTogglePin ? () => onTogglePin(modInfo) : undefined}
-              onSnooze={modInfo && onSnooze ? () => onSnooze(modInfo, audit) : undefined}
-              onUnsnooze={modInfo && onUnsnooze ? () => onUnsnooze(modInfo) : undefined}
-              onRepair={modInfo && onRepair ? () => onRepair(modInfo) : undefined}
-              onRollback={modInfo && onRollback ? () => onRollback(modInfo) : undefined}
-              onDelete={modInfo && onDelete ? () => onDelete(modInfo) : undefined}
-              onCopyVersion={modInfo && onCopyVersion ? () => onCopyVersion(modInfo) : undefined}
-              onOpenThisModFolder={modInfo && onOpenThisModFolder ? () => onOpenThisModFolder(modInfo) : undefined}
-              onEditSources={modInfo && onEditSources ? () => onEditSources(modInfo) : undefined}
-              onFindGithubFromNexus={modInfo && onFindGithubFromNexus ? () => onFindGithubFromNexus(modInfo) : undefined}
-              onOpenExternalUrl={modInfo && onOpenExternalUrl ? (url: string) => onOpenExternalUrl(url, modInfo) : undefined}
-              onAutoDetectSource={modInfo && onAutoDetectSource ? () => onAutoDetectSource(modInfo) : undefined}
+              {...rowActionHandlers}
+              versionOptions={versionRows.map((option) => ({
+                key: membershipRowKey(option),
+                version: option.version,
+                label: `${option.version.replace(/^v/i, 'v')}${option.installed_enabled ? ` ${t('mods.versionActiveSuffix')}` : ` ${t('mods.versionStoredSuffix')}`}`,
+              }))}
+              onSelectVersion={(selectedKey) => handleSelectRowVersion(row, selectedKey)}
               sourceEditorSlot={sourceEditorSlot}
             />
           );

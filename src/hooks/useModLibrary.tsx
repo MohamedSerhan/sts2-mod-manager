@@ -31,6 +31,7 @@ import { SourceEditor } from '../components/SourceEditor';
 import { AutoDetectModal } from '../components/AutoDetectModal';
 import { nexusFilesUrl } from '../lib/nexusUrl';
 import { loadAutoAddInstallsToModpack } from '../lib/installPolicy';
+import { auditEntryKey, auditTargetForMod } from '../lib/auditState';
 import type { ModAuditEntry, ModInfo } from '../types';
 import {
   deleteMod,
@@ -155,8 +156,9 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     const m = new Map<string, NonNullable<typeof auditResults>[number]>();
     if (auditResults) {
       for (const a of auditResults) {
-        const key = a.folder_name ?? a.mod_name;
-        m.set(key, a);
+        m.set(auditEntryKey(a), a);
+        if (a.folder_name) m.set(a.folder_name, a);
+        m.set(a.mod_name, a);
       }
     }
     return m;
@@ -325,8 +327,11 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       await syncTargetPackUpdatedMods([info]);
       toast.success(t('mods.toast.updated', { name: mod.name, version: info.version }));
       await refreshAll();
-      const names = info.name !== mod.name ? [mod.name, info.name] : [mod.name];
-      await refreshAuditEntries(names);
+      await refreshAuditEntries(
+        info.name !== mod.name
+          ? [auditTargetForMod(mod), auditTargetForMod(info)]
+          : [auditTargetForMod(info)],
+      );
     } catch (e) {
       const updateErrMsg = e instanceof Error ? e.message : String(e);
       toast.error(t('mods.toast.updateFailed', { name: mod.name, error: updateErrMsg }));
@@ -424,8 +429,11 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       await syncTargetPackUpdatedMods([info]);
       toast.success(t('mods.toast.rolledBack', { name: info.name, version: info.version }));
       await refreshAll();
-      const names = info.name !== mod.name ? [mod.name, info.name] : [mod.name];
-      await refreshAuditEntries(names);
+      await refreshAuditEntries(
+        info.name !== mod.name
+          ? [auditTargetForMod(mod), auditTargetForMod(info)]
+          : [auditTargetForMod(info)],
+      );
     } catch (e) {
       toast.error(t('mods.toast.rollbackFailed', { name: mod.name, error: e instanceof Error ? e.message : String(e) }));
     } finally {

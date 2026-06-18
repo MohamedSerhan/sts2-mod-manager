@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, NexusModInfo, BrowserPage } from '../types';
+import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -231,6 +231,24 @@ export async function setProfileModMembership(
   });
 }
 
+export async function selectProfileModVersion(
+  profileId: string,
+  current: ModAuditTarget,
+  selected: ModAuditTarget,
+): Promise<Profile> {
+  return invoke('select_profile_mod_version', {
+    profileId,
+    currentName: current.name,
+    currentModVersionId: current.mod_version_id ?? null,
+    currentFolderName: current.folder_name ?? null,
+    currentModId: current.mod_id ?? null,
+    selectedName: selected.name,
+    selectedModVersionId: selected.mod_version_id ?? null,
+    selectedFolderName: selected.folder_name ?? null,
+    selectedModId: selected.mod_id ?? null,
+  });
+}
+
 export async function setProfileLoadOrder(
   profileId: string,
   orderedMods: ProfileModOrderKey[],
@@ -329,7 +347,7 @@ export async function updateAllMods(profileId: string | null = null): Promise<Mo
  *   skips per-mod GitHub/Nexus calls for everything else. Pass undefined
  *   (or omit) for a full audit.
  */
-export async function auditModVersions(only?: string[]): Promise<ModAuditEntry[]> {
+export async function auditModVersions(only?: Array<string | ModAuditTarget>): Promise<ModAuditEntry[]> {
   return invoke('audit_mod_versions', only ? { only } : {});
 }
 

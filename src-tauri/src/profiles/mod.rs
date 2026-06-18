@@ -276,6 +276,40 @@ pub fn set_profile_mod_membership(
     .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn select_profile_mod_version(
+    profile_id: String,
+    current_name: String,
+    current_mod_version_id: Option<String>,
+    current_folder_name: Option<String>,
+    current_mod_id: Option<String>,
+    selected_name: String,
+    selected_mod_version_id: Option<String>,
+    selected_folder_name: Option<String>,
+    selected_mod_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Profile, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    membership::select_profile_mod_version_from_paths(
+        &profile_id,
+        &current_name,
+        current_mod_version_id.as_deref(),
+        current_folder_name.as_deref(),
+        current_mod_id.as_deref(),
+        &selected_name,
+        selected_mod_version_id.as_deref(),
+        selected_folder_name.as_deref(),
+        selected_mod_id.as_deref(),
+        mods_path,
+        disabled_path,
+        &s.profiles_path,
+        &s.config_path,
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// Enable or disable every mod in a profile at once (the modpack view's
 /// "Enable all" / "Disable all"). Resolves each manifest entry to its real
 /// on-disk mod, so it works even when the manifest folder name has drifted.

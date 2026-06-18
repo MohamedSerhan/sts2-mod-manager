@@ -96,6 +96,38 @@ pub fn nexus_file_version(archive_path: &Path) -> Option<String> {
         .to_string_lossy()
         .to_string();
     let stem = strip_browser_copy_suffix(&stem); // drop a trailing " (N)"
+    let all_segs: Vec<&str> = stem.split('-').filter(|s| !s.is_empty()).collect();
+    if all_segs
+        .last()
+        .is_some_and(|s| s.chars().all(|c| c.is_ascii_digit()))
+    {
+        for idx in 1..all_segs.len().saturating_sub(1) {
+            let first = all_segs[idx];
+            let without_v = first.trim_start_matches(|c| c == 'v' || c == 'V');
+            if without_v.len() == first.len() || without_v.is_empty() {
+                continue;
+            }
+            if !without_v.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            if !all_segs[idx - 1].chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            if !all_segs[idx + 1..all_segs.len() - 1]
+                .iter()
+                .all(|s| s.chars().all(|c| c.is_ascii_digit()))
+            {
+                continue;
+            }
+            let mut parts = vec![without_v.to_string()];
+            parts.extend(
+                all_segs[idx + 1..all_segs.len() - 1]
+                    .iter()
+                    .map(|s| s.to_string()),
+            );
+            return Some(parts.join("."));
+        }
+    }
     let name = strip_nexus_suffix(&stem);
     if name.len() >= stem.len() {
         return None; // nothing stripped → no Nexus suffix present
@@ -275,6 +307,16 @@ mod tests {
         assert_eq!(
             nexus_file_version(std::path::Path::new(
                 "RelicsReminder-284-1-1-0-1775500710 (2).zip"
+            )),
+            Some("1.1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn nexus_file_version_handles_v_prefixed_dash_version() {
+        assert_eq!(
+            nexus_file_version(std::path::Path::new(
+                "SlayTheStats v1.1.0-349-v1-1-0-1780935880.zip"
             )),
             Some("1.1.0".to_string())
         );

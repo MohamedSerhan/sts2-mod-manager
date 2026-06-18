@@ -37,6 +37,12 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.8.1] - 2026-06-18
+
+### Fixed
+
+- Fixed an issue where bundle updates could leave duplicate active mod IDs that stopped the game from starting.
+
 ## [1.8.0] - 2026-06-18
 
 ### Added

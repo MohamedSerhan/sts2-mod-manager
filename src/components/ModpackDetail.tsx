@@ -67,7 +67,7 @@ import { useModLibrary } from '../hooks/useModLibrary';
 import { usePinScroll } from '../hooks/usePinScroll';
 import { deleteMod, selectProfileModVersion, setProfileModMembership, setProfileModsEnabled, toggleMod } from '../hooks/useTauri';
 import { identitiesMatch } from '../lib/modIdentity';
-import { auditEntryKey, isActionableUpdate } from '../lib/auditState';
+import { auditEntryKey, isGithubBulkUpdate } from '../lib/auditState';
 import type { ModInfo, Profile, ProfileMembershipMod, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
@@ -271,9 +271,7 @@ export function ModpackDetail({
       );
       return (auditResults ?? [])
         .filter((r) =>
-          isActionableUpdate(r)
-          && r.github_repo
-          && r.latest_release_with_assets_tag
+          isGithubBulkUpdate(r)
           && (packKeys.has(auditEntryKey(r)) || packKeys.has(r.mod_name))
         )
         .map((r) => r.mod_name);

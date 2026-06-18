@@ -34,6 +34,10 @@ fn is_version_tag(tag: &str) -> bool {
     parse_version(tag).is_some()
 }
 
+fn is_walk_back_release_candidate(release: &crate::download::GitHubRelease) -> bool {
+    is_version_tag(&release.tag_name) && release.assets.iter().any(|a| is_mod_asset(&a.name))
+}
+
 /// Compare two version strings. Returns:
 /// - Some(Ordering::Less) if current < latest (update available)
 /// - Some(Ordering::Equal) if they match
@@ -1458,6 +1462,15 @@ pub async fn pick_compatible_release(
     let mut last_required: Option<String> = None;
     for release in releases.iter().take(MAX_RELEASES_TO_WALK) {
         let tag = release.tag_name.as_str();
+        if !is_walk_back_release_candidate(release) {
+            log::info!(
+                "Walk-back: skipping {}/{}@{} (not a versioned release with installable mod assets)",
+                owner,
+                repo,
+                tag
+            );
+            continue;
+        }
         let zip_path = match crate::download::download_release_zip_to_cache(
             owner,
             repo,
@@ -2667,6 +2680,27 @@ mod version_helper_tests {
     }
 
     // ── Bundle / Nexus folder-first lookup tests ──────────────────────────
+
+    #[test]
+    fn walk_back_candidate_gate_rejects_dev_builds_and_empty_releases() {
+        let releases = vec![
+            github_release("dev-build", &["RitsuLib.zip"]),
+            github_release("v0.4.25", &[]),
+            github_release("v0.4.24", &["RitsuLib.github.zip"]),
+        ];
+
+        let candidates: Vec<_> = releases
+            .iter()
+            .filter(|release| is_walk_back_release_candidate(release))
+            .map(|release| release.tag_name.as_str())
+            .collect();
+
+        assert_eq!(
+            candidates,
+            vec!["v0.4.24"],
+            "bulk update walk-back must not install dev-build or empty releases"
+        );
+    }
 
     /// A bundle's `ModInfo` has no display name, no mod_id, and a
     /// `folder_name` set to the container folder. Its Nexus source MUST be

@@ -36,6 +36,14 @@ export function isActionableUpdate(entry: ModAuditEntry | undefined): boolean {
   return Boolean(entry.nexus_update_available || entry.latest_compatible_tag || entry.latest_release_with_assets_tag);
 }
 
+export function isGithubBulkUpdate(entry: ModAuditEntry | undefined): boolean {
+  if (!entry) return false;
+  if (entry.pinned || entry.snoozed || !entry.needs_update) return false;
+  if (entry.game_version_too_old || entry.latest_release_blocked_by_game_version) return false;
+  if (entry.update_source !== 'github' && entry.update_source !== 'both') return false;
+  return Boolean(entry.github_repo && (entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag));
+}
+
 export function isUpToDate(entry: ModAuditEntry): boolean {
   const hasSource = Boolean(entry.github_repo || entry.nexus_url);
   if (!hasSource) return false;
@@ -58,7 +66,5 @@ export function isUpToDate(entry: ModAuditEntry): boolean {
 }
 
 export function countGithubUpdates(entries: ModAuditEntry[]): number {
-  return entries.filter(
-    (e) => e.needs_update && !e.snoozed && e.github_repo && e.latest_release_with_assets_tag,
-  ).length;
+  return entries.filter(isGithubBulkUpdate).length;
 }

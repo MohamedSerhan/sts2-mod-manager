@@ -360,6 +360,7 @@ describe('<ModsView>', () => {
         pinned: false,
         nexus_update_available: false,
         github_repo: 'foo/bar',
+        update_source: 'github',
       },
     ]);
     const user = userEvent.setup();
@@ -2923,6 +2924,7 @@ describe('<ModsView>', () => {
       github_auto_detected: false,
       pinned: false,
       nexus_update_available: false,
+      update_source: 'github',
       game_version_too_old: true,
       latest_release_blocked_by_game_version: false,
     }]);
@@ -2930,12 +2932,12 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('GameOld')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    // Even with needs_update=true, game_version_too_old blocks the inline
-    // "Update available" pill on the mod row, but the toolbar bulk-update
-    // button still counts it as a pending update.
+    // Even with needs_update=true, game_version_too_old blocks both the inline
+    // "Update available" pill and the toolbar bulk-update button.
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^Update 1 mod$/ })).toBeInTheDocument();
+      expect(screen.getByText('Up to date')).toBeInTheDocument();
     });
+    expect(screen.queryByRole('button', { name: /^Update 1 mod$/ })).toBeNull();
     expect(screen.queryByText(/Update available →/)).toBeNull();
   });
 

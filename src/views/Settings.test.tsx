@@ -11,6 +11,10 @@ import { AllProviders } from '../__test__/providers';
 import { chooseOption } from '../__test__/selectHelpers';
 import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from '../__test__/setup';
 import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from '../lib/installPolicy';
+import {
+  NAVIGATION_LAYOUT_CHANGE_EVENT,
+  NAVIGATION_LAYOUT_STORAGE_KEY,
+} from '../display/navigationLayout';
 
 function Wrap() {
   return (
@@ -55,6 +59,28 @@ describe('<SettingsView>', () => {
     render(<Wrap />);
 
     expect(await screen.findByRole('combobox', { name: 'Language' })).toHaveTextContent('Auto');
+  });
+
+  it('saves the navigation layout preference from the General display controls', async () => {
+    const user = userEvent.setup();
+    const onLayoutChange = vi.fn();
+    window.addEventListener(NAVIGATION_LAYOUT_CHANGE_EVENT, onLayoutChange);
+
+    render(<Wrap />);
+
+    const select = await screen.findByRole('combobox', { name: /Navigation layout/i });
+    expect(select).toHaveTextContent('Top bar');
+
+    await chooseOption(user, /Navigation layout/i, /Left sidebar/i);
+
+    await waitFor(() => {
+      expect(localStorage.getItem(NAVIGATION_LAYOUT_STORAGE_KEY)).toBe('sidebar');
+    });
+    expect(onLayoutChange).toHaveBeenCalledWith(expect.objectContaining({
+      detail: { value: 'sidebar' },
+    }));
+
+    window.removeEventListener(NAVIGATION_LAYOUT_CHANGE_EVENT, onLayoutChange);
   });
 
   it('clicking Accounts shows the Nexus + GitHub key fields', async () => {

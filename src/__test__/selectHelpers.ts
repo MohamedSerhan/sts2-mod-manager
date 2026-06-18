@@ -12,7 +12,7 @@ type Name = string | RegExp;
 
 /** Open the dropdown identified by its accessible name. Returns the listbox. */
 export async function openSelect(user: User, name: Name) {
-  const combo = screen.getByRole('combobox', { name });
+  const combo = await screen.findByRole('combobox', { name });
   await user.click(combo);
   return screen.findByRole('listbox');
 }

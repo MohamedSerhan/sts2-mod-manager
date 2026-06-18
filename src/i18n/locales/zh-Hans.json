@@ -1317,6 +1317,10 @@
     "display": {
       "label": "显示大小",
       "desc": "分别调整界面布局和文字大小。",
+      "navigationLabel": "导航布局",
+      "navigationSidebar": "左侧边栏",
+      "navigationTopbar": "顶部栏（默认）",
+      "navigationDesc": "选择主要的首页、模组包、模组库和设置导航显示在何处。",
       "scaleLabel": "界面缩放",
       "reset": "重置为 100%",
       "fontLabel": "文字大小"

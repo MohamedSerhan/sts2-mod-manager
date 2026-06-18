@@ -1316,6 +1316,10 @@
     "display": {
       "label": "Display size",
       "desc": "Scale the interface layout separately from text size.",
+      "navigationLabel": "Navigation layout",
+      "navigationSidebar": "Left sidebar",
+      "navigationTopbar": "Top bar (default)",
+      "navigationDesc": "Choose where the primary Home, Modpacks, Library, and Settings navigation appears.",
       "scaleLabel": "Interface scale",
       "reset": "Reset to 100%",
       "fontLabel": "Text size"

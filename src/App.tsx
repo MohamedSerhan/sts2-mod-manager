@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type MouseEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type CSSProperties, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
@@ -38,8 +38,15 @@ import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { LaunchSpinner } from './components/LaunchSpinner';
 import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { HelpDrawer } from './components/HelpDrawer';
+import { SidebarResizeHandle } from './components/SidebarResizeHandle';
 import { LocalizedAppErrorBoundary, RendererErrorReporter } from './components/AppErrorBoundary';
 import { recordModpackLaunch } from './lib/modpackUsage';
+import { useResizableSidebar } from './hooks/useResizableSidebar';
+import {
+  loadNavigationLayout,
+  NAVIGATION_LAYOUT_CHANGE_EVENT,
+  type NavigationLayout,
+} from './display/navigationLayout';
 import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
 import { ProfilesView } from './views/Profiles';
@@ -56,10 +63,9 @@ import type { Profile } from './types';
 type View = 'home' | 'profiles' | 'mods' | 'browse-mods' | 'browse-modpacks' | 'settings';
 type ResizeDirection = 'East' | 'North' | 'NorthEast' | 'NorthWest' | 'South' | 'SouthEast' | 'SouthWest' | 'West';
 
-// Top navigation — 4 items total: Home / Modpacks / Library /
-// Settings. The first three live in NAV; Settings lives in FOOT_NAV
-// (kept as a separate list so it reads as a distinct "app-level"
-// entry, but it now renders inline in the same topbar nav row).
+// Primary navigation: Home / Modpacks / Library / Settings. The first
+// three live in NAV; Settings lives in FOOT_NAV so the default sidebar
+// can keep it visually separated while the optional topbar renders one row.
 // Browse Mods is a tab inside Library (formerly Mods); Browse Modpacks
 // is a tab inside Modpacks. Help is a `?` icon in the topbar that
 // opens a slide-out HelpDrawer, mirrored as a Settings tab. The
@@ -109,9 +115,11 @@ export default function App() {
 function AppInner() {
   const { t } = useTranslation();
   const [activeView, setActiveView] = useState<View>('home');
+  const [navigationLayout, setNavigationLayout] = useState<NavigationLayout>(() => loadNavigationLayout());
   const { gameInfo, mods, refreshAll, activeProfile, activeProfileId, gameRunning, subUpdates, refreshSubUpdates } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
+  const sidebar = useResizableSidebar();
   const [dragOver, setDragOver] = useState(false);
   const [appUpdate, setAppUpdate] = useState<Update | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -151,6 +159,15 @@ function AppInner() {
   const [isDev, setIsDev] = useState(false);
   useEffect(() => {
     isDevBuild().then(setIsDev).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    function onNavigationLayoutChange(event: Event) {
+      const value = (event as CustomEvent<{ value?: NavigationLayout }>).detail?.value;
+      setNavigationLayout(value === 'topbar' || value === 'sidebar' ? value : loadNavigationLayout());
+    }
+    window.addEventListener(NAVIGATION_LAYOUT_CHANGE_EVENT, onNavigationLayoutChange);
+    return () => window.removeEventListener(NAVIGATION_LAYOUT_CHANGE_EVENT, onNavigationLayoutChange);
   }, []);
 
   // Deep-link: "Customize menu…" kebab item dispatches ROW_MENU_OPEN_EVENT →
@@ -497,6 +514,32 @@ function AppInner() {
     : [];
   const enabledCount = activePackMods.filter((m) => m.enabled).length;
   const totalCount = activePackMods.length;
+  const useTopNavigation = navigationLayout === 'topbar';
+  const navLabels: Partial<Record<View, string>> = {
+    home: t('nav.home'),
+    profiles: t('nav.profiles'),
+    mods: t('nav.mods'),
+    settings: t('nav.settings'),
+  };
+  const renderNavButtons = (items: { id: View; label: string; icon: typeof Home }[]) =>
+    items.map(({ id, icon: Icon }) => {
+      const badge = id === 'profiles' && subUpdates.length > 0 ? subUpdates.length : null;
+      return (
+        <button
+          key={id}
+          onClick={() => setActiveView(id)}
+          className={cn('gf-nav', activeView === id && 'active')}
+        >
+          <Icon size={14} className="gf-nav-icon" />
+          <span className="gf-nav-label">{navLabels[id]}</span>
+          {badge !== null && (
+            <span className="gf-nav-badge" title={t('app.packUpdateTooltip', { count: badge, badge })}>
+              {badge}
+            </span>
+          )}
+        </button>
+      );
+    });
 
   useEffect(() => {
     if (!activeProfileKey) {
@@ -791,44 +834,28 @@ function AppInner() {
             the old left sidebar into the topbar (Home / Modpacks / Library
             / Settings on the left, profile chip + status + launch on the
             right). The brand mark + app name live in the custom titlebar. */}
+        {!useTopNavigation && (
+          <nav
+            className="gf-sidebar"
+            style={{ '--gf-sidebar-width': `${sidebar.width}px` } as CSSProperties}
+          >
+            {renderNavButtons(NAV)}
+            <div className="gf-side-foot">{renderNavButtons(FOOT_NAV)}</div>
+            <SidebarResizeHandle sidebar={sidebar} />
+          </nav>
+        )}
+
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Top bar — nav + profile chip + Vanilla + Launch */}
-          <div className="gf-top">
+          <div className={cn('gf-top', useTopNavigation && 'has-topnav')}>
             {/* Top navigation. Settings (formerly the sidebar foot item)
                 joins the same row. Keeps the `gf-nav` class so the active
                 state + badge styles carry over. */}
-            <nav className="gf-topnav">
-              {[...NAV, ...FOOT_NAV].map(({ id, icon: Icon }) => {
-                // Profiles gets a count badge when followed packs have
-                // pending updates — same data the Home view's "update
-                // available" cards consume, lifted to AppContext so the
-                // nav can read it from anywhere.
-                const badge = id === 'profiles' && subUpdates.length > 0 ? subUpdates.length : null;
-                // Per-id nav label. Only the four canonical ids appear in
-                // NAV + FOOT_NAV (home / profiles / mods / settings).
-                const navLabels: Partial<Record<View, string>> = {
-                  home: t('nav.home'),
-                  profiles: t('nav.profiles'),
-                  mods: t('nav.mods'),
-                  settings: t('nav.settings'),
-                };
-                return (
-                  <button
-                    key={id}
-                    onClick={() => setActiveView(id)}
-                    className={cn('gf-nav', activeView === id && 'active')}
-                  >
-                    <Icon size={14} className="gf-nav-icon" />
-                    <span className="gf-nav-label">{navLabels[id]}</span>
-                    {badge !== null && (
-                      <span className="gf-nav-badge" title={t('app.packUpdateTooltip', { count: badge, badge })}>
-                        {badge}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </nav>
+            {useTopNavigation && (
+              <nav className="gf-topnav">
+                {renderNavButtons([...NAV, ...FOOT_NAV])}
+              </nav>
+            )}
 
             <div className="gf-top-chip" style={{ position: 'relative' }}>
               <button

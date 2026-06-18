@@ -41,6 +41,11 @@ import {
   saveAutoAddInstallsToModpack,
 } from '../lib/installPolicy';
 import {
+  loadNavigationLayout,
+  saveNavigationLayout,
+  type NavigationLayout,
+} from '../display/navigationLayout';
+import {
   detectGamePath,
   setGamePath,
   setNexusApiKey,
@@ -98,6 +103,7 @@ export function SettingsView({
   const [autoAddInstallsToModpack, setAutoAddInstallsToModpack] = useState(
     loadAutoAddInstallsToModpack,
   );
+  const [navigationLayout, setNavigationLayout] = useState<NavigationLayout>(() => loadNavigationLayout());
   const [nexusDownloadDir, setNexusDownloadDirValue] = useState<string | null>(null);
   // The OS default Downloads folder, resolved once on mount. Shown in the
   // read-only path box when no custom folder is set, so the box always names
@@ -209,6 +215,12 @@ export function SettingsView({
     } finally {
       setSavingRetention(false);
     }
+  }
+
+  function handleNavigationLayoutChange(value: string) {
+    const next: NavigationLayout = value === 'topbar' ? 'topbar' : 'sidebar';
+    setNavigationLayout(next);
+    saveNavigationLayout(next);
   }
 
   async function handleRestoreBackup(name: string) {
@@ -693,6 +705,22 @@ export function SettingsView({
               </h3>
               <div className="gf-set-desc" style={{ marginTop: -6 }}>
                 {t('settings.display.desc')}
+              </div>
+              <label htmlFor="navigation-layout-select" className="gf-set-label" style={{ fontSize: 13 }}>
+                {t('settings.display.navigationLabel')}
+              </label>
+              <Select
+                id="navigation-layout-select"
+                value={navigationLayout}
+                onChange={handleNavigationLayoutChange}
+                aria-label={t('settings.display.navigationLabel')}
+                options={[
+                  { value: 'sidebar', label: t('settings.display.navigationSidebar') },
+                  { value: 'topbar', label: t('settings.display.navigationTopbar') },
+                ]}
+              />
+              <div className="gf-help muted">
+                <span>{t('settings.display.navigationDesc')}</span>
               </div>
               <UiScaleSlider />
             </Card>

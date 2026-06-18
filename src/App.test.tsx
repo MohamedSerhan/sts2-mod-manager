@@ -33,6 +33,7 @@ import App from './App';
 import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from './__test__/setup';
 import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from './lib/installPolicy';
 import { ROW_MENU_OPEN_EVENT } from './lib/rowMenuConfig';
+import { NAVIGATION_LAYOUT_STORAGE_KEY } from './display/navigationLayout';
 
 // Stub getCurrentWindow used by the top-bar (move/minimize/etc.) so the
 // App shell can mount in jsdom without throwing. The fns are shared
@@ -78,6 +79,7 @@ describe('<App>', () => {
     // is NOT in the tree on render, so tests can deterministically skip
     // the `if (skip) await user.click(skip)` dance.
     try { localStorage.setItem('sts2mm-onboarded', 'true'); } catch {}
+    try { localStorage.removeItem(NAVIGATION_LAYOUT_STORAGE_KEY); } catch {}
   });
 
   it('renders the top bar with the app title', async () => {
@@ -98,11 +100,11 @@ describe('<App>', () => {
     return nav as HTMLButtonElement;
   }
 
-  it('renders the four sidebar nav items (1.7.0 IA collapse)', async () => {
+  it('renders the four primary nav items (1.7.0 IA collapse)', async () => {
     // 1.7.0 — sidebar shrunk from 7 items to 4. Browse Mods became a
     // tab inside Library; Browse Modpacks became a tab inside Modpacks;
     // Help moved to the topbar `?` icon (HelpDrawer) + Settings → Help
-    // tab. The sidebar now reads Home / Modpacks / Library / Settings.
+    // tab. The primary nav now reads Home / Modpacks / Library / Settings.
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument();
@@ -111,7 +113,7 @@ describe('<App>', () => {
     expect(getNavButton('Modpacks')).toBeInTheDocument();
     expect(getNavButton('Mod Library')).toBeInTheDocument();
     expect(getNavButton('Settings')).toBeInTheDocument();
-    // Browse Mods / Browse Modpacks / Help should NOT be sidebar
+    // Browse Mods / Browse Modpacks / Help should NOT be primary nav
     // buttons any more. Use queryAllByRole + filter to assert absence
     // without throwing for the missing names.
     const sidebarNavs = screen.getAllByRole('button').filter((b) =>
@@ -121,10 +123,37 @@ describe('<App>', () => {
     expect(labels).not.toContain('Browse Mods');
     expect(labels).not.toContain('Browse Modpacks');
     // "Help" can appear on the topbar `?` button (aria-label) but
-    // must not appear as a sidebar nav entry.
+    // must not appear as a primary nav entry.
     expect(labels.find((l) => /^Help$/.test(l))).toBeUndefined();
     // Topbar `?` icon — open the drawer.
     expect(screen.getByRole('button', { name: /^Help$/i })).toBeInTheDocument();
+  });
+
+  it('uses Khalid topbar navigation by default and can render the saved left sidebar setting', async () => {
+    const first = render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument();
+    });
+
+    expect(document.querySelector('.gf-sidebar')).toBeNull();
+    let nav = document.querySelector('.gf-topnav');
+    expect(nav).not.toBeNull();
+    let labels = Array.from(nav!.querySelectorAll('.gf-nav-label'))
+      .map((el) => el.textContent?.trim() ?? '');
+    expect(labels).toEqual(['Home', 'Modpacks', 'Mod Library', 'Settings']);
+
+    first.unmount();
+    localStorage.setItem(NAVIGATION_LAYOUT_STORAGE_KEY, 'sidebar');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument();
+    });
+
+    expect(document.querySelector('.gf-sidebar')).not.toBeNull();
+    nav = document.querySelector('.gf-sidebar');
+    labels = Array.from(nav!.querySelectorAll('.gf-nav-label'))
+      .map((el) => el.textContent?.trim() ?? '');
+    expect(labels).toEqual(['Home', 'Modpacks', 'Mod Library', 'Settings']);
   });
 
   it('clicking Library nav swaps the body to the Library (Installed) view', async () => {

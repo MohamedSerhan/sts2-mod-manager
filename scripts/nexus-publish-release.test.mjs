@@ -7,6 +7,8 @@ import {
   buildUpdateGroupBody,
   configuredGroupIdForAsset,
   filenameForAsset,
+  getUpdateGroups,
+  isNexusNotFoundError,
   orderedReleaseAssets,
   uploadDisplayName,
 } from './nexus-publish-release.mjs';
@@ -68,6 +70,18 @@ test('group discovery can be skipped only when every selected asset has a config
     allAssetsHaveConfiguredGroups(orderedReleaseAssets(), { ...env, NEXUS_FILE_GROUP_ID_LINUX: '' }),
     false,
   );
+});
+
+test('missing Nexus update group endpoint allows first platform group bootstrap', async () => {
+  const error = new Error('GET /mods/mod-1/file-update-groups failed with 404: Not Found');
+  error.status = 404;
+
+  const groups = await getUpdateGroups(async () => {
+    throw error;
+  }, 'mod-1');
+
+  assert.deepEqual(groups, []);
+  assert.equal(isNexusNotFoundError(error), true);
 });
 
 test('Windows is the primary mod-manager download and other platforms are not', () => {

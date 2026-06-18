@@ -6,12 +6,21 @@ on:
       version:
         description: "Release version to republish, with or without v prefix"
         required: true
-        default: "1.7.11"
+        default: "1.8.0"
         type: string
+      asset:
+        description: "Release asset to republish"
+        required: true
+        default: "windows"
+        type: choice
+        options:
+          - windows
+          - macos
+          - linux
       expected_sha256:
-        description: "Expected SHA256 for the exact GitHub Windows portable zip"
+        description: "Expected SHA256 for the exact GitHub release asset"
         required: false
-        default: "624916D25EE309E7BE9CB935635C208D8B1DCD2E9271E1853D4F58DB4849ADCE"
+        default: ""
         type: string
       repack_windows_zip:
         description: "Repack the same README and EXE before uploading to Nexus"
@@ -29,20 +38,20 @@ on:
         default: ""
         type: string
       diagnose_only:
-        description: "Only print Nexus Windows file group state; do not upload"
+        description: "Only print Nexus file group state; do not upload"
         required: false
         default: false
         type: boolean
 
 concurrency:
-  group: nexus-republish-windows-${{ inputs.version }}
+  group: nexus-republish-${{ inputs.asset }}-${{ inputs.version }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  republish-windows:
+  republish-release-asset:
     if: ${{ !inputs.rebuild_windows_zip }}
     runs-on: ubuntu-latest
     steps:
@@ -59,6 +68,9 @@ jobs:
         env:
           NEXUS_API_KEY:         ${{ secrets.NEXUS_API_KEY }}
           NEXUS_FILE_GROUP_ID:   ${{ secrets.NEXUS_FILE_GROUP_ID }}
+          NEXUS_FILE_GROUP_ID_MACOS: ${{ secrets.NEXUS_FILE_GROUP_ID_MACOS }}
+          NEXUS_FILE_GROUP_ID_LINUX: ${{ secrets.NEXUS_FILE_GROUP_ID_LINUX }}
+          NEXUS_ASSET_KEY:       ${{ inputs.asset }}
           NEXUSMODS_MOD_ID:      ${{ vars.NEXUSMODS_MOD_ID || '856' }}
           NEXUSMODS_GAME_DOMAIN: slaythespire2
         run: |
@@ -132,7 +144,28 @@ jobs:
 
           const gameDomain = process.env.NEXUSMODS_GAME_DOMAIN || 'slaythespire2';
           const gameScopedModId = process.env.NEXUSMODS_MOD_ID || '856';
-          const configuredGroupId = String(process.env.NEXUS_FILE_GROUP_ID || '').trim();
+          const releaseAssets = [
+            {
+              key: 'macos',
+              groupEnv: 'NEXUS_FILE_GROUP_ID_MACOS',
+              labelPattern: /macos|mac os|universal/i,
+            },
+            {
+              key: 'linux',
+              groupEnv: 'NEXUS_FILE_GROUP_ID_LINUX',
+              labelPattern: /linux|appimage/i,
+            },
+            {
+              key: 'windows',
+              groupEnv: 'NEXUS_FILE_GROUP_ID',
+              labelPattern: /windows|portable/i,
+            },
+          ];
+          const selectedAsset = releaseAssets.find((asset) => asset.key === process.env.NEXUS_ASSET_KEY);
+          if (!selectedAsset) {
+            throw new Error(`Unknown Nexus asset key: ${process.env.NEXUS_ASSET_KEY}`);
+          }
+          const configuredGroupId = String(process.env[selectedAsset.groupEnv] || '').trim();
 
           const mod = await request(apiBase, `/games/${encodeURIComponent(gameDomain)}/mods/${encodeURIComponent(gameScopedModId)}`);
           print('mod', mod);
@@ -149,15 +182,15 @@ jobs:
           } catch (error) {
             print('file-update-groups error', error instanceof Error ? error.message : String(error));
           }
-          const windowsGroup = groups.find((group) => (
+          const selectedGroup = groups.find((group) => (
             String(group?.id || '') === configuredGroupId
-            || /windows|portable/i.test(String(group?.name || ''))
+            || selectedAsset.labelPattern.test(String(group?.name || ''))
           ));
-          print('selected-windows-group', windowsGroup || null);
+          print('selected-group', selectedGroup || null);
 
-          const groupId = windowsGroup?.id || configuredGroupId;
+          const groupId = selectedGroup?.id || configuredGroupId;
           if (!groupId) {
-            throw new Error('Could not determine Windows Nexus file group id');
+            throw new Error(`Could not determine ${selectedAsset.key} Nexus file group id`);
           }
 
           for (const endpoint of [
@@ -188,7 +221,7 @@ jobs:
           }
           NODE
 
-      - name: Download GitHub Windows portable zip
+      - name: Download GitHub release asset
         if: ${{ !inputs.diagnose_only }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -196,9 +229,26 @@ jobs:
           set -euo pipefail
           VERSION="${{ inputs.version }}"
           VERSION="${VERSION#v}"
-          ASSET="STS2.Mod.Manager_${VERSION}_x64_portable.zip"
+          ASSET_KEY="${{ inputs.asset }}"
+
+          case "$ASSET_KEY" in
+            macos)
+              ASSET="STS2.Mod.Manager_${VERSION}_universal.dmg"
+              ;;
+            linux)
+              ASSET="STS2.Mod.Manager_${VERSION}_amd64.AppImage"
+              ;;
+            windows)
+              ASSET="STS2.Mod.Manager_${VERSION}_x64_portable.zip"
+              ;;
+            *)
+              echo "Unknown asset key: ${ASSET_KEY}" >&2
+              exit 1
+              ;;
+          esac
 
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "ASSET_KEY=${ASSET_KEY}" >> "$GITHUB_ENV"
           echo "ASSET=${ASSET}" >> "$GITHUB_ENV"
 
           mkdir -p nexus-assets
@@ -207,18 +257,23 @@ jobs:
             -D nexus-assets \
             -p "$ASSET"
 
-      - name: Verify Windows portable zip
+      - name: Verify GitHub release asset
         if: ${{ !inputs.diagnose_only }}
         run: |
           set -euo pipefail
-          ZIP="nexus-assets/${ASSET}"
-          ACTUAL_SHA="$(sha256sum "$ZIP" | awk '{ print toupper($1) }')"
+          ASSET_PATH="nexus-assets/${ASSET}"
+          ACTUAL_SHA="$(sha256sum "$ASSET_PATH" | awk '{ print toupper($1) }')"
           EXPECTED_SHA="$(printf '%s' "${{ inputs.expected_sha256 }}" | tr '[:lower:]' '[:upper:]')"
 
-          echo "ZIP_SHA256=${ACTUAL_SHA}" >> "$GITHUB_ENV"
+          echo "ASSET_SHA256=${ACTUAL_SHA}" >> "$GITHUB_ENV"
           if [ -n "$EXPECTED_SHA" ] && [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
             echo "Expected $EXPECTED_SHA but downloaded $ACTUAL_SHA" >&2
             exit 1
+          fi
+
+          if [ "$ASSET_KEY" != "windows" ]; then
+            echo "Verified ${ASSET} as ${ACTUAL_SHA}"
+            exit 0
           fi
 
           python3 - <<'PY'
@@ -235,7 +290,7 @@ jobs:
           PY
 
       - name: Repack Windows portable zip
-        if: ${{ !inputs.diagnose_only && inputs.repack_windows_zip }}
+        if: ${{ !inputs.diagnose_only && inputs.repack_windows_zip && inputs.asset == 'windows' }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -258,33 +313,35 @@ jobs:
           PY
 
           REPACKED_SHA="$(sha256sum "nexus-assets/${ASSET}" | awk '{ print toupper($1) }')"
-          echo "ZIP_SHA256=${REPACKED_SHA}" >> "$GITHUB_ENV"
+          echo "ASSET_SHA256=${REPACKED_SHA}" >> "$GITHUB_ENV"
           echo "Repacked ${ASSET} as ${REPACKED_SHA}"
 
-      - name: Publish Windows portable zip to Nexus
+      - name: Publish release asset to Nexus
         if: ${{ !inputs.diagnose_only }}
         env:
           NEXUS_API_KEY:             ${{ secrets.NEXUS_API_KEY }}
           NEXUS_FILE_GROUP_ID:       ${{ secrets.NEXUS_FILE_GROUP_ID }}
-          NEXUS_ALLOW_BOOTSTRAP:     "false"
+          NEXUS_FILE_GROUP_ID_MACOS: ${{ secrets.NEXUS_FILE_GROUP_ID_MACOS }}
+          NEXUS_FILE_GROUP_ID_LINUX: ${{ secrets.NEXUS_FILE_GROUP_ID_LINUX }}
+          NEXUS_ALLOW_BOOTSTRAP:     ${{ inputs.asset == 'windows' && 'false' || 'true' }}
           NEXUSMODS_MOD_ID:          ${{ vars.NEXUSMODS_MOD_ID || '856' }}
           NEXUSMODS_GAME_DOMAIN:     slaythespire2
-        run: node scripts/nexus-publish-release.mjs --version "$VERSION" --asset-dir nexus-assets --only windows
+        run: node scripts/nexus-publish-release.mjs --version "$VERSION" --asset-dir nexus-assets --only "$ASSET_KEY"
 
       - name: Summarize republish
         if: ${{ !inputs.diagnose_only }}
         run: |
           {
-            echo "### Nexus Windows republish"
+            echo "### Nexus ${ASSET_KEY} republish"
             echo
             echo "- Version: ${VERSION}"
             echo "- Asset: ${ASSET}"
-            echo "- SHA256: ${ZIP_SHA256}"
+            echo "- SHA256: ${ASSET_SHA256}"
             echo "- Repacked: ${{ inputs.repack_windows_zip }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   rebuild-and-republish-windows:
-    if: ${{ inputs.rebuild_windows_zip && !inputs.diagnose_only }}
+    if: ${{ inputs.asset == 'windows' && inputs.rebuild_windows_zip && !inputs.diagnose_only }}
     runs-on: windows-latest
     steps:
       - name: Checkout publisher workflow

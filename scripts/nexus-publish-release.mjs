@@ -121,7 +121,10 @@ function createApiClient(apiKey, apiBase = DEFAULT_API_BASE) {
       },
     });
     if (!response.ok) {
-      throw new Error(`${options.method || 'GET'} ${endpoint} failed with ${response.status}: ${await response.text()}`);
+      const error = new Error(`${options.method || 'GET'} ${endpoint} failed with ${response.status}: ${await response.text()}`);
+      error.status = response.status;
+      error.endpoint = endpoint;
+      throw error;
     }
     if (response.status === 204) {
       return null;
@@ -135,8 +138,22 @@ async function getModUuid(api, gameDomain, gameScopedModId) {
   return requireValue(body?.data?.id, 'Nexus mod UUID');
 }
 
-async function getUpdateGroups(api, modId) {
-  const body = await api(`/mods/${encodeURIComponent(modId)}/file-update-groups`);
+export function isNexusNotFoundError(error) {
+  return error?.status === 404 || /\bfailed with 404\b/.test(String(error?.message || error));
+}
+
+export async function getUpdateGroups(api, modId) {
+  const endpoint = `/mods/${encodeURIComponent(modId)}/file-update-groups`;
+  let body;
+  try {
+    body = await api(endpoint);
+  } catch (error) {
+    if (isNexusNotFoundError(error)) {
+      console.warn(`Nexus file update group discovery returned 404 for ${modId}; bootstrapping missing groups if allowed`);
+      return [];
+    }
+    throw error;
+  }
   return body?.data?.groups || body?.data?.data?.groups || body?.groups || [];
 }
 

@@ -1255,10 +1255,13 @@ body {
 .gf-profile-library-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  column-gap: 7px;
+  row-gap: 4px;
   margin-top: 5px;
   font-size: 11.5px;
   color: var(--ink-mute);
+  line-height: 1.35;
 }
 .gf-profile-library-meta span {
   max-width: 220px;
@@ -1269,27 +1272,32 @@ body {
 .gf-version-select {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  max-width: 240px;
+  gap: 5px;
+  max-width: 220px;
+  min-width: 0;
   color: var(--ink-mute);
+  line-height: 1;
 }
 .gf-version-select span {
   flex: 0 0 auto;
 }
 .gf-version-select select {
-  min-width: 128px;
-  max-width: 210px;
-  height: 22px;
-  border: 1px solid var(--line);
+  min-width: 112px;
+  max-width: 170px;
+  height: 24px;
+  border: 1px solid var(--indigo-line);
   border-radius: 6px;
-  background: var(--panel);
+  background: var(--indigo-side);
   color: var(--ink);
-  color-scheme: dark;
-  font-size: 11px;
-  padding: 0 4px;
+  color-scheme: var(--app-color-scheme);
+  font: inherit;
+  font-weight: 600;
+  outline: none;
+  padding: 0 24px 0 8px;
 }
+.gf-version-select select:focus { border-color: var(--gf-line); }
 .gf-version-select select option {
-  background: var(--panel);
+  background-color: var(--indigo-panel);
   color: var(--ink);
 }
 .gf-profile-library-muted { font-size: 12px; color: var(--ink-dim); }

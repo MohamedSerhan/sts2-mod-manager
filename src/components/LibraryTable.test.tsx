@@ -1449,9 +1449,9 @@ describe('<LibraryTable modpackName={null}>', () => {
       const { container } = render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
       await screen.findByText('Watcher');
       expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
-      expect(screen.getByRole('option', { name: /saved v1\.4\.3 \(active\)/i })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: /saved v1\.3\.0 \(stored\)/i })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: /saved v\? \(stored\)/i })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /1\.4\.3 \(active\)/i })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /1\.3\.0 \(stored\)/i })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /\? \(stored\)/i })).toBeInTheDocument();
       const user = userEvent.setup();
       await user.selectOptions(
         screen.getByRole('combobox', { name: /Choose version/i }),

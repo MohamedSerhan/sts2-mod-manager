@@ -1192,7 +1192,7 @@ export function LibraryTable({
               versionOptions={versionRows.map((option) => ({
                 key: option.mod_version_id,
                 version: option.version,
-                label: t('mods.savedVersionOption', {
+                label: t('mods.versionOption', {
                   version: cleanDisplayVersion(option.version),
                   state: option.installed_enabled
                     ? t('mods.versionActiveSuffix')

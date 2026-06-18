@@ -20,10 +20,12 @@ use serde::{Deserialize, Serialize};
 use super::apply::{disk_mod_matches_pin, switch_profile_from_paths};
 use super::crud::{
     hide_app_created_by, load_profile, mod_key, profile_is_edit_locked, profile_mod_from_installed,
-    save_profile, version_is_wildcard,
+    profile_mod_matches_installed, profile_mod_matches_installed_with_version_db, save_profile,
+    version_is_wildcard,
 };
 use super::{Profile, ProfileMod};
 use crate::error::{AppError, Result};
+use crate::mods::ModInfo;
 
 /// A mod whose installed version differs from the profile's recorded version.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,54 +79,88 @@ pub(super) fn compute_drift_for_profile(
     mods_path: &Path,
     disabled_path: &Path,
     profiles_path: &Path,
+    config_path: &Path,
 ) -> std::result::Result<ProfileDrift, String> {
     let profile = load_profile(name, profiles_path).map_err(|e| e.to_string())?;
-    Ok(compute_profile_drift(&profile, mods_path, disabled_path))
+    Ok(compute_profile_drift_with_registry(
+        &profile,
+        mods_path,
+        disabled_path,
+        config_path,
+    ))
 }
 
+#[cfg(test)]
 pub(super) fn compute_profile_drift(
     profile: &Profile,
     mods_path: &Path,
     disabled_path: &Path,
 ) -> ProfileDrift {
-    // Build a map of profile mods: key -> (enabled, version, display_name)
-    let mut profile_map: std::collections::HashMap<String, (bool, String, String, Option<String>)> =
-        std::collections::HashMap::new();
-    for pm in &profile.mods {
-        let key = mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref());
-        profile_map.insert(
-            key,
-            (
-                pm.enabled,
-                pm.version.clone(),
-                pm.name.clone(),
-                pm.hash.clone(),
-            ),
-        );
-    }
-
-    // Build a map of installed mods: key -> (display_name, enabled, version)
     let enabled_mods = crate::mods::scan_mods(mods_path);
     let disabled_mods = crate::mods::scan_disabled_mods(disabled_path);
 
-    let mut installed_map: std::collections::HashMap<
-        String,
-        (String, bool, String, Option<String>),
-    > = std::collections::HashMap::new();
-    for m in &enabled_mods {
-        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_map.insert(
-            key,
-            (m.name.clone(), true, m.version.clone(), m.hash.clone()),
-        );
+    compute_profile_drift_from_mods(profile, &enabled_mods, &disabled_mods, None)
+}
+
+fn compute_profile_drift_with_registry(
+    profile: &Profile,
+    mods_path: &Path,
+    disabled_path: &Path,
+    config_path: &Path,
+) -> ProfileDrift {
+    let mut all_mods = crate::mods::scan_mods(mods_path);
+    let enabled_count = all_mods.len();
+    all_mods.extend(crate::mods::scan_disabled_mods(disabled_path));
+    crate::mod_sources::enrich_mods_with_sources(&mut all_mods, config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut all_mods, config_path);
+    let version_db = crate::mod_versions::load(config_path);
+    let (enabled_mods, disabled_mods) = all_mods.split_at(enabled_count);
+
+    compute_profile_drift_from_mods(profile, enabled_mods, disabled_mods, Some(&version_db))
+}
+
+fn profile_mod_matches_disk(
+    pm: &ProfileMod,
+    disk_mod: &ModInfo,
+    version_db: Option<&crate::mod_versions::ModVersionsDb>,
+) -> bool {
+    if let Some(version_db) = version_db {
+        profile_mod_matches_installed_with_version_db(pm, disk_mod, version_db)
+    } else {
+        profile_mod_matches_installed(pm, disk_mod)
     }
-    for m in &disabled_mods {
-        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_map.insert(
-            key,
-            (m.name.clone(), false, m.version.clone(), m.hash.clone()),
-        );
-    }
+}
+
+fn find_disk_mod_for_profile<'a>(
+    pm: &ProfileMod,
+    enabled_mods: &'a [ModInfo],
+    disabled_mods: &'a [ModInfo],
+    version_db: Option<&crate::mod_versions::ModVersionsDb>,
+) -> Option<(&'a ModInfo, bool)> {
+    enabled_mods
+        .iter()
+        .find(|disk_mod| profile_mod_matches_disk(pm, disk_mod, version_db))
+        .map(|disk_mod| (disk_mod, true))
+        .or_else(|| {
+            disabled_mods
+                .iter()
+                .find(|disk_mod| profile_mod_matches_disk(pm, disk_mod, version_db))
+                .map(|disk_mod| (disk_mod, false))
+        })
+}
+
+fn compute_profile_drift_from_mods(
+    profile: &Profile,
+    enabled_mods: &[ModInfo],
+    disabled_mods: &[ModInfo],
+    version_db: Option<&crate::mod_versions::ModVersionsDb>,
+) -> ProfileDrift {
+    let profile_contains_disk_mod = |disk_mod: &ModInfo| {
+        profile
+            .mods
+            .iter()
+            .any(|pm| profile_mod_matches_disk(pm, disk_mod, version_db))
+    };
 
     let mut added = Vec::new();
     let mut removed = Vec::new();
@@ -133,42 +169,36 @@ pub(super) fn compute_profile_drift(
 
     // Mods active in the loadout but not in profile. Disabled extras are
     // library items, not active profile drift.
-    for m in &enabled_mods {
-        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        if !profile_map.contains_key(&key) {
+    for m in enabled_mods {
+        if !profile_contains_disk_mod(m) {
             added.push(m.name.clone());
         }
     }
 
-    // Mods in profile but not installed
-    for pm in &profile.mods {
-        let key = mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref());
-        if !installed_map.contains_key(&key) {
-            removed.push(pm.name.clone());
-        }
-    }
-
     // Mods whose enabled state OR version differs
-    for (key, (profile_enabled, profile_version, profile_display, profile_hash)) in &profile_map {
-        if let Some((disk_display, installed_enabled, disk_version, disk_hash)) =
-            installed_map.get(key)
+    for pm in &profile.mods {
+        let Some((disk_mod, installed_enabled)) =
+            find_disk_mod_for_profile(pm, enabled_mods, disabled_mods, version_db)
+        else {
+            removed.push(pm.name.clone());
+            continue;
+        };
+
+        if pm.enabled != installed_enabled {
+            toggled.push(disk_mod.name.clone());
+        }
+        if !versions_match(&pm.version, &disk_mod.version)
+            && !contents_match(pm.hash.as_deref(), disk_mod.hash.as_deref())
         {
-            if profile_enabled != installed_enabled {
-                toggled.push(disk_display.clone());
-            }
-            if !versions_match(profile_version, disk_version)
-                && !contents_match(profile_hash.as_deref(), disk_hash.as_deref())
-            {
-                version_changed.push(VersionMismatch {
-                    name: if disk_display.is_empty() {
-                        profile_display.clone()
-                    } else {
-                        disk_display.clone()
-                    },
-                    profile_version: profile_version.clone(),
-                    disk_version: disk_version.clone(),
-                });
-            }
+            version_changed.push(VersionMismatch {
+                name: if disk_mod.name.is_empty() {
+                    pm.name.clone()
+                } else {
+                    disk_mod.name.clone()
+                },
+                profile_version: pm.version.clone(),
+                disk_version: disk_mod.version.clone(),
+            });
         }
     }
 
@@ -473,6 +503,52 @@ mod reconcile_tests {
             drift.version_changed.len(),
             1,
             "different content + version is real drift"
+        );
+    }
+
+    #[test]
+    fn registry_drift_matches_added_library_mod_by_artifact_id_when_identity_fields_drift() {
+        let game = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let mods = game.path().join("mods");
+        let disabled = game.path().join("mods_disabled");
+        fs::create_dir_all(&mods).unwrap();
+        fs::create_dir_all(&disabled).unwrap();
+
+        write_mod(
+            &mods,
+            "EndRunGraph-v0.3.2-Beta-STS2-v0.107.0",
+            "End Run Graph",
+            "0.3.2",
+        );
+        let mut installed = crate::mods::scan_mods(&mods);
+        crate::mod_versions::enrich_mods_with_versions(&mut installed, config.path());
+        let disk_mod = installed.into_iter().next().unwrap();
+        let version_id = disk_mod
+            .mod_version_id
+            .clone()
+            .expect("scan enrichment assigns a local artifact id");
+
+        // Add from Library writes the exact artifact id, but older saved
+        // identity fields may still be stale or human-readable. Drift must
+        // trust the concrete version id before calling this an active extra.
+        let mut pm = pack_mod(
+            "End Run Graph",
+            "EndRunGraph-v0.3.1-Beta-STS2-v0.107.0",
+            "0.3.2",
+            true,
+        );
+        pm.mod_version_id = Some(version_id);
+        pm.hash = disk_mod.hash.clone();
+        let profile = base_profile("TesterW", vec![pm]);
+
+        let drift = compute_profile_drift_with_registry(&profile, &mods, &disabled, config.path());
+
+        assert!(drift.added.is_empty(), "no false active extras: {drift:?}");
+        assert!(drift.removed.is_empty(), "saved artifact must match disk");
+        assert!(
+            !drift.has_drift,
+            "adding from Library should not leave drift"
         );
     }
 

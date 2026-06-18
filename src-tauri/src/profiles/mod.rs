@@ -776,7 +776,13 @@ pub fn get_profile_drift(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
-    drift::compute_drift_for_profile(&name, mods_path, disabled_path, &s.profiles_path)
+    drift::compute_drift_for_profile(
+        &name,
+        mods_path,
+        disabled_path,
+        &s.profiles_path,
+        &s.config_path,
+    )
 }
 
 /// Save the drift: reconcile the manifest to the current loadout by applying

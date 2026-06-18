@@ -586,6 +586,7 @@ fn flow_11_apply_profile_pins_override_profile_state() {
 
     let mods_tmp = tempfile::tempdir().unwrap();
     let disabled_tmp = tempfile::tempdir().unwrap();
+    let config_tmp = tempfile::tempdir().unwrap();
     install_baselib_with_bom(mods_tmp.path());
 
     let baselib_dll_path = mods_tmp.path().join("BaseLib").join("BaseLib.dll");
@@ -620,8 +621,14 @@ fn flow_11_apply_profile_pins_override_profile_state() {
     let mut pinned = std::collections::HashSet::new();
     pinned.insert("BaseLib".to_string());
 
-    apply_profile_with_pins(&profile, mods_tmp.path(), disabled_tmp.path(), &pinned)
-        .expect("apply with pin must succeed");
+    apply_profile_with_pins(
+        &profile,
+        mods_tmp.path(),
+        disabled_tmp.path(),
+        &pinned,
+        config_tmp.path(),
+    )
+    .expect("apply with pin must succeed");
 
     assert!(
         baselib_dll_path.exists(),
@@ -791,6 +798,7 @@ fn flow_11_apply_profile_without_pin_preserves_disabled_profile_mod() {
 
     let mods_tmp = tempfile::tempdir().unwrap();
     let disabled_tmp = tempfile::tempdir().unwrap();
+    let config_tmp = tempfile::tempdir().unwrap();
     install_baselib_with_bom(mods_tmp.path());
 
     let now = chrono::Utc::now();
@@ -820,8 +828,14 @@ fn flow_11_apply_profile_without_pin_preserves_disabled_profile_mod() {
     };
 
     let empty_pins = std::collections::HashSet::new();
-    apply_profile_with_pins(&profile, mods_tmp.path(), disabled_tmp.path(), &empty_pins)
-        .expect("apply must succeed");
+    apply_profile_with_pins(
+        &profile,
+        mods_tmp.path(),
+        disabled_tmp.path(),
+        &empty_pins,
+        config_tmp.path(),
+    )
+    .expect("apply must succeed");
 
     let active_baselib = mods_tmp.path().join("BaseLib").join("BaseLib.dll");
     let disabled_baselib = disabled_tmp.path().join("BaseLib").join("BaseLib.dll");

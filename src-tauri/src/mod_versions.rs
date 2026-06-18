@@ -1,4 +1,4 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -41,6 +41,8 @@ pub struct ModVersionsDb {
     pub records: HashMap<String, ModVersionRecord>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub aliases: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub conflicts: HashMap<String, Vec<String>>,
 }
 
 fn db_path(config_path: &Path) -> PathBuf {
@@ -146,6 +148,34 @@ fn resolve_alias<'a>(db: &'a ModVersionsDb, id: &'a str) -> &'a str {
     db.aliases.get(id).map(String::as_str).unwrap_or(id)
 }
 
+fn record_has_canonical_alias(db: &ModVersionsDb, record_id: &str, alias: &str) -> bool {
+    db.records
+        .get(record_id)
+        .is_some_and(|record| record.aliases.iter().any(|existing| existing == alias))
+        && db
+            .aliases
+            .get(alias)
+            .is_some_and(|target| resolve_alias(db, target) == record_id)
+}
+
+pub fn ids_equivalent(config_path: &Path, a: &str, b: &str) -> bool {
+    let a = a.trim();
+    let b = b.trim();
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    if a == b {
+        return true;
+    }
+    let db = load(config_path);
+    let resolved_a = resolve_alias(&db, a);
+    let resolved_b = resolve_alias(&db, b);
+    if resolved_a == resolved_b {
+        return true;
+    }
+    record_has_canonical_alias(&db, resolved_a, b) || record_has_canonical_alias(&db, resolved_b, a)
+}
+
 fn record_by_identity<'a>(
     db: &'a ModVersionsDb,
     identity_key: &str,
@@ -161,9 +191,15 @@ fn upsert_record_for_mod(
     requested_id: Option<&str>,
 ) -> (String, bool) {
     let identity_key = key_for_mod(info);
-    let existing_id = requested_id
+    let requested_existing_id = requested_id
         .map(|id| resolve_alias(db, id).to_string())
         .filter(|id| db.records.contains_key(id))
+        .filter(|id| {
+            db.records
+                .get(id)
+                .is_some_and(|record| record.identity_key == identity_key)
+        });
+    let existing_id = requested_existing_id
         .or_else(|| record_by_identity(db, &identity_key).map(|record| record.id.clone()));
 
     let id = existing_id.unwrap_or_else(|| {
@@ -311,8 +347,21 @@ pub fn alias_shared_id(
                 changed = true;
             }
         }
-        if db.aliases.insert(shared_id.to_string(), local_id.clone()) != Some(local_id.clone()) {
-            changed = true;
+        match db.aliases.get(shared_id) {
+            Some(existing) if existing != &local_id => {
+                let conflicts = db.conflicts.entry(shared_id.to_string()).or_default();
+                if !conflicts.iter().any(|id| id == &local_id) {
+                    conflicts.push(local_id.clone());
+                    changed = true;
+                }
+            }
+            _ => {
+                if db.aliases.insert(shared_id.to_string(), local_id.clone())
+                    != Some(local_id.clone())
+                {
+                    changed = true;
+                }
+            }
         }
     }
     installed.mod_version_id = Some(local_id.clone());
@@ -326,10 +375,12 @@ pub fn alias_shared_id(
 
 pub fn record_for_profile_mod(pm: &ProfileMod, config_path: &Path) -> Option<ModVersionRecord> {
     let db = load(config_path);
+    let identity_key = key_for_profile_mod(pm);
     pm.mod_version_id
         .as_deref()
         .and_then(|id| db.records.get(resolve_alias(&db, id)).cloned())
-        .or_else(|| record_by_identity(&db, &key_for_profile_mod(pm)).cloned())
+        .filter(|record| record.identity_key == identity_key)
+        .or_else(|| record_by_identity(&db, &identity_key).cloned())
 }
 
 fn sha256_file(path: &Path) -> io::Result<String> {
@@ -541,6 +592,49 @@ mod tests {
         assert_eq!(local, aliased);
         let db = load(dir.path());
         assert_eq!(db.aliases.get("shared-id"), Some(&local));
+    }
+
+    #[test]
+    fn conflicting_shared_id_keeps_separate_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut first = mod_info("Test", "1.0.0", Some("abc"));
+        let first_id = alias_shared_id("shared-id", &mut first, dir.path()).unwrap();
+        let mut second = mod_info("Test", "1.0.0", Some("def"));
+        let second_id = alias_shared_id("shared-id", &mut second, dir.path()).unwrap();
+
+        assert_ne!(first_id, second_id);
+        let db = load(dir.path());
+        assert_eq!(db.aliases.get("shared-id"), Some(&first_id));
+        assert!(db
+            .conflicts
+            .get("shared-id")
+            .is_some_and(|ids| ids.contains(&second_id)));
+        let shared_id = "shared-id".to_string();
+        assert!(db.records[&first_id].aliases.contains(&shared_id));
+        assert!(db.records[&second_id].aliases.contains(&shared_id));
+        assert!(
+            !ids_equivalent(dir.path(), "shared-id", &second_id),
+            "ambiguous aliases must not globally match every conflicting artifact"
+        );
+
+        let pm = ProfileMod {
+            mod_version_id: Some("shared-id".into()),
+            name: "Test".into(),
+            version: "1.0.0".into(),
+            source: Some("github:owner/repo".into()),
+            hash: Some("def".into()),
+            files: vec!["Mod/manifest.json".into()],
+            folder_name: Some("Mod".into()),
+            mod_id: Some("mod-id".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        };
+        assert_eq!(
+            record_for_profile_mod(&pm, dir.path()).map(|record| record.id),
+            Some(second_id)
+        );
     }
 
     #[test]

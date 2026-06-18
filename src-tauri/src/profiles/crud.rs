@@ -539,6 +539,58 @@ pub(crate) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo
         })
 }
 
+pub(crate) fn profile_mod_matches_installed_with_registry(
+    pm: &ProfileMod,
+    installed: &ModInfo,
+    config_path: &Path,
+) -> bool {
+    if pm
+        .mod_version_id
+        .as_deref()
+        .is_some_and(|id| !id.trim().is_empty())
+        && installed
+            .mod_version_id
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty())
+    {
+        return profile_mod_artifact_id_matches(pm, installed, config_path).unwrap_or(false);
+    }
+
+    profile_mod_matches_installed(pm, installed)
+}
+
+pub(crate) fn profile_mod_artifact_id_matches(
+    pm: &ProfileMod,
+    installed: &ModInfo,
+    config_path: &Path,
+) -> Option<bool> {
+    let profile_id = pm
+        .mod_version_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    let installed_id = installed
+        .mod_version_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    if profile_id == installed_id {
+        return Some(true);
+    }
+    if let Some(record) = crate::mod_versions::record_for_profile_mod(pm, config_path) {
+        return Some(crate::mod_versions::ids_equivalent(
+            config_path,
+            &record.id,
+            installed_id,
+        ));
+    }
+    Some(crate::mod_versions::ids_equivalent(
+        config_path,
+        profile_id,
+        installed_id,
+    ))
+}
+
 pub(super) fn profile_mod_matches_target(
     pm: &ProfileMod,
     name: &str,
@@ -595,7 +647,7 @@ pub(super) fn installed_mod_matches_target(
     installed.name.eq_ignore_ascii_case(name)
 }
 
-pub(super) fn profile_mod_from_installed(installed: &ModInfo) -> ProfileMod {
+pub(crate) fn profile_mod_from_installed(installed: &ModInfo) -> ProfileMod {
     ProfileMod {
         mod_version_id: installed.mod_version_id.clone(),
         name: installed.name.clone(),
@@ -609,6 +661,77 @@ pub(super) fn profile_mod_from_installed(installed: &ModInfo) -> ProfileMod {
         bundle_url: None,
         bundle_sha256: None,
         bundle_members: installed.bundle_members.clone(),
+    }
+}
+
+#[cfg(test)]
+mod profile_mod_registry_match_tests {
+    use super::*;
+
+    fn mod_info(hash: &str) -> ModInfo {
+        ModInfo {
+            mod_version_id: None,
+            name: "Test".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec!["Mod/manifest.json".into()],
+            source: Some("github:owner/repo".into()),
+            hash: Some(hash.into()),
+            dependencies: Vec::new(),
+            size_bytes: 0,
+            folder_name: Some("Mod".into()),
+            mod_id: Some("mod-id".into()),
+            github_url: None,
+            github_auto_detected: false,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            custom_url: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            bundle_members: vec![],
+        }
+    }
+
+    fn profile_mod(hash: &str) -> ProfileMod {
+        ProfileMod {
+            mod_version_id: Some("shared-id".into()),
+            name: "Test".into(),
+            version: "1.0.0".into(),
+            source: Some("github:owner/repo".into()),
+            hash: Some(hash.into()),
+            files: vec!["Mod/manifest.json".into()],
+            folder_name: Some("Mod".into()),
+            mod_id: Some("mod-id".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        }
+    }
+
+    #[test]
+    fn artifact_match_uses_profile_identity_for_conflicting_shared_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut first = mod_info("abc");
+        let mut second = mod_info("def");
+        crate::mod_versions::alias_shared_id("shared-id", &mut first, dir.path()).unwrap();
+        crate::mod_versions::alias_shared_id("shared-id", &mut second, dir.path()).unwrap();
+
+        let pm = profile_mod("def");
+
+        assert_eq!(
+            profile_mod_artifact_id_matches(&pm, &first, dir.path()),
+            Some(false)
+        );
+        assert_eq!(
+            profile_mod_artifact_id_matches(&pm, &second, dir.path()),
+            Some(true)
+        );
     }
 }
 

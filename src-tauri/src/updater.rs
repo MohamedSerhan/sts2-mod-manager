@@ -787,28 +787,37 @@ fn profile_references_installed_mod(
     crate::profiles::list_profiles(profiles_path)
         .iter()
         .any(|profile| {
-            profile
-                .mods
-                .iter()
-                .any(|pm| crate::profiles::profile_mod_matches_installed(pm, &candidate))
+            profile.mods.iter().any(|pm| {
+                crate::profiles::profile_mod_matches_installed_with_registry(
+                    pm,
+                    &candidate,
+                    config_path,
+                )
+            })
         })
 }
 
-fn preserve_referenced_modpack_version(
-    mod_info: &ModInfo,
-    mods_path: &Path,
+fn cache_downloaded_mod_artifact(
+    zip_path: &Path,
+    source_hint: Option<String>,
     cache_path: &Path,
     config_path: &Path,
-) -> Result<()> {
-    let mut info = mod_info.clone();
-    crate::mod_versions::cache_mod_version_by_id(&mut info, mods_path, cache_path, config_path)
-        .ok_or_else(|| {
-            crate::error::AppError::Other(format!(
-                "Failed to preserve '{}' v{} before updating the library copy",
-                mod_info.name, mod_info.version
-            ))
-        })?;
-    Ok(())
+) -> Result<ModInfo> {
+    let staging = tempfile::tempdir()?;
+    let mut info = crate::mods::install_mod_from_zip(zip_path, staging.path())?;
+    if info.source.is_none() {
+        info.source = source_hint;
+    }
+    crate::mod_versions::cache_mod_version_by_id(
+        &mut info,
+        staging.path(),
+        cache_path,
+        config_path,
+    )
+    .ok_or_else(|| {
+        crate::error::AppError::Other(format!("Failed to cache '{}' v{}", info.name, info.version))
+    })?;
+    Ok(info)
 }
 
 /// Download and install the newest version of a specific mod from its
@@ -944,14 +953,19 @@ pub async fn update_mod(
         && profile_references_installed_mod(mod_info, &profiles_path, &config_path)
     {
         log::info!(
-            "update_mod: '{}' is referenced by a saved modpack; preserving current artifact before installing {}/{}@{} in the library",
+            "update_mod: '{}' is referenced by a saved modpack; caching {}/{}@{} without changing the library copy",
             name,
             owner,
             repo,
             chosen_tag,
         );
-        preserve_referenced_modpack_version(mod_info, &mods_path, &cache_path, &config_path)
-            .map_err(|e| e.to_string())?;
+        return cache_downloaded_mod_artifact(
+            &chosen_zip,
+            Some(format!("github:{}/{}", owner, repo)),
+            &cache_path,
+            &config_path,
+        )
+        .map_err(|e| e.to_string());
     }
 
     // Read user-edited configs BEFORE the destructive delete pass. Empty
@@ -1850,25 +1864,28 @@ pub async fn update_all_mods(
                 && profile_references_installed_mod(old_info, &profiles_path, &config_path)
             {
                 log::info!(
-                    "update_all_mods: '{}' is referenced by a saved modpack; preserving current artifact before installing {}/{}@{} in the library",
+                    "update_all_mods: '{}' is referenced by a saved modpack; caching {}/{}@{} without changing the library copy",
                     update.mod_name,
                     owner,
                     repo,
                     chosen_tag,
                 );
-                if let Err(e) = preserve_referenced_modpack_version(
-                    old_info,
-                    &mods_path,
+                match cache_downloaded_mod_artifact(
+                    &chosen_zip,
+                    Some(format!("github:{}/{}", owner, repo)),
                     &cache_path,
                     &config_path,
                 ) {
-                    log::error!(
-                        "update_all_mods: failed to preserve current artifact for '{}': {}",
-                        update.mod_name,
-                        e,
-                    );
-                    continue;
+                    Ok(info) => results.push(info),
+                    Err(e) => {
+                        log::error!(
+                            "update_all_mods: failed to cache update artifact for '{}': {}",
+                            update.mod_name,
+                            e,
+                        );
+                    }
                 }
+                continue;
             }
 
             let mut parent_dirs = std::collections::HashSet::new();
@@ -2515,7 +2532,7 @@ mod version_helper_tests {
     }
 
     #[test]
-    fn preserving_referenced_modpack_version_caches_current_library_copy() {
+    fn cache_downloaded_artifact_records_uuid_cache_without_touching_library() {
         let tmp = tempfile::tempdir().unwrap();
         let mods_path = tmp.path().join("mods");
         let cache_path = tmp.path().join("cache");
@@ -2530,23 +2547,44 @@ mod version_helper_tests {
         .unwrap();
         std::fs::write(mods_path.join("Watcher").join("Watcher.dll"), "old-bytes").unwrap();
 
-        let info = mod_info(|m| {
-            m.name = "Watcher".into();
-            m.version = "1.4.2".into();
-            m.folder_name = Some("Watcher".into());
-            m.mod_id = Some("Watcher".into());
-            m.files = vec!["Watcher/manifest.json".into(), "Watcher/Watcher.dll".into()];
-        });
+        let zip_path = tmp.path().join("Watcher-1.4.3.zip");
+        {
+            let file = std::fs::File::create(&zip_path).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            writer.start_file("Watcher/manifest.json", options).unwrap();
+            std::io::Write::write_all(
+                &mut writer,
+                br#"{"id":"Watcher","name":"Watcher","version":"1.4.3"}"#,
+            )
+            .unwrap();
+            writer.start_file("Watcher/Watcher.dll", options).unwrap();
+            std::io::Write::write_all(&mut writer, b"new-bytes").unwrap();
+            writer.finish().unwrap();
+        }
 
-        preserve_referenced_modpack_version(&info, &mods_path, &cache_path, &config_path).unwrap();
+        let cached_info = cache_downloaded_mod_artifact(
+            &zip_path,
+            Some("github:owner/watcher".into()),
+            &cache_path,
+            &config_path,
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(mods_path.join("Watcher").join("Watcher.dll")).unwrap(),
+            "old-bytes",
+            "cache-only updates must not replace the library copy on disk"
+        );
 
         let profile_mod = crate::profiles::ProfileMod {
-            mod_version_id: None,
+            mod_version_id: cached_info.mod_version_id.clone(),
             name: "Watcher".into(),
-            version: "1.4.2".into(),
-            source: None,
-            hash: None,
-            files: info.files.clone(),
+            version: "1.4.3".into(),
+            source: Some("github:owner/watcher".into()),
+            hash: cached_info.hash.clone(),
+            files: cached_info.files.clone(),
             folder_name: Some("Watcher".into()),
             mod_id: Some("Watcher".into()),
             enabled: true,
@@ -2559,13 +2597,13 @@ mod version_helper_tests {
             &config_path,
             &profile_mod,
         )
-        .expect("current library copy should be cached for the saved profile mod");
+        .expect("downloaded update artifact should be cached by ID");
         let file = std::fs::File::open(cached).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
         let mut dll = archive.by_name("Watcher/Watcher.dll").unwrap();
         let mut contents = String::new();
         std::io::Read::read_to_string(&mut dll, &mut contents).unwrap();
-        assert_eq!(contents, "old-bytes");
+        assert_eq!(contents, "new-bytes");
     }
 
     #[test]

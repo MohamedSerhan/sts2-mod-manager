@@ -1283,8 +1283,10 @@ fn backfill_profile_sources_from_db(profile: &mut Profile, config_path: &std::pa
 
 /// A stable fingerprint of the content that actually gets published, so the
 /// UI can tell when an owned share has un-pushed local edits. Deliberately
-/// excludes volatile / publish-side fields: timestamps and bundle_url/sha
-/// (those change on every re-share without the user changing anything).
+/// excludes volatile / publish-side fields: timestamps and bundle_url (the
+/// upload location can change on every re-share without content changing).
+/// `mod_version_id` is intentionally excluded because lazy local migrations
+/// should not nag, while `bundle_sha256` is included as published content.
 fn profile_publish_signature(profile: &Profile) -> String {
     use sha2::{Digest, Sha256};
     let mut entries: Vec<String> = profile
@@ -1292,7 +1294,7 @@ fn profile_publish_signature(profile: &Profile) -> String {
         .iter()
         .map(|m| {
             format!(
-                "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
                 m.name,
                 m.version,
                 m.folder_name.as_deref().unwrap_or(""),
@@ -1300,6 +1302,7 @@ fn profile_publish_signature(profile: &Profile) -> String {
                 m.enabled,
                 m.source.as_deref().unwrap_or(""),
                 m.hash.as_deref().unwrap_or(""),
+                m.bundle_sha256.as_deref().unwrap_or(""),
             )
         })
         .collect();
@@ -4799,25 +4802,24 @@ mod publish_signature_tests {
         );
     }
 
-    /// Step B test 1: signature is stable across updated_at and bundle fields.
+    /// Step B test 1: signature is stable across updated_at and upload URLs.
     #[test]
     fn signature_stable_across_volatile_fields() {
         let profile1 = base_profile();
 
-        // Build a profile that differs ONLY in updated_at and bundle_url/sha256.
+        // Build a profile that differs ONLY in updated_at and bundle_url.
         let mut profile2 = base_profile();
         // Shift updated_at by a second.
         profile2.updated_at = profile1.updated_at + chrono::Duration::seconds(1);
-        // Set bundle_url and bundle_sha256 on every mod.
+        // Set bundle_url on every mod.
         for m in &mut profile2.mods {
             m.bundle_url = Some("https://example.com/bundle.zip".into());
-            m.bundle_sha256 = Some("deadbeef".into());
         }
 
         assert_eq!(
             profile_publish_signature(&profile1),
             profile_publish_signature(&profile2),
-            "signature must not change when only updated_at or bundle fields differ"
+            "signature must not change when only updated_at or upload URLs differ"
         );
     }
 
@@ -4858,6 +4860,16 @@ mod publish_signature_tests {
             profile_publish_signature(&profile_original),
             profile_publish_signature(&profile_version_bumped),
             "signature must differ when a mod's version changes"
+        );
+
+        // Change the published artifact hash for ModA.
+        let mut profile_hash_changed = base_profile();
+        profile_hash_changed.mods[0].bundle_sha256 = Some("deadbeef".into());
+
+        assert_ne!(
+            profile_publish_signature(&profile_original),
+            profile_publish_signature(&profile_hash_changed),
+            "signature must differ when a mod's published artifact hash changes"
         );
 
         // Add a new mod.

@@ -163,6 +163,7 @@ function registerSafeDefaults(): void {
   invokeHandlers.set('check_subscription_updates', () => []);
   invokeHandlers.set('list_profiles_cmd', () => []);
   invokeHandlers.set('get_profile_memberships', () => ({ profiles: [], mods: [] }));
+  invokeHandlers.set('get_library_version_options', () => ({}));
   invokeHandlers.set('set_profile_load_order', () => ({
     profile: null,
     settings_status: 'skipped_inactive',

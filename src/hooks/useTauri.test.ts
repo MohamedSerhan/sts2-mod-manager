@@ -28,6 +28,7 @@ import {
   getGameInfo,
   getInstalledMods,
   getLaunchMode,
+  getLibraryVersionOptions,
   getLogPath,
   getModDependents,
   getModSources,
@@ -367,6 +368,12 @@ describe('useTauri wrappers — command names + arg shapes', () => {
         selectedModId: null,
         applyToDisk: false,
       },
+    });
+
+    await getLibraryVersionOptions();
+    expect(lastCall()).toEqual({
+      cmd: 'get_library_version_options',
+      args: undefined,
     });
 
     await rollbackMod('BaseLib', 'BaseLib-v2');

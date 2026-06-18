@@ -249,7 +249,7 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
       <LibraryTable
         modpackName={activeProfile}
         priorityTag={priorityTag}
-        reloadToken={`bulk:${bulkReloadNonce}`}
+        reloadToken={`bulk:${bulkReloadNonce}|versions:${lib.versionOptionsReloadToken}`}
         {...tableActionProps}
       />
         </>

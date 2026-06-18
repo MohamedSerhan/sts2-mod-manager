@@ -122,6 +122,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     gameInfo,
     notifyNexusOpen,
     auditResults,
+    libraryVersionRevision,
     auditing,
     runAudit,
     updatingAll,
@@ -148,6 +149,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   // don't share a spinner.
   const [updatingKey, setUpdatingKey] = useState<string | null>(null);
   const updatingKeyRef = useRef<string | null>(null);
+  const [localVersionRevision, setLocalVersionRevision] = useState(0);
   const [repairingKey, setRepairingKey] = useState<string | null>(null);
   const [rollingBackKey, setRollingBackKey] = useState<string | null>(null);
 
@@ -320,6 +322,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
         );
       }
       const info = await updateMod(mod.name, mod.folder_name, targetPack ?? null);
+      setLocalVersionRevision((n) => n + 1);
       toast.success(t('mods.toast.updated', { name: mod.name, version: info.version }));
       await refreshAll();
       await refreshAuditEntries(
@@ -348,7 +351,9 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function updateAllGithubForSurface(githubUpdateNames: string[]) {
-    return updateAllGithub(githubUpdateNames, targetPack ? { profileId: targetPack } : undefined);
+    const updated = await updateAllGithub(githubUpdateNames, targetPack ? { profileId: targetPack } : undefined);
+    if (updated.length > 0) setLocalVersionRevision((n) => n + 1);
+    return updated;
   }
 
   async function handleTogglePin(mod: ModInfo) {
@@ -805,6 +810,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     // Per-row lookups (also exposed for views that need them directly).
     modInfoByKey,
     auditByKey,
+    versionOptionsReloadToken: `${libraryVersionRevision}:${localVersionRevision}`,
     // Spread-in bundle for LibraryTable.
     tableActionProps,
   };

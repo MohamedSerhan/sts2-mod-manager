@@ -46,6 +46,7 @@ import { useConfirm } from './ConfirmDialog';
 import { isActionableUpdate } from '../lib/auditState';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
 import {
+  getLibraryVersionOptions,
   getProfileMemberships,
   selectLibraryModVersion,
   selectProfileModVersion,
@@ -296,6 +297,7 @@ export function LibraryTable({
   const focusedProfileLabel = modpackLabel ?? modpackName;
 
   const [grid, setGrid] = useState<ProfileMembershipGrid | null>(null);
+  const [libraryVersionOptionsById, setLibraryVersionOptionsById] = useState<Map<string, LocalModVersionOption[]>>(new Map());
   const [loading, setLoading] = useState(modpackName != null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState(initialSearch);
@@ -342,9 +344,20 @@ export function LibraryTable({
   const load = useCallback(async () => {
     if (modpackName == null) {
       // No-focus mode — rows are synthesized from the AppContext mods
-      // array (see the synthesizedGrid useMemo below). No need to round-
-      // trip through getProfileMemberships.
-      setLoading(false);
+      // array (see the synthesizedGrid useMemo below). Fetch only the compact
+      // version-option map so cache-only updates can still appear here without
+      // pulling the full profile-by-mod membership grid.
+      try {
+        setLoading(true);
+        setError(null);
+        const result = await getLibraryVersionOptions();
+        setLibraryVersionOptionsById(new Map(Object.entries(result)));
+      } catch (e) {
+        setLibraryVersionOptionsById(new Map());
+        console.debug('getLibraryVersionOptions failed:', e);
+      } finally {
+        setLoading(false);
+      }
       return;
     }
     try {
@@ -384,10 +397,13 @@ export function LibraryTable({
         mod_id: mod.mod_id,
         display_name: mod.display_name,
         installed_enabled: mod.enabled,
+        version_options: mod.mod_version_id
+          ? libraryVersionOptionsById.get(mod.mod_version_id) ?? []
+          : [],
         profiles: [],
       })),
     };
-  }, [modpackName, appMods]);
+  }, [modpackName, appMods, libraryVersionOptionsById]);
 
   const effectiveGrid = modpackName == null ? synthesizedGrid : grid;
 

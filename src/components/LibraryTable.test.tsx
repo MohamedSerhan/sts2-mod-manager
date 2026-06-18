@@ -1086,6 +1086,53 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(getInvokeCalls().some((call) => call.cmd === 'select_profile_mod_version')).toBe(false);
   });
 
+  it('shows cached-only backend versions in the no-focus Library selector', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'end-run-031',
+        name: 'End Run Graph',
+        version: '0.3.1',
+        folder_name: 'EndRunGraph-v0.3.1',
+        mod_id: 'EndRunGraph',
+        enabled: true,
+      }),
+    ]);
+    registerInvokeHandler('get_library_version_options', () => ({
+      'end-run-031': [
+        {
+          mod_version_id: 'end-run-032',
+          name: 'End Run Graph',
+          version: '0.3.2',
+          folder_name: 'EndRunGraph-v0.3.2',
+          mod_id: 'EndRunGraph',
+          installed: false,
+          installed_enabled: false,
+          cached: true,
+          pinned: false,
+          used_by_profiles: [],
+        },
+        {
+          mod_version_id: 'end-run-031',
+          name: 'End Run Graph',
+          version: '0.3.1',
+          folder_name: 'EndRunGraph-v0.3.1',
+          mod_id: 'EndRunGraph',
+          installed: true,
+          installed_enabled: true,
+          cached: true,
+          pinned: false,
+          used_by_profiles: ['TesterW'],
+        },
+      ],
+    }));
+
+    render(<Wrap modpackName={null} />);
+
+    const picker = await screen.findByRole('combobox', { name: /Choose version/i });
+    expect(within(picker).getByRole('option', { name: /0\.3\.2 \(stored\)/i })).toBeInTheDocument();
+    expect(within(picker).getByRole('option', { name: /0\.3\.1 \(active\)/i })).toBeInTheDocument();
+  });
+
   it('renders rows without the storage chip or per-row Store button', async () => {
     seedInstalledMods();
     const { container } = render(<Wrap modpackName={null} />);

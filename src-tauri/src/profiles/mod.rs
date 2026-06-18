@@ -259,6 +259,30 @@ pub fn get_profile_memberships(
 }
 
 #[tauri::command]
+pub fn get_library_version_options(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<HashMap<String, Vec<LocalModVersionOption>>, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    let mut installed_mods = crate::mods::merge_active_disabled_mods(
+        crate::mods::scan_mods(mods_path),
+        crate::mods::scan_disabled_mods(disabled_path),
+    );
+    crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, &s.config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, &s.config_path);
+    let profiles = list_profiles(&s.profiles_path);
+    Ok(
+        crate::mod_versions::local_version_options_by_mod_version_id(
+            &installed_mods,
+            &profiles,
+            &s.config_path,
+            &s.cache_path,
+        ),
+    )
+}
+
+#[tauri::command]
 pub fn set_profile_mod_membership(
     profile_id: String,
     mod_name: String,

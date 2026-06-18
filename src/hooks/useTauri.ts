@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage } from '../types';
+import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -209,6 +209,10 @@ export async function importSts2pack(path: string): Promise<Profile> {
 
 export async function getProfileMemberships(): Promise<ProfileMembershipGrid> {
   return invoke('get_profile_memberships');
+}
+
+export async function getLibraryVersionOptions(): Promise<Record<string, LocalModVersionOption[]>> {
+  return invoke('get_library_version_options');
 }
 
 export async function setProfileModMembership(

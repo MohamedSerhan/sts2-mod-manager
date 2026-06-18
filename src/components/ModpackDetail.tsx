@@ -881,7 +881,7 @@ export function ModpackDetail({
           modpackLabel={profile.name}
           packScoped
           coupleActiveStorage
-          reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}|bulk:${bulkReloadNonce}`}
+          reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}|bulk:${bulkReloadNonce}|versions:${lib.versionOptionsReloadToken}`}
           toolbarActions={packToolbarActions}
           bulkActionsBar={packBulkBar}
           filterRow={(row) => {

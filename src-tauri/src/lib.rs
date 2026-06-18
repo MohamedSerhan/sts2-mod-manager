@@ -365,6 +365,7 @@ pub fn run() {
             // Profiles
             profiles::list_profiles_cmd,
             profiles::get_profile_memberships,
+            profiles::get_library_version_options,
             profiles::set_profile_mod_membership,
             profiles::select_profile_mod_version,
             profiles::select_library_mod_version,

@@ -22,6 +22,7 @@ interface AppContextType {
    *  here from Settings so the Mods view can show per-row "update available"
    *  pills without forcing the user to dig into Settings to discover them. */
   auditResults: ModAuditEntry[] | null;
+  libraryVersionRevision: number;
   auditing: boolean;
   runAudit: (only?: AuditRefreshTarget[]) => Promise<void>;
   refreshAuditEntries: (targets: AuditRefreshTarget[]) => Promise<void>;
@@ -137,6 +138,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [gameRunning, setGameRunning] = useState<boolean>(false);
   const [subUpdates, setSubUpdates] = useState<SubscriptionUpdate[]>([]);
   const [auditResults, setAuditResults] = useState<ModAuditEntry[] | null>(null);
+  const [libraryVersionRevision, setLibraryVersionRevision] = useState(0);
   const [auditing, setAuditing] = useState<boolean>(false);
   const [updatingAll, setUpdatingAll] = useState<boolean>(false);
   const gameRunningRef = useRef<boolean>(false);
@@ -193,6 +195,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // landed. Dismiss.
     const unlisten = listen('mod-auto-installed', () => {
       dismissNexusPending();
+      setLibraryVersionRevision((n) => n + 1);
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -339,6 +342,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUpdatingAll(true);
     try {
       const updated = await updateAllMods(opts?.profileId ?? null);
+      if (updated.length > 0) setLibraryVersionRevision((n) => n + 1);
       await opts?.afterUpdate?.(updated);
       toast.success(
         updated.length === 0
@@ -430,7 +434,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshGameRunning, refreshMods]);
 
   return (
-    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, activeProfileId, gameRunning, subUpdates, auditResults, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, refreshSubUpdates, setActiveProfile, notifyNexusOpen }}>
+    <AppContext.Provider value={{ gameInfo, mods, loading, activeProfile, activeProfileId, gameRunning, subUpdates, auditResults, libraryVersionRevision, auditing, runAudit, refreshAuditEntries, updatingAll, updateAllGithub, refreshGameInfo, refreshMods, refreshAll, refreshGameRunning, refreshSubUpdates, setActiveProfile, notifyNexusOpen }}>
       {children}
     </AppContext.Provider>
   );

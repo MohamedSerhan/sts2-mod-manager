@@ -194,12 +194,31 @@ pub async fn install_shared_profile(
         );
 
         // Find matching on-disk mod
-        let on_disk_mod = on_disk_by_id
-            .get(pm.mod_version_id.as_deref().unwrap_or(""))
-            .or_else(|| on_disk_by_id.get(&pm.name))
-            .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
-            .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
-            .copied();
+        let on_disk_mod = pm
+            .mod_version_id
+            .as_ref()
+            .and_then(|id| on_disk_by_id.get(id))
+            .copied()
+            .or_else(|| {
+                all_on_disk.iter().find(|disk_mod| {
+                    crate::profiles::profile_mod_matches_installed_with_registry(
+                        pm,
+                        disk_mod,
+                        &config_path,
+                    )
+                })
+            })
+            .or_else(|| on_disk_by_id.get(&pm.name).copied())
+            .or_else(|| {
+                pm.folder_name
+                    .as_ref()
+                    .and_then(|f| on_disk_by_id.get(f).copied())
+            })
+            .or_else(|| {
+                pm.mod_id
+                    .as_ref()
+                    .and_then(|id| on_disk_by_id.get(id).copied())
+            });
 
         if on_disk_mod.is_none() && crate::profiles::profile_mod_matches_pin(pm, &pinned_set) {
             log::info!(
@@ -226,8 +245,11 @@ pub async fn install_shared_profile(
                 || profile_ver == "0.0.0"
                 || disk_ver == "unknown"
                 || disk_ver == "0.0.0";
+            let artifact_ok =
+                crate::profiles::profile_mod_artifact_id_matches(pm, disk_mod, &config_path)
+                    .unwrap_or(true);
 
-            if version_ok {
+            if version_ok && artifact_ok {
                 log::info!(
                     "Mod '{}' already on disk at correct version ({})",
                     pm.name,
@@ -236,42 +258,100 @@ pub async fn install_shared_profile(
                 continue;
             }
 
-            // Version mismatch -- need to replace with the profile's version
-            if pm.bundle_url.is_some() {
-                log::info!(
-                    "Mod '{}' version mismatch (disk: {}, profile: {}) -- will reinstall",
-                    pm.name,
-                    disk_mod.version,
-                    pm.version
-                );
-                // Cache the current version before deleting (so user can switch back)
-                let cache_base = if disk_mod.enabled {
+            // Version or artifact mismatch -- need to replace with the profile's artifact.
+            log::info!(
+                "Mod '{}' artifact mismatch (disk: {}, profile: {}, artifact_ok: {}) -- will reinstall",
+                pm.name,
+                disk_mod.version,
+                pm.version,
+                artifact_ok
+            );
+            // Cache the current version before deleting (so user can switch back)
+            let cache_base = if disk_mod.enabled {
+                &mods_path
+            } else {
+                &disabled_path
+            };
+            let mut disk_snapshot = disk_mod.clone();
+            if crate::mod_versions::cache_mod_version_by_id(
+                &mut disk_snapshot,
+                cache_base,
+                &cache_path,
+                &config_path,
+            )
+            .is_none()
+            {
+                crate::mods::cache_mod_version(disk_mod, cache_base, &cache_path);
+            }
+
+            let has_id_cache = crate::mod_versions::get_cached_mod_path_for_profile_mod(
+                &cache_path,
+                &config_path,
+                pm,
+            )
+            .is_some();
+            let has_legacy_cache =
+                crate::mods::get_cached_mod_path(&cache_path, &pm.name, &pm.version).is_some();
+            if has_id_cache || (has_legacy_cache && !version_ok) {
+                let base = if disk_mod.enabled {
                     &mods_path
                 } else {
                     &disabled_path
                 };
-                let mut disk_snapshot = disk_mod.clone();
-                if crate::mod_versions::cache_mod_version_by_id(
-                    &mut disk_snapshot,
-                    cache_base,
-                    &cache_path,
-                    &config_path,
-                )
-                .is_none()
-                {
-                    crate::mods::cache_mod_version(disk_mod, cache_base, &cache_path);
+                let previous_profile_mod = crate::profiles::profile_mod_from_installed(disk_mod);
+                crate::mods::delete_mod_files_by_info(disk_mod, base);
+                let restored = if has_id_cache {
+                    crate::mod_versions::restore_mod_from_cache_by_id(
+                        &cache_path,
+                        &config_path,
+                        pm,
+                        &mods_path,
+                    )
+                } else {
+                    crate::mods::restore_mod_from_cache(
+                        &cache_path,
+                        &pm.name,
+                        &pm.version,
+                        &mods_path,
+                    )
+                };
+                if restored.is_ok() {
+                    log::info!("Restored '{}' v{} from local cache", pm.name, pm.version);
+                    continue;
+                } else if pm.bundle_url.is_none() {
+                    log::warn!(
+                        "Failed to restore cached artifact for '{}' and no bundle is available; restoring previous disk copy",
+                        pm.name
+                    );
+                    let _ = crate::mod_versions::restore_mod_from_cache_by_id(
+                        &cache_path,
+                        &config_path,
+                        &previous_profile_mod,
+                        base,
+                    )
+                    .or_else(|_| {
+                        crate::mods::restore_mod_from_cache(
+                            &cache_path,
+                            &disk_mod.name,
+                            &disk_mod.version,
+                            base,
+                        )
+                    });
+                    continue;
                 }
-                // Delete old version
+            }
+
+            if pm.bundle_url.is_some() {
+                // Delete old version and fall through to download the correct artifact.
                 let base = if disk_mod.enabled {
                     &mods_path
                 } else {
                     &disabled_path
                 };
                 crate::mods::delete_mod_files_by_info(disk_mod, base);
-                // Fall through to download the correct version
             } else {
                 log::info!(
-                    "Mod '{}' version mismatch (disk: {}, profile: {}) but no bundle -- keeping disk version",
+                    "Mod '{}' artifact mismatch (disk: {}, profile: {}) but no bundle -- keeping disk version",
                     pm.name, disk_mod.version, pm.version
                 );
                 continue;
@@ -475,8 +555,14 @@ pub async fn install_shared_profile(
     // ── STEP 2: Apply profile AFTER downloads ──
     // Now all downloadable mods are in mods_path, apply_profile can correctly enable/disable
     emit_modpack_install_progress(&app_handle, &profile.name, "applying", 0, total_mods, None);
-    crate::profiles::apply_profile_with_pins(&profile, &mods_path, &disabled_path, &pinned_set)
-        .map_err(|e| e.to_string())?;
+    crate::profiles::apply_profile_with_pins(
+        &profile,
+        &mods_path,
+        &disabled_path,
+        &pinned_set,
+        &config_path,
+    )
+    .map_err(|e| e.to_string())?;
 
     // ── STEP 3: Mark imported profile as active ──
     // We just rewrote disk to match this profile. If we leave the

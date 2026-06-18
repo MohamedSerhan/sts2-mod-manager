@@ -38,8 +38,9 @@ pub use crud::{
     save_profile,
 };
 pub(crate) use crud::{
-    migrate_profile_identity_storage, profile_file_stem, profile_mod_matches_installed,
-    profile_name_exists, unique_profile_name,
+    migrate_profile_identity_storage, profile_file_stem, profile_mod_artifact_id_matches,
+    profile_mod_from_installed, profile_mod_matches_installed_with_registry, profile_name_exists,
+    unique_profile_name,
 };
 pub use drift::{ProfileDrift, RepairProfileResult, VersionMismatch};
 pub use membership::SetProfileModsEnabledResult;
@@ -322,7 +323,7 @@ pub fn set_profile_mods_enabled(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<SetProfileModsEnabledResult, String> {
     crate::game::ensure_game_not_running()?;
-    let (mods_path, disabled_path, profiles_path) = {
+    let (mods_path, disabled_path, profiles_path, config_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         (
             s.mods_path.as_ref().ok_or("Game path not set")?.clone(),
@@ -331,6 +332,7 @@ pub fn set_profile_mods_enabled(
                 .ok_or("Game path not set")?
                 .clone(),
             s.profiles_path.clone(),
+            s.config_path.clone(),
         )
     };
     set_profile_mods_enabled_from_paths(
@@ -339,6 +341,7 @@ pub fn set_profile_mods_enabled(
         &mods_path,
         &disabled_path,
         &profiles_path,
+        &config_path,
     )
     .map_err(|e| e.to_string())
 }

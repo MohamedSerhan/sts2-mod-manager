@@ -601,12 +601,31 @@ async fn apply_subscription_update_inner(
 
     for pm in &remote.mods {
         // Find matching on-disk mod
-        let on_disk_mod = on_disk_by_id
-            .get(pm.mod_version_id.as_deref().unwrap_or(""))
-            .or_else(|| on_disk_by_id.get(&pm.name))
-            .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
-            .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
-            .copied();
+        let on_disk_mod = pm
+            .mod_version_id
+            .as_ref()
+            .and_then(|id| on_disk_by_id.get(id))
+            .copied()
+            .or_else(|| {
+                all_on_disk.iter().find(|disk_mod| {
+                    crate::profiles::profile_mod_matches_installed_with_registry(
+                        pm,
+                        disk_mod,
+                        &config_path,
+                    )
+                })
+            })
+            .or_else(|| on_disk_by_id.get(&pm.name).copied())
+            .or_else(|| {
+                pm.folder_name
+                    .as_ref()
+                    .and_then(|f| on_disk_by_id.get(f).copied())
+            })
+            .or_else(|| {
+                pm.mod_id
+                    .as_ref()
+                    .and_then(|id| on_disk_by_id.get(id).copied())
+            });
 
         // Pinned mods keep their installed version — don't replace files.
         let is_pinned = pinned_set.contains(&pm.name)
@@ -639,17 +658,21 @@ async fn apply_subscription_update_inner(
                 || profile_ver == "0.0.0"
                 || disk_ver == "unknown"
                 || disk_ver == "0.0.0";
+            let artifact_ok =
+                crate::profiles::profile_mod_artifact_id_matches(pm, disk_mod, &config_path)
+                    .unwrap_or(true);
 
-            if version_ok {
+            if version_ok && artifact_ok {
                 continue;
             }
 
-            // Version mismatch -- reinstall from bundle or cache
+            // Version or artifact mismatch -- reinstall from bundle or cache
             log::info!(
-                "Subscription update: mod '{}' version mismatch (disk: {}, remote: {})",
+                "Subscription update: mod '{}' artifact mismatch (disk: {}, remote: {}, artifact_ok: {})",
                 pm.name,
                 disk_mod.version,
-                pm.version
+                pm.version,
+                artifact_ok
             );
 
             // Cache current version before deleting
@@ -679,12 +702,13 @@ async fn apply_subscription_update_inner(
             .is_some();
             let has_legacy_cache =
                 crate::mods::get_cached_mod_path(&cache_path, &pm.name, &pm.version).is_some();
-            if has_id_cache || has_legacy_cache {
+            if has_id_cache || (has_legacy_cache && !version_ok) {
                 let base = if disk_mod.enabled {
                     &mods_path
                 } else {
                     &disabled_path
                 };
+                let previous_profile_mod = crate::profiles::profile_mod_from_installed(disk_mod);
                 crate::mods::delete_mod_files_by_info(disk_mod, base);
                 let restored = if has_id_cache {
                     crate::mod_versions::restore_mod_from_cache_by_id(
@@ -703,6 +727,26 @@ async fn apply_subscription_update_inner(
                 };
                 if restored.is_ok() {
                     log::info!("Restored '{}' v{} from local cache", pm.name, pm.version);
+                    continue;
+                } else if pm.bundle_url.is_none() {
+                    log::warn!(
+                        "Failed to restore cached artifact for '{}' and no bundle is available; restoring previous disk copy",
+                        pm.name
+                    );
+                    let _ = crate::mod_versions::restore_mod_from_cache_by_id(
+                        &cache_path,
+                        &config_path,
+                        &previous_profile_mod,
+                        base,
+                    )
+                    .or_else(|_| {
+                        crate::mods::restore_mod_from_cache(
+                            &cache_path,
+                            &disk_mod.name,
+                            &disk_mod.version,
+                            base,
+                        )
+                    });
                     continue;
                 }
             }
@@ -918,8 +962,14 @@ async fn apply_subscription_update_inner(
         remote.name,
         remote.mods.len()
     );
-    crate::profiles::apply_profile_with_pins(&remote, &mods_path, &disabled_path, &pinned_set)
-        .map_err(|e| e.to_string())?;
+    crate::profiles::apply_profile_with_pins(
+        &remote,
+        &mods_path,
+        &disabled_path,
+        &pinned_set,
+        &config_path,
+    )
+    .map_err(|e| e.to_string())?;
 
     // ── STEP 3: Mark this profile as active ──
     // Without this, a previously-active profile would still be reported as

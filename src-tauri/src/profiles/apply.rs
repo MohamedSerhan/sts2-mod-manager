@@ -27,7 +27,8 @@ use crate::error::Result;
 use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods};
 
 use super::crud::{
-    load_profile, mod_identity_keys, profile_mod_matches_installed, sanitize_filename,
+    load_profile, mod_identity_keys, profile_mod_artifact_id_matches,
+    profile_mod_matches_installed, profile_mod_matches_installed_with_registry, sanitize_filename,
     save_profile, version_is_wildcard,
 };
 use super::membership::sync_profile_load_order_to_settings;
@@ -318,9 +319,8 @@ pub fn apply_profile_with_pins(
     mods_path: &Path,
     disabled_path: &Path,
     pinned: &std::collections::HashSet<String>,
+    config_path: &Path,
 ) -> Result<()> {
-    use std::collections::HashMap;
-
     let is_pinned = |m: &crate::mods::ModInfo| -> bool {
         if pinned.contains(&m.name) {
             return true;
@@ -349,40 +349,36 @@ pub fn apply_profile_with_pins(
     // filesystem (Linux / Steam Deck) a profile identifier that differs only
     // in case from the on-disk folder would otherwise miss here and silently
     // disable a mod that drift considers present.
-    let mut profile_state: HashMap<String, bool> = HashMap::new();
-    for pm in &profile.mods {
-        profile_state.insert(pm.name.to_lowercase(), pm.enabled);
-        if let Some(ref folder) = pm.folder_name {
-            profile_state.insert(folder.to_lowercase(), pm.enabled);
-        }
-        if let Some(ref id) = pm.mod_id {
-            profile_state.insert(id.to_lowercase(), pm.enabled);
-        }
-    }
-
-    // Look up an on-disk mod against the multi-key profile state. Returns None
-    // if no identifier matched the profile at all (i.e. mod is not part of the
-    // profile and should be disabled). Lookups are lowercased to match the
-    // keys built above.
+    // Look up an on-disk mod against the profile state. Artifact IDs are
+    // authoritative when both sides have them; folder/name fallback remains for
+    // legacy entries without IDs.
     let lookup = |m: &crate::mods::ModInfo| -> Option<bool> {
-        if let Some(v) = profile_state.get(&m.name.to_lowercase()) {
-            return Some(*v);
-        }
-        if let Some(ref folder) = m.folder_name {
-            if let Some(v) = profile_state.get(&folder.to_lowercase()) {
-                return Some(*v);
+        let mut legacy_match = None;
+        let mut id_conflict = false;
+        for pm in &profile.mods {
+            if let Some(id_match) = profile_mod_artifact_id_matches(pm, m, config_path) {
+                if id_match {
+                    return Some(pm.enabled);
+                }
+                if profile_mod_matches_installed(pm, m) {
+                    id_conflict = true;
+                }
+                continue;
+            }
+            if profile_mod_matches_installed(pm, m) {
+                legacy_match = Some(pm.enabled);
             }
         }
-        if let Some(ref id) = m.mod_id {
-            if let Some(v) = profile_state.get(&id.to_lowercase()) {
-                return Some(*v);
-            }
+        if id_conflict {
+            None
+        } else {
+            legacy_match
         }
-        None
     };
 
     // Step 1: Move mods outside the profile from enabled to disabled.
-    let current_enabled = scan_mods(mods_path);
+    let mut current_enabled = scan_mods(mods_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut current_enabled, config_path);
     for m in &current_enabled {
         if is_pinned(m) {
             log::info!(
@@ -413,7 +409,8 @@ pub fn apply_profile_with_pins(
     }
 
     // Step 2: Move included profile mods from disabled to enabled.
-    let current_disabled = scan_disabled_mods(disabled_path);
+    let mut current_disabled = scan_disabled_mods(disabled_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut current_disabled, config_path);
     for m in &current_disabled {
         if is_pinned(m) {
             log::info!(
@@ -446,30 +443,11 @@ pub fn apply_profile_with_pins(
     // Warn about profile mods that we never saw on disk (neither enabled nor
     // disabled). Helps diagnose subscription-update issues where a download
     // landed under a different identifier than the profile expected.
-    let on_disk_ids: std::collections::HashSet<String> = current_enabled
-        .iter()
-        .chain(current_disabled.iter())
-        .flat_map(|m| {
-            let mut ids = vec![m.name.clone()];
-            if let Some(ref f) = m.folder_name {
-                ids.push(f.clone());
-            }
-            if let Some(ref i) = m.mod_id {
-                ids.push(i.clone());
-            }
-            ids
-        })
-        .collect();
     for pm in &profile.mods {
-        let found = on_disk_ids.contains(&pm.name)
-            || pm
-                .folder_name
-                .as_ref()
-                .map_or(false, |f| on_disk_ids.contains(f))
-            || pm
-                .mod_id
-                .as_ref()
-                .map_or(false, |i| on_disk_ids.contains(i));
+        let found = current_enabled
+            .iter()
+            .chain(current_disabled.iter())
+            .any(|disk_mod| profile_mod_matches_installed_with_registry(pm, disk_mod, config_path));
         if !found {
             log::error!(
                 "Profile apply: profile expects '{}' enabled but no matching mod found on disk (folder={:?}, mod_id={:?})",
@@ -530,19 +508,23 @@ fn profile_content_matches_disk(pm: &ProfileMod, disk_mod: &crate::mods::ModInfo
 
 const PROFILE_ENABLE_MAX_ATTEMPTS: usize = 3;
 
-fn profile_mod_has_active_match(pm: &ProfileMod, mods_path: &Path) -> bool {
-    scan_mods(mods_path)
-        .iter()
-        .any(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
+fn profile_mod_has_active_match(pm: &ProfileMod, mods_path: &Path, config_path: &Path) -> bool {
+    let mut mods = scan_mods(mods_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut mods, config_path);
+    mods.iter()
+        .any(|disk_mod| profile_mod_matches_installed_with_registry(pm, disk_mod, config_path))
 }
 
 fn find_disabled_profile_mod(
     pm: &ProfileMod,
     disabled_path: &Path,
+    config_path: &Path,
 ) -> Option<crate::mods::ModInfo> {
-    scan_disabled_mods(disabled_path)
+    let mut disabled = scan_disabled_mods(disabled_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut disabled, config_path);
+    disabled
         .into_iter()
-        .find(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
+        .find(|disk_mod| profile_mod_matches_installed_with_registry(pm, disk_mod, config_path))
 }
 
 fn enable_mod_with_identity_fallbacks(
@@ -588,19 +570,24 @@ fn enable_mod_with_identity_fallbacks(
     }))
 }
 
-fn retry_enable_profile_mod(pm: &ProfileMod, mods_path: &Path, disabled_path: &Path) -> bool {
+fn retry_enable_profile_mod(
+    pm: &ProfileMod,
+    mods_path: &Path,
+    disabled_path: &Path,
+    config_path: &Path,
+) -> bool {
     for attempt in 1..=PROFILE_ENABLE_MAX_ATTEMPTS {
-        if profile_mod_has_active_match(pm, mods_path) {
+        if profile_mod_has_active_match(pm, mods_path, config_path) {
             return true;
         }
 
-        let Some(disabled_mod) = find_disabled_profile_mod(pm, disabled_path) else {
+        let Some(disabled_mod) = find_disabled_profile_mod(pm, disabled_path, config_path) else {
             return false;
         };
 
         match enable_mod_with_identity_fallbacks(&disabled_mod, disabled_path, mods_path) {
             Ok(()) => {
-                if profile_mod_has_active_match(pm, mods_path) {
+                if profile_mod_has_active_match(pm, mods_path, config_path) {
                     return true;
                 }
                 log::warn!(
@@ -626,7 +613,7 @@ fn retry_enable_profile_mod(pm: &ProfileMod, mods_path: &Path, disabled_path: &P
         }
     }
 
-    profile_mod_has_active_match(pm, mods_path)
+    profile_mod_has_active_match(pm, mods_path, config_path)
 }
 
 fn retry_enable_included_profile_mods(
@@ -634,6 +621,7 @@ fn retry_enable_included_profile_mods(
     mods_path: &Path,
     disabled_path: &Path,
     pinned: &std::collections::HashSet<String>,
+    config_path: &Path,
 ) -> Vec<String> {
     let mut failed = Vec::new();
 
@@ -644,10 +632,10 @@ fn retry_enable_included_profile_mods(
         if profile_mod_matches_pin(pm, pinned) {
             continue;
         }
-        if profile_mod_has_active_match(pm, mods_path) {
+        if profile_mod_has_active_match(pm, mods_path, config_path) {
             continue;
         }
-        if find_disabled_profile_mod(pm, disabled_path).is_none() {
+        if find_disabled_profile_mod(pm, disabled_path, config_path).is_none() {
             continue;
         }
 
@@ -655,7 +643,7 @@ fn retry_enable_included_profile_mods(
             "Profile switch: '{}' is still stored after apply; retrying enable",
             pm.name
         );
-        if !retry_enable_profile_mod(pm, mods_path, disabled_path) {
+        if !retry_enable_profile_mod(pm, mods_path, disabled_path, config_path) {
             log::error!(
                 "Profile switch: '{}' is still not active after {} enable attempts",
                 pm.name,
@@ -814,6 +802,9 @@ pub(crate) async fn switch_profile_from_paths(
     let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> =
         std::collections::HashMap::new();
     for m in &all_on_disk {
+        if let Some(ref version_id) = m.mod_version_id {
+            on_disk_by_id.insert(version_id.clone(), m);
+        }
         on_disk_by_id.insert(m.name.clone(), m);
         if let Some(ref folder) = m.folder_name {
             on_disk_by_id.insert(folder.clone(), m);
@@ -839,15 +830,26 @@ pub(crate) async fn switch_profile_from_paths(
         // download attempts below.
         let mut replace_swap: Option<crate::fs_safety::DirSwap> = None;
         // Find matching on-disk mod
-        let on_disk_mod = on_disk_by_id
-            .get(&pm.name)
-            .or_else(|| pm.folder_name.as_ref().and_then(|f| on_disk_by_id.get(f)))
-            .or_else(|| pm.mod_id.as_ref().and_then(|id| on_disk_by_id.get(id)))
+        let on_disk_mod = pm
+            .mod_version_id
+            .as_ref()
+            .and_then(|id| on_disk_by_id.get(id))
             .copied()
             .or_else(|| {
-                all_on_disk
-                    .iter()
-                    .find(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
+                all_on_disk.iter().find(|disk_mod| {
+                    profile_mod_matches_installed_with_registry(pm, disk_mod, config_path)
+                })
+            })
+            .or_else(|| on_disk_by_id.get(&pm.name).copied())
+            .or_else(|| {
+                pm.folder_name
+                    .as_ref()
+                    .and_then(|f| on_disk_by_id.get(f).copied())
+            })
+            .or_else(|| {
+                pm.mod_id
+                    .as_ref()
+                    .and_then(|id| on_disk_by_id.get(id).copied())
             });
 
         if on_disk_mod.is_none() && profile_mod_matches_pin(pm, &pinned_set) {
@@ -876,13 +878,20 @@ pub(crate) async fn switch_profile_from_paths(
                 || disk_ver == "unknown"
                 || disk_ver == "0.0.0";
             let content_ok = profile_content_matches_disk(pm, disk_mod);
+            let artifact_ok =
+                profile_mod_artifact_id_matches(pm, disk_mod, config_path).unwrap_or(true);
 
-            if version_ok && content_ok {
+            if version_ok && content_ok && artifact_ok {
                 continue; // Correct version/content on disk
             }
 
             let version_mismatch = !version_ok;
-            if version_mismatch {
+            if !artifact_ok {
+                log::info!(
+                    "Mod '{}' artifact mismatch -- restoring profile artifact",
+                    pm.name
+                );
+            } else if version_mismatch {
                 log::info!(
                     "Mod '{}' version mismatch (disk: {}, profile: {}) -- restoring profile version",
                     pm.name, disk_mod.version, pm.version
@@ -912,9 +921,9 @@ pub(crate) async fn switch_profile_from_paths(
                 crate::mods::cache_mod_version(disk_mod, cache_base, cache_path);
             }
 
-            // Try local cache first for true version mismatches. For same-version
-            // content drift the cache key (name + version) is ambiguous, so the
-            // exact profile bundle is the only trustworthy restore source.
+            // Try local cache first for true version/artifact mismatches. For
+            // same-version content drift the legacy cache key (name + version)
+            // is ambiguous, but the UUID cache remains exact.
             let has_id_cache = crate::mod_versions::get_cached_mod_path_for_profile_mod(
                 cache_path,
                 config_path,
@@ -923,7 +932,9 @@ pub(crate) async fn switch_profile_from_paths(
             .is_some();
             let has_legacy_cache =
                 crate::mods::get_cached_mod_path(cache_path, &pm.name, &pm.version).is_some();
-            if version_mismatch && (has_id_cache || has_legacy_cache) {
+            let use_id_cache = has_id_cache && (version_mismatch || !artifact_ok);
+            let use_legacy_cache = has_legacy_cache && version_mismatch;
+            if use_id_cache || use_legacy_cache {
                 let base = if disk_mod.enabled {
                     mods_path
                 } else {
@@ -933,7 +944,7 @@ pub(crate) async fn switch_profile_from_paths(
                 // failed cache restore rolls back to the old version.
                 match stash_mod_for_replace(disk_mod, base, mods_path) {
                     Ok(swap) => {
-                        let restore_result = if has_id_cache {
+                        let restore_result = if use_id_cache {
                             crate::mod_versions::restore_mod_from_cache_by_id(
                                 cache_path,
                                 config_path,
@@ -1047,7 +1058,7 @@ pub(crate) async fn switch_profile_from_paths(
                     crate::mod_versions::enrich_mods_with_versions(&mut after_scan, config_path);
                     if let Some(installed) = after_scan
                         .iter_mut()
-                        .find(|m| profile_mod_matches_installed(pm, m))
+                        .find(|m| profile_mod_matches_installed_with_registry(pm, m, config_path))
                     {
                         if let Some(shared_id) = pm.mod_version_id.as_deref() {
                             crate::mod_versions::alias_shared_id(shared_id, installed, config_path);
@@ -1165,10 +1176,15 @@ pub(crate) async fn switch_profile_from_paths(
     crate::mod_sources::merge_shared_extras(&profile.mod_extras, config_path);
 
     // ── STEP 2: Apply profile AFTER downloads ──
-    apply_profile_with_pins(&profile, mods_path, disabled_path, &pinned_set)
+    apply_profile_with_pins(&profile, mods_path, disabled_path, &pinned_set, config_path)
         .map_err(|e| e.to_string())?;
-    let failed_enables =
-        retry_enable_included_profile_mods(&profile, mods_path, disabled_path, &pinned_set);
+    let failed_enables = retry_enable_included_profile_mods(
+        &profile,
+        mods_path,
+        disabled_path,
+        &pinned_set,
+        config_path,
+    );
 
     let (load_order_status, load_order_path) =
         sync_profile_load_order_to_settings(&profile, mods_path, disabled_path, config_path);
@@ -1190,9 +1206,9 @@ pub(crate) async fn switch_profile_from_paths(
         .mods
         .iter()
         .filter(|pm| {
-            !final_on_disk
-                .iter()
-                .any(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
+            !final_on_disk.iter().any(|disk_mod| {
+                profile_mod_matches_installed_with_registry(pm, disk_mod, config_path)
+            })
         })
         .map(|pm| pm.name.clone())
         .collect();
@@ -2148,6 +2164,7 @@ mod modpack_flow_tests {
             &paths.mods,
             &paths.disabled,
             &std::collections::HashSet::new(),
+            &paths.config,
         );
 
         assert!(
@@ -2193,6 +2210,7 @@ mod modpack_flow_tests {
             &paths.mods,
             &paths.disabled,
             &std::collections::HashSet::new(),
+            &paths.config,
         );
 
         assert!(

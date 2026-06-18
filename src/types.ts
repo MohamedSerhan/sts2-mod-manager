@@ -80,6 +80,7 @@ export interface ProfileMod {
   files: string[];
   enabled: boolean;
   bundle_url: string | null;
+  bundle_sha256?: string | null;
   folder_name: string | null;
   mod_id: string | null;
   /** Member-mod display names when this entry is a bundle container.

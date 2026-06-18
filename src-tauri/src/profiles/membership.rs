@@ -32,7 +32,7 @@ use super::apply::disk_mod_matches_pin;
 use super::crud::{
     hide_app_created_by, installed_mod_matches_target, list_profiles, load_profile, mod_key,
     profile_has_json, profile_is_edit_locked, profile_mod_from_installed,
-    profile_mod_matches_installed, profile_mod_matches_target, save_profile,
+    profile_mod_matches_installed_with_registry, profile_mod_matches_target, save_profile,
 };
 use super::{
     LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod,
@@ -73,11 +73,9 @@ pub(crate) fn profile_membership_matrix(
                 .iter()
                 .zip(profile_rows.iter())
                 .map(|(profile, profile_row)| {
-                    let matched = profile
-                        .mods
-                        .iter()
-                        .enumerate()
-                        .find(|(_, pm)| profile_mod_matches_installed(pm, &installed));
+                    let matched = profile.mods.iter().enumerate().find(|(_, pm)| {
+                        profile_mod_matches_installed_with_registry(pm, &installed, config_path)
+                    });
                     ProfileMembershipState {
                         profile_id: profile.id.clone(),
                         profile_name: profile.name.clone(),
@@ -313,10 +311,12 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
     mods_path: &Path,
     disabled_path: &Path,
     profiles_path: &Path,
+    config_path: &Path,
 ) -> Result<SetProfileModsEnabledResult> {
     let mut profile = load_profile(profile_name, profiles_path)?;
-    let installed =
+    let mut installed =
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    crate::mod_versions::enrich_mods_with_versions(&mut installed, config_path);
 
     let mut toggled = Vec::new();
     let mut missing = Vec::new();
@@ -326,7 +326,7 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
         let pm = profile.mods[index].clone();
         match installed
             .iter()
-            .find(|m| profile_mod_matches_installed(&pm, m))
+            .find(|m| profile_mod_matches_installed_with_registry(&pm, m, config_path))
         {
             None => missing.push(pm.name.clone()),
             Some(inst) => {
@@ -721,11 +721,11 @@ fn find_settings_save_path() -> SettingsSaveResolution {
     resolve_settings_save_candidates(candidates)
 }
 
-fn profile_contains_disk_mod(profile: &Profile, disk_mod: &ModInfo) -> bool {
+fn profile_contains_disk_mod(profile: &Profile, disk_mod: &ModInfo, config_path: &Path) -> bool {
     profile
         .mods
         .iter()
-        .any(|pm| profile_mod_matches_installed(pm, disk_mod))
+        .any(|pm| profile_mod_matches_installed_with_registry(pm, disk_mod, config_path))
 }
 
 pub(super) fn sync_profile_load_order_to_settings(
@@ -747,13 +747,16 @@ pub(super) fn sync_profile_load_order_to_settings(
     };
 
     let pinned_set = crate::mod_sources::load_pinned_set(config_path);
-    let pinned_mods =
-        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path))
-            .into_iter()
-            .filter(|m| {
-                disk_mod_matches_pin(m, &pinned_set) && !profile_contains_disk_mod(profile, m)
-            })
-            .collect::<Vec<_>>();
+    let mut all_mods =
+        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    crate::mod_versions::enrich_mods_with_versions(&mut all_mods, config_path);
+    let pinned_mods = all_mods
+        .into_iter()
+        .filter(|m| {
+            disk_mod_matches_pin(m, &pinned_set)
+                && !profile_contains_disk_mod(profile, m, config_path)
+        })
+        .collect::<Vec<_>>();
 
     match write_profile_load_order_to_settings_file(profile, &settings_path, &pinned_mods) {
         Ok(()) => (
@@ -864,6 +867,7 @@ mod profile_membership_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            config_tmp.path(),
         )
         .unwrap();
 
@@ -901,6 +905,7 @@ mod profile_membership_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            config_tmp.path(),
         )
         .unwrap();
 
@@ -933,6 +938,7 @@ mod profile_membership_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            config_tmp.path(),
         )
         .unwrap();
 

@@ -2356,6 +2356,7 @@ mod enrich_priority_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -3470,6 +3471,7 @@ mod shared_profile_source_tests {
             note: None,
             custom_url: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 

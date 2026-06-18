@@ -1472,6 +1472,7 @@ mod compatibility_payload_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -1544,6 +1545,7 @@ mod stash_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 

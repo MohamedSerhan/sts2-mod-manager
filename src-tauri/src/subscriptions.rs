@@ -1079,6 +1079,7 @@ mod own_subscription_sync_tests {
                     bundle_url: None,
                     bundle_sha256: None,
                     bundle_members: vec![],
+                    bundle_member_ids: vec![],
                 })
                 .collect(),
             created_at: now,

@@ -1845,6 +1845,7 @@ mod version_helper_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         overrides(&mut info);
         info
@@ -1976,6 +1977,7 @@ mod version_helper_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         assert!(install_is_incompatible(
             &mk(Some("0.110.0")),
@@ -2412,6 +2414,7 @@ mod version_helper_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         let cached = crate::mod_versions::get_cached_mod_path_for_profile_mod(
             &cache_path,
@@ -3619,6 +3622,7 @@ mod repair_stash_on_failed_extract_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 

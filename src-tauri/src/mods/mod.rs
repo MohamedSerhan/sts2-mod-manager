@@ -129,6 +129,304 @@ pub struct ModInfo {
     /// Empty for standalone mods.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bundle_members: Vec<String>,
+    /// Runtime IDs of the member mods inside this bundle container.
+    /// Used for game-loader duplicate detection; empty for standalone mods.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundle_member_ids: Vec<String>,
+}
+
+fn push_runtime_id(ids: &mut Vec<String>, raw: &str) {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if !ids.iter().any(|id| id.eq_ignore_ascii_case(trimmed)) {
+        ids.push(trimmed.to_string());
+    }
+}
+
+/// Game-facing runtime IDs represented by this installed artifact.
+pub fn runtime_mod_ids(info: &ModInfo) -> Vec<String> {
+    let mut ids = Vec::new();
+    for id in &info.bundle_member_ids {
+        push_runtime_id(&mut ids, id);
+    }
+    if ids.is_empty() && !info.bundle_members.is_empty() {
+        for member in &info.bundle_members {
+            push_runtime_id(&mut ids, member);
+        }
+    }
+    if ids.is_empty() {
+        if let Some(id) = info.mod_id.as_deref() {
+            push_runtime_id(&mut ids, id);
+        } else {
+            push_runtime_id(&mut ids, &info.name);
+        }
+    }
+    ids
+}
+
+fn runtime_id_set(info: &ModInfo) -> std::collections::HashSet<String> {
+    runtime_mod_ids(info)
+        .into_iter()
+        .map(|id| id.to_lowercase())
+        .collect()
+}
+
+fn same_local_artifact(a: &ModInfo, b: &ModInfo) -> bool {
+    if let (Some(left), Some(right)) = (a.mod_version_id.as_deref(), b.mod_version_id.as_deref()) {
+        if !left.trim().is_empty() && left == right {
+            return true;
+        }
+    }
+    if let (Some(left), Some(right)) = (a.folder_name.as_deref(), b.folder_name.as_deref()) {
+        if left.eq_ignore_ascii_case(right) {
+            return true;
+        }
+    }
+    false
+}
+
+fn mod_storage_label(info: &ModInfo) -> String {
+    info.folder_name
+        .clone()
+        .unwrap_or_else(|| info.name.clone())
+}
+
+fn unique_disabled_folder(disabled_path: &Path, folder: &str) -> PathBuf {
+    let safe_folder = sanitize_path_segment(folder);
+    let first = disabled_path.join(&safe_folder);
+    if !first.exists() {
+        return first;
+    }
+
+    for index in 1.. {
+        let candidate = disabled_path.join(format!("{safe_folder}.sts2mm-conflict-{index}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!("unbounded conflict suffix loop should always return")
+}
+
+fn is_bundle_container(info: &ModInfo) -> bool {
+    !info.bundle_member_ids.is_empty() || !info.bundle_members.is_empty()
+}
+
+fn move_mod_files_to_disabled_wrapper(
+    mod_info: &ModInfo,
+    mods_path: &Path,
+    disabled_path: &Path,
+    label: &str,
+) -> Result<String> {
+    let dest_folder = unique_disabled_folder(disabled_path, label);
+    fs::create_dir_all(&dest_folder)?;
+    let mut moved_any = false;
+
+    for file_rel in &mod_info.files {
+        let Some(rel_path) = safe_mod_relative_path(file_rel) else {
+            log::warn!(
+                "Skipping unsafe path '{}' while preserving duplicate mod '{}'",
+                file_rel,
+                mod_info.name
+            );
+            continue;
+        };
+        let src_file = mods_path.join(&rel_path);
+        if !src_file.exists() {
+            continue;
+        }
+
+        let dest_file = dest_folder.join(&rel_path);
+        if let Some(parent) = dest_file.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(&src_file, &dest_file).or_else(|_| {
+            fs::copy(&src_file, &dest_file).and_then(|_| fs::remove_file(&src_file))
+        })?;
+        moved_any = true;
+    }
+
+    if !moved_any {
+        return Err(AppError::ModNotFound(format!(
+            "No files found for mod '{}' in {}",
+            mod_info.name,
+            mods_path.display()
+        )));
+    }
+
+    Ok(dest_folder
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| label.to_string()))
+}
+
+/// Move an active mod into disabled storage without replacing an existing
+/// disabled copy. Duplicate-runtime repair uses this because every user file
+/// must remain recoverable.
+pub(crate) fn move_mod_to_disabled_preserving_storage(
+    mod_info: &ModInfo,
+    mods_path: &Path,
+    disabled_path: &Path,
+) -> Result<String> {
+    fs::create_dir_all(disabled_path)?;
+    let label = mod_storage_label(mod_info);
+
+    if let Some(folder) = mod_info.folder_name.as_deref() {
+        let src_folder = mods_path.join(folder);
+        if src_folder.is_dir() {
+            let dest_folder = unique_disabled_folder(disabled_path, folder);
+            move_directory(&src_folder, &dest_folder)?;
+            return Ok(dest_folder
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or(label));
+        }
+    }
+
+    let destination_conflict = mod_info
+        .files
+        .iter()
+        .filter_map(|file_rel| safe_mod_relative_path(file_rel))
+        .any(|rel_path| disabled_path.join(rel_path).exists());
+    if destination_conflict {
+        return move_mod_files_to_disabled_wrapper(mod_info, mods_path, disabled_path, &label);
+    }
+
+    move_mod_by_info(mod_info, mods_path, disabled_path)?;
+    Ok(label)
+}
+
+fn active_profile_for_runtime_repair(
+    active_profile: Option<&str>,
+    profiles_path: &Path,
+) -> Option<crate::profiles::Profile> {
+    let active = active_profile?.trim();
+    if active.is_empty() {
+        return None;
+    }
+
+    crate::profiles::list_profiles(profiles_path)
+        .into_iter()
+        .find(|profile| crate::profiles::profile_identifier_matches(profile, active))
+}
+
+fn runtime_repair_rank(
+    profile: Option<&crate::profiles::Profile>,
+    disk_mod: &ModInfo,
+    index: usize,
+    config_path: &Path,
+) -> (usize, usize, usize) {
+    let profile_rank = profile
+        .and_then(|profile| {
+            profile
+                .mods
+                .iter()
+                .enumerate()
+                .find(|(_, profile_mod)| {
+                    profile_mod.enabled
+                        && crate::profiles::profile_mod_matches_installed_with_registry(
+                            profile_mod,
+                            disk_mod,
+                            config_path,
+                        )
+                })
+                .map(|(rank, _)| rank)
+        })
+        .unwrap_or(usize::MAX);
+    let bundle_rank = if is_bundle_container(disk_mod) { 0 } else { 1 };
+    (profile_rank, bundle_rank, index)
+}
+
+/// Repair an already-broken active `mods/` folder that contains multiple
+/// artifacts with the same game runtime ID. This is intentionally called from
+/// library refresh/startup so users who hit the v1.8.0 bundle regression do not
+/// need to manually delete anything.
+pub(crate) fn repair_active_runtime_id_duplicates(
+    mods_path: &Path,
+    disabled_path: &Path,
+    config_path: &Path,
+    profiles_path: &Path,
+    active_profile: Option<&str>,
+) -> Result<Vec<String>> {
+    let mut active = scan_mods(mods_path);
+    if active.len() < 2 {
+        return Ok(Vec::new());
+    }
+
+    crate::mod_versions::enrich_mods_with_versions(&mut active, config_path);
+    let profile = active_profile_for_runtime_repair(active_profile, profiles_path);
+    let mut keepers: std::collections::HashMap<String, (usize, usize, usize)> =
+        std::collections::HashMap::new();
+
+    for (index, disk_mod) in active.iter().enumerate() {
+        let rank = runtime_repair_rank(profile.as_ref(), disk_mod, index, config_path);
+        for runtime_id in runtime_mod_ids(disk_mod) {
+            let key = runtime_id.to_lowercase();
+            keepers
+                .entry(key)
+                .and_modify(|current| {
+                    if rank < *current {
+                        *current = rank;
+                    }
+                })
+                .or_insert(rank);
+        }
+    }
+
+    let mut moved = Vec::new();
+    for (index, disk_mod) in active.iter().enumerate() {
+        let should_move = runtime_mod_ids(disk_mod)
+            .into_iter()
+            .map(|id| id.to_lowercase())
+            .any(|id| {
+                keepers
+                    .get(&id)
+                    .is_some_and(|(_, _, keep_index)| *keep_index != index)
+            });
+        if !should_move {
+            continue;
+        }
+
+        moved.push(move_mod_to_disabled_preserving_storage(
+            disk_mod,
+            mods_path,
+            disabled_path,
+        )?);
+    }
+
+    Ok(moved)
+}
+
+/// Move active artifacts that would collide with `target`'s game runtime IDs
+/// into disabled storage. The selected/restored target remains active.
+pub fn move_runtime_id_conflicts_to_disabled(
+    target: &ModInfo,
+    mods_path: &Path,
+    disabled_path: &Path,
+) -> Result<Vec<String>> {
+    let target_ids = runtime_id_set(target);
+    if target_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut moved = Vec::new();
+    for active in scan_mods(mods_path) {
+        if same_local_artifact(&active, target) {
+            continue;
+        }
+        let active_ids = runtime_id_set(&active);
+        if active_ids.is_disjoint(&target_ids) {
+            continue;
+        }
+        moved.push(move_mod_to_disabled_preserving_storage(
+            &active,
+            mods_path,
+            disabled_path,
+        )?);
+    }
+    Ok(moved)
 }
 
 // ── Local Mod Version Cache ────────────────────────────────────────────────
@@ -295,15 +593,46 @@ pub fn restore_mod_from_cache(
 pub fn get_installed_mods(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModInfo>, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
+    let (mods_path, disabled_mods_path, config_path, profiles_path, active_profile) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (
+            s.mods_path.clone(),
+            s.disabled_mods_path.clone(),
+            s.config_path.clone(),
+            s.profiles_path.clone(),
+            s.active_profile.clone(),
+        )
+    };
 
-    let active_mods = s
-        .mods_path
-        .as_ref()
-        .map(|p| scan_mods(p))
-        .unwrap_or_default();
-    let disabled_mods = s
-        .disabled_mods_path
+    if let (Some(mods_path), Some(disabled_path)) =
+        (mods_path.as_deref(), disabled_mods_path.as_deref())
+    {
+        if crate::game::is_game_running() {
+            log::info!("Skipping active runtime-ID duplicate repair while the game is running");
+        } else {
+            match repair_active_runtime_id_duplicates(
+                mods_path,
+                disabled_path,
+                &config_path,
+                &profiles_path,
+                active_profile.as_deref(),
+            ) {
+                Ok(moved) if !moved.is_empty() => log::warn!(
+                    "Library refresh moved {} active runtime-ID duplicate(s) to disabled storage: {}",
+                    moved.len(),
+                    moved.join(", ")
+                ),
+                Ok(_) => {}
+                Err(err) => log::warn!(
+                    "Library refresh could not repair active runtime-ID duplicates: {}",
+                    err
+                ),
+            }
+        }
+    }
+
+    let active_mods = mods_path.as_ref().map(|p| scan_mods(p)).unwrap_or_default();
+    let disabled_mods = disabled_mods_path
         .as_ref()
         .map(|p| scan_disabled_mods(p))
         .unwrap_or_default();
@@ -339,8 +668,8 @@ pub fn get_installed_mods(
     });
 
     // Enrich with source metadata (GitHub/Nexus links)
-    crate::mod_sources::enrich_mods_with_sources(&mut all_mods, &s.config_path);
-    crate::mod_versions::enrich_mods_with_versions(&mut all_mods, &s.config_path);
+    crate::mod_sources::enrich_mods_with_sources(&mut all_mods, &config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut all_mods, &config_path);
     all_mods.sort_by(|a, b| {
         a.display_name
             .as_deref()
@@ -1114,6 +1443,7 @@ mod pending_nexus_manual_install_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -1169,6 +1499,7 @@ mod pending_nexus_manual_install_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
 
         attach_pending_nexus_source_for_file(
@@ -1331,6 +1662,7 @@ mod pending_nexus_manual_install_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
 
         attach_pending_nexus_source_for_file(
@@ -1909,6 +2241,271 @@ mod user_scenario_tests {
 }
 
 #[cfg(test)]
+mod runtime_duplicate_repair_tests {
+    use super::{repair_active_runtime_id_duplicates, scan_disabled_mods, scan_mods};
+    use std::fs;
+    use std::path::Path;
+
+    fn write_file(path: &Path, content: impl AsRef<[u8]>) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, content).unwrap();
+    }
+
+    fn write_mod(root: &Path, folder: &str, display: &str, runtime_id: &str, dll_bytes: &[u8]) {
+        let dir = root.join(folder);
+        write_file(
+            &dir.join(format!("{runtime_id}.json")),
+            format!(r#"{{"id":"{runtime_id}","name":"{display}","version":"1.0.0"}}"#),
+        );
+        write_file(&dir.join(format!("{runtime_id}.dll")), dll_bytes);
+    }
+
+    fn write_flat_mod(root: &Path, display: &str, runtime_id: &str, dll_bytes: &[u8]) {
+        write_file(
+            &root.join(format!("{runtime_id}.json")),
+            format!(r#"{{"id":"{runtime_id}","name":"{display}","version":"1.0.0"}}"#),
+        );
+        write_file(&root.join(format!("{runtime_id}.dll")), dll_bytes);
+    }
+
+    fn write_bundle(root: &Path, folder: &str, members: &[(&str, &str)]) {
+        let dir = root.join(folder);
+        fs::create_dir_all(&dir).unwrap();
+        crate::mods::bundle::write_sidecar(
+            &dir,
+            &crate::mods::bundle::BundleSidecar {
+                display_name: "Pretty Pack".into(),
+                installed_version: Some("2.0.0".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        for (runtime_id, display) in members {
+            write_file(
+                &dir.join(runtime_id).join(format!("{runtime_id}.json")),
+                format!(r#"{{"id":"{runtime_id}","name":"{display}","version":"2.0.0"}}"#),
+            );
+            write_file(
+                &dir.join(runtime_id).join(format!("{runtime_id}.dll")),
+                format!("bundle-{runtime_id}"),
+            );
+        }
+    }
+
+    #[test]
+    fn library_refresh_repairs_existing_active_duplicate_runtime_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let config_path = tmp.path().join("config");
+        let profiles_path = tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&config_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_bundle(
+            &mods_path,
+            "PrettyPack",
+            &[
+                ("BaseLib", "BaseLib"),
+                ("KaguyaRegentMSGKSkin", "Kaguya Skin"),
+            ],
+        );
+        write_mod(&mods_path, "BaseLib", "BaseLib", "BaseLib", b"standalone");
+
+        let moved = repair_active_runtime_id_duplicates(
+            &mods_path,
+            &disabled_path,
+            &config_path,
+            &profiles_path,
+            None,
+        )
+        .expect("repair should move duplicate standalone member aside");
+
+        assert_eq!(moved, vec!["BaseLib"]);
+        let active = scan_mods(&mods_path);
+        assert_eq!(active.len(), 1, "only the bundle should remain active");
+        assert_eq!(active[0].folder_name.as_deref(), Some("PrettyPack"));
+        assert!(
+            disabled_path.join("BaseLib").is_dir(),
+            "standalone duplicate should be moved to disabled storage"
+        );
+    }
+
+    #[test]
+    fn runtime_duplicate_repair_preserves_existing_disabled_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let config_path = tmp.path().join("config");
+        let profiles_path = tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&config_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_bundle(&mods_path, "PrettyPack", &[("BaseLib", "BaseLib")]);
+        write_mod(
+            &mods_path,
+            "BaseLib",
+            "BaseLib",
+            "BaseLib",
+            b"active-standalone",
+        );
+        write_file(
+            &disabled_path.join("BaseLib").join("BaseLib.dll"),
+            b"already-disabled",
+        );
+
+        let moved = repair_active_runtime_id_duplicates(
+            &mods_path,
+            &disabled_path,
+            &config_path,
+            &profiles_path,
+            None,
+        )
+        .expect("repair should preserve disabled copy and move active duplicate");
+
+        assert_eq!(moved, vec!["BaseLib.sts2mm-conflict-1"]);
+        assert_eq!(
+            fs::read(disabled_path.join("BaseLib").join("BaseLib.dll")).unwrap(),
+            b"already-disabled",
+            "existing disabled copy must not be overwritten"
+        );
+        assert_eq!(
+            fs::read(
+                disabled_path
+                    .join("BaseLib.sts2mm-conflict-1")
+                    .join("BaseLib.dll")
+            )
+            .unwrap(),
+            b"active-standalone",
+            "active duplicate should be preserved under a conflict suffix"
+        );
+
+        let disabled = scan_disabled_mods(&disabled_path);
+        assert!(
+            disabled.iter().any(
+                |mod_info| mod_info.folder_name.as_deref() == Some("BaseLib.sts2mm-conflict-1")
+            ),
+            "suffixed preserved copy should remain discoverable"
+        );
+    }
+
+    #[test]
+    fn runtime_duplicate_repair_preserves_flat_file_conflicts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let config_path = tmp.path().join("config");
+        let profiles_path = tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&config_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_bundle(&mods_path, "PrettyPack", &[("BaseLib", "BaseLib")]);
+        write_flat_mod(&mods_path, "BaseLib", "BaseLib", b"active-flat");
+        write_file(&disabled_path.join("BaseLib.dll"), b"disabled-flat");
+
+        let moved = repair_active_runtime_id_duplicates(
+            &mods_path,
+            &disabled_path,
+            &config_path,
+            &profiles_path,
+            None,
+        )
+        .expect("repair should preserve root-level disabled conflicts");
+
+        assert_eq!(moved, vec!["BaseLib"]);
+        assert_eq!(
+            fs::read(disabled_path.join("BaseLib.dll")).unwrap(),
+            b"disabled-flat",
+            "existing flat disabled file must not be overwritten"
+        );
+        assert_eq!(
+            fs::read(disabled_path.join("BaseLib").join("BaseLib.dll")).unwrap(),
+            b"active-flat",
+            "active flat duplicate should be preserved in a wrapper folder"
+        );
+        assert!(
+            !mods_path.join("BaseLib.dll").exists(),
+            "flat duplicate should no longer be active"
+        );
+    }
+
+    #[test]
+    fn runtime_duplicate_repair_respects_active_profile_first_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let config_path = tmp.path().join("config");
+        let profiles_path = tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&config_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_bundle(&mods_path, "PrettyPack", &[("BaseLib", "BaseLib")]);
+        write_mod(&mods_path, "BaseLib", "BaseLib", "BaseLib", b"profile-copy");
+
+        let now = chrono::Utc::now();
+        let profile = crate::profiles::Profile {
+            id: "profile-standalone".into(),
+            name: "Standalone profile".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![crate::profiles::ProfileMod {
+                mod_version_id: None,
+                name: "BaseLib".into(),
+                version: "1.0.0".into(),
+                source: None,
+                hash: None,
+                files: vec![],
+                folder_name: Some("BaseLib".into()),
+                mod_id: Some("BaseLib".into()),
+                enabled: true,
+                bundle_url: None,
+                bundle_sha256: None,
+                bundle_members: vec![],
+                bundle_member_ids: vec![],
+            }],
+            created_at: now,
+            updated_at: now,
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let moved = repair_active_runtime_id_duplicates(
+            &mods_path,
+            &disabled_path,
+            &config_path,
+            &profiles_path,
+            Some(&profile.id),
+        )
+        .expect("repair should keep the active profile's first matching artifact");
+
+        assert_eq!(moved, vec!["PrettyPack"]);
+        assert!(
+            mods_path.join("BaseLib").is_dir(),
+            "profile-selected standalone copy should remain active"
+        );
+        assert!(
+            disabled_path.join("PrettyPack").is_dir(),
+            "non-profile duplicate should be moved to disabled storage"
+        );
+        let active = scan_mods(&mods_path);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].folder_name.as_deref(), Some("BaseLib"));
+    }
+}
+
+#[cfg(test)]
 mod toggle_idempotency_tests {
     //! Coverage for `mod_present_in`, the helper that lets `toggle_mod` no-op
     //! instead of hard-erroring when a mod is already in the requested state.
@@ -2030,6 +2627,7 @@ mod profile_manifest_refresh_tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             }],
             created_at: now,
             updated_at: now,
@@ -2148,6 +2746,7 @@ mod profile_manifest_refresh_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
 
         let mod_dir = mods_path.join("BadManifest");

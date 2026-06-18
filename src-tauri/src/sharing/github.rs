@@ -3608,6 +3608,7 @@ mod github_api_stress_tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             });
         }
 

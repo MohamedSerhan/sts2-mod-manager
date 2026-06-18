@@ -180,6 +180,7 @@ mod tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: Vec::new(),
+                bundle_member_ids: Vec::new(),
             }],
             created_at: Utc::now(),
             updated_at: Utc::now(),

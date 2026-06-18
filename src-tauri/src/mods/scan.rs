@@ -453,7 +453,60 @@ pub(crate) fn parse_manifest(
         display_name: None,
         display_description: None,
         bundle_members: vec![],
+        bundle_member_ids: vec![],
     })
+}
+
+pub(crate) fn collect_bundle_member_metadata(
+    container_path: &Path,
+    base_dir: &Path,
+    enabled: bool,
+) -> (Vec<String>, Vec<String>) {
+    let mut bundle_members: Vec<String> = Vec::new();
+    let mut bundle_member_ids: Vec<String> = Vec::new();
+    let Ok(sub_entries) = fs::read_dir(container_path) else {
+        return (bundle_members, bundle_member_ids);
+    };
+
+    let mut sub_dirs: Vec<_> = sub_entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .collect();
+    sub_dirs.sort_by_key(|e| e.file_name());
+
+    for sub_entry in sub_dirs {
+        let sub_path = sub_entry.path();
+        let sub_name = sub_entry.file_name().to_string_lossy().to_string();
+        let parsed = fs::read_dir(&sub_path).ok().and_then(|inner| {
+            inner
+                .flatten()
+                .filter(|e| {
+                    e.path().is_file()
+                        && e.path().extension().and_then(|x| x.to_str()) == Some("json")
+                })
+                .filter_map(|json_e| parse_manifest(&json_e.path(), base_dir, enabled))
+                .next()
+        });
+
+        match parsed {
+            Some(info) => {
+                if let Some(id) = info.mod_id.as_deref() {
+                    let id = id.trim();
+                    if !id.is_empty()
+                        && !bundle_member_ids
+                            .iter()
+                            .any(|existing| existing.eq_ignore_ascii_case(id))
+                    {
+                        bundle_member_ids.push(id.to_string());
+                    }
+                }
+                bundle_members.push(info.name);
+            }
+            None => bundle_members.push(sub_name),
+        }
+    }
+
+    (bundle_members, bundle_member_ids)
 }
 
 /// For a manifest-fallback mod whose primary artifact (`artifact_path`) lives in
@@ -555,6 +608,7 @@ pub(super) fn pck_only_mod(pck_path: &Path, base_dir: &Path, enabled: bool) -> M
         display_name: None,
         display_description: None,
         bundle_members: vec![],
+        bundle_member_ids: vec![],
     }
 }
 
@@ -624,6 +678,7 @@ pub(super) fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> M
         display_name: None,
         display_description: None,
         bundle_members: vec![],
+        bundle_member_ids: vec![],
     }
 }
 
@@ -919,34 +974,8 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
 
                     let size_bytes = calculate_mod_size(dir, &files);
 
-                    // Derive display names for each immediate subdirectory member.
-                    let mut bundle_members: Vec<String> = Vec::new();
-                    if let Ok(sub_entries) = fs::read_dir(&path) {
-                        let mut sub_dirs: Vec<_> = sub_entries
-                            .flatten()
-                            .filter(|e| e.path().is_dir())
-                            .collect();
-                        sub_dirs.sort_by_key(|e| e.file_name());
-                        for sub_entry in sub_dirs {
-                            let sub_path = sub_entry.path();
-                            let sub_name = sub_entry.file_name().to_string_lossy().to_string();
-                            // Try parsing the member's manifest for a display name.
-                            let display = if let Ok(inner) = fs::read_dir(&sub_path) {
-                                inner
-                                    .flatten()
-                                    .find(|e| {
-                                        e.path().is_file()
-                                            && e.path().extension().and_then(|x| x.to_str())
-                                                == Some("json")
-                                    })
-                                    .and_then(|json_e| parse_manifest(&json_e.path(), dir, enabled))
-                                    .map(|info| info.name)
-                            } else {
-                                None
-                            };
-                            bundle_members.push(display.unwrap_or(sub_name));
-                        }
-                    }
+                    let (bundle_members, bundle_member_ids) =
+                        collect_bundle_member_metadata(&path, dir, enabled);
 
                     // Register the container name so PASS 3/4 won't double-count.
                     found_names.insert(normalize_name(&container_name));
@@ -976,6 +1005,7 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                         display_name: None,
                         display_description: None,
                         bundle_members,
+                        bundle_member_ids,
                     };
                     mods.push(info);
                     continue;
@@ -1216,6 +1246,7 @@ mod dedup_identity_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -1452,7 +1483,15 @@ mod pck_only_scan_tests {
     fn sidecar_container_scans_as_one_bundle_entry() {
         let tmp = tempfile::tempdir().unwrap();
         let mods = tmp.path();
+        write_bytes(
+            &mods.join("Pack").join("ModA").join("ModA.json"),
+            br#"{"id":"RuntimeA","name":"Member A","version":"1.0.0"}"#,
+        );
         write_bytes(&mods.join("Pack").join("ModA").join("ModA.dll"), b"");
+        write_bytes(
+            &mods.join("Pack").join("ModB").join("ModB.json"),
+            br#"{"id":"RuntimeB","name":"Member B","version":"1.0.0"}"#,
+        );
         write_bytes(&mods.join("Pack").join("ModB").join("ModB.dll"), b"");
         crate::mods::bundle::write_sidecar(
             &mods.join("Pack"),
@@ -1492,6 +1531,11 @@ mod pck_only_scan_tests {
             bundle.bundle_members.len(),
             2,
             "bundle_members must list both sub-mods"
+        );
+        assert_eq!(
+            bundle.bundle_member_ids,
+            vec!["RuntimeA".to_string(), "RuntimeB".to_string()],
+            "bundle_member_ids must list runtime IDs from member manifests"
         );
 
         // The sidecar file itself must be in the files list.

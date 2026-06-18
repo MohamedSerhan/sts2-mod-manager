@@ -18,6 +18,22 @@ describe('logicalModKey', () => {
       { name: 'Card Advisor', folder_name: 'Sts2CardAdvisor-v29', mod_id: 'Sts2CardAdvisor' },
     ));
   });
+
+  it('keeps bundle containers separate from member runtime IDs', () => {
+    const bundleKey = logicalModKey(
+      { name: 'Pretty Pack', folder_name: 'PrettyPack', mod_id: null },
+      {
+        name: 'Pretty Pack',
+        source: null,
+        github_url: null,
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/979',
+      },
+    );
+    const memberKey = logicalModKey({ name: 'BaseLib', folder_name: 'BaseLib', mod_id: 'BaseLib' });
+
+    expect(bundleKey).toBe('source:https://www.nexusmods.com/slaythespire2/mods/979|name:pretty pack');
+    expect(bundleKey).not.toBe(memberKey);
+  });
 });
 
 describe('modVersionSortValue', () => {

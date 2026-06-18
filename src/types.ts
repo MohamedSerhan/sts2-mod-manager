@@ -22,6 +22,8 @@ export interface ModInfo {
    *  Non-empty only when this ModInfo represents the single library entry
    *  for a multi-mod (bundle) download. Empty / absent for normal mods. */
   bundle_members?: string[];
+  /** Game runtime IDs of the bundled member mods. */
+  bundle_member_ids?: string[];
   /** Minimum STS2 build the mod's manifest declares (e.g. "0.105.0").
    *  null when the mod doesn't care about game version. */
   min_game_version?: string | null;
@@ -87,6 +89,8 @@ export interface ProfileMod {
    *  Non-empty only when the installed mod had bundle_members set.
    *  Absent / empty for normal mods and legacy manifests. */
   bundle_members?: string[];
+  /** Game runtime IDs of the bundled member mods. */
+  bundle_member_ids?: string[];
 }
 
 export interface ProfileModOrderKey {
@@ -128,6 +132,8 @@ export interface ProfileMembershipMod {
   folder_name: string | null;
   mod_id: string | null;
   display_name?: string | null;
+  bundle_members?: string[];
+  bundle_member_ids?: string[];
   installed_enabled: boolean;
   version_options?: LocalModVersionOption[];
   profiles: ProfileMembershipState[];
@@ -140,6 +146,7 @@ export interface LocalModVersionOption {
   folder_name?: string | null;
   mod_id?: string | null;
   display_name?: string | null;
+  bundle_member_ids?: string[];
   installed: boolean;
   installed_enabled: boolean;
   cached: boolean;

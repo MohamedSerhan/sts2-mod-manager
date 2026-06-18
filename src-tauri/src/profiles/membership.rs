@@ -103,6 +103,8 @@ pub(crate) fn profile_membership_matrix(
                 folder_name: installed.folder_name.clone(),
                 mod_id: installed.mod_id.clone(),
                 display_name: installed.display_name.clone(),
+                bundle_members: installed.bundle_members.clone(),
+                bundle_member_ids: installed.bundle_member_ids.clone(),
                 installed_enabled: installed.enabled,
                 version_options: installed
                     .mod_version_id
@@ -520,6 +522,20 @@ fn select_local_mod_version_on_disk(
             selected.enabled = target_enabled;
         }
         apply_record_source_version(&selected, selected.mod_version_id.as_deref(), config_path);
+        if target_enabled {
+            let moved = crate::mods::move_runtime_id_conflicts_to_disabled(
+                &selected,
+                mods_path,
+                disabled_path,
+            )?;
+            if !moved.is_empty() {
+                log::warn!(
+                    "Version selection moved {} active runtime-ID conflict(s) to disabled storage: {}",
+                    moved.len(),
+                    moved.join(", ")
+                );
+            }
+        }
         return Ok(selected);
     }
 
@@ -542,6 +558,20 @@ fn select_local_mod_version_on_disk(
     )?;
     restored.enabled = target_enabled;
     apply_record_source_version(&restored, Some(selected_id), config_path);
+    if target_enabled {
+        let moved = crate::mods::move_runtime_id_conflicts_to_disabled(
+            &restored,
+            mods_path,
+            disabled_path,
+        )?;
+        if !moved.is_empty() {
+            log::warn!(
+                "Version restore moved {} active runtime-ID conflict(s) to disabled storage: {}",
+                moved.len(),
+                moved.join(", ")
+            );
+        }
+    }
     Ok(restored)
 }
 
@@ -1090,6 +1120,36 @@ mod profile_membership_tests {
         fs::write(dir.join(format!("{folder}.dll")), b"dll").unwrap();
     }
 
+    fn write_bundle(
+        root: &Path,
+        folder: &str,
+        display: &str,
+        version: &str,
+        members: &[(&str, &str)],
+    ) {
+        let dir = root.join(folder);
+        fs::create_dir_all(&dir).unwrap();
+        crate::mods::bundle::write_sidecar(
+            &dir,
+            &crate::mods::bundle::BundleSidecar {
+                display_name: display.into(),
+                installed_version: Some(version.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for (member_id, member_name) in members {
+            let member_dir = dir.join(member_id);
+            fs::create_dir_all(&member_dir).unwrap();
+            fs::write(
+                member_dir.join(format!("{member_id}.json")),
+                format!(r#"{{"id":"{member_id}","name":"{member_name}","version":"{version}"}}"#),
+            )
+            .unwrap();
+            fs::write(member_dir.join(format!("{member_id}.dll")), b"dll").unwrap();
+        }
+    }
+
     fn empty_profile(name: &str) -> Profile {
         Profile {
             id: crate::profiles::new_profile_id(),
@@ -1118,7 +1178,75 @@ mod profile_membership_tests {
             bundle_url: Some(format!("https://example.test/{folder}.zip")),
             bundle_sha256: Some(format!("sha-{folder}")),
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
+    }
+
+    #[test]
+    fn selecting_bundle_version_moves_active_duplicate_member_ids_to_storage() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+
+        write_bundle(
+            &mods_path,
+            "PrettyPack-old",
+            "Pretty Pack",
+            "1.0.0",
+            &[
+                ("BaseLib", "BaseLib"),
+                ("KaguyaRegentMSGKSkin", "Kaguya Skin"),
+            ],
+        );
+        write_mod(&mods_path, "BaseLib", "BaseLib", "1.0.0");
+        write_bundle(
+            &disabled_path,
+            "PrettyPack-new",
+            "Pretty Pack",
+            "2.0.0",
+            &[
+                ("BaseLib", "BaseLib"),
+                ("KaguyaRegentMSGKSkin", "Kaguya Skin"),
+            ],
+        );
+
+        let mut installed =
+            merge_active_disabled_mods(scan_mods(&mods_path), scan_disabled_mods(&disabled_path));
+        crate::mod_versions::enrich_mods_with_versions(&mut installed, config_tmp.path());
+        let selected = installed
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("PrettyPack-new"))
+            .cloned()
+            .expect("disabled bundle version should scan");
+
+        let restored = select_local_mod_version_on_disk(
+            &installed,
+            "Pretty Pack",
+            None,
+            Some(&selected),
+            None,
+            true,
+            &mods_path,
+            &disabled_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .expect("selecting disabled bundle version should move it active");
+
+        assert_eq!(restored.folder_name.as_deref(), Some("PrettyPack-new"));
+        assert!(mods_path.join("PrettyPack-new").is_dir());
+        assert!(
+            !mods_path.join("BaseLib").exists(),
+            "standalone duplicate runtime ID must not remain active"
+        );
+        assert!(
+            disabled_path.join("BaseLib").is_dir(),
+            "standalone duplicate runtime ID should be preserved in disabled storage"
+        );
     }
 
     #[test]
@@ -1154,6 +1282,7 @@ mod profile_membership_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         });
         save_profile(&pack, &profiles_path).unwrap();
 
@@ -1273,6 +1402,7 @@ mod profile_membership_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         });
         save_profile(&alpha, &profiles_path).unwrap();
         save_profile(&empty_profile("Beta"), &profiles_path).unwrap();
@@ -1398,6 +1528,7 @@ mod profile_membership_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         });
         save_profile(&profile, &profiles_path).unwrap();
 
@@ -1446,6 +1577,7 @@ mod profile_membership_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         });
         save_profile(&profile, &profiles_path).unwrap();
 
@@ -1503,6 +1635,7 @@ mod profile_membership_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         });
         save_profile(&profile, &profiles_path).unwrap();
 
@@ -1578,6 +1711,7 @@ mod profile_membership_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         let old_id = crate::mod_versions::ensure_mod_info_id(&mut old_info, config_tmp.path())
             .expect("old version should get an artifact id");
@@ -1597,6 +1731,7 @@ mod profile_membership_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         });
         save_profile(&profile, &profiles_path).unwrap();
 
@@ -1652,6 +1787,7 @@ mod profile_membership_tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             });
         }
         save_profile(&profile, &profiles_path).unwrap();
@@ -1961,6 +2097,7 @@ mod profile_membership_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }];
 
         write_profile_load_order_to_settings_file(&profile, &settings_path, &pinned).unwrap();

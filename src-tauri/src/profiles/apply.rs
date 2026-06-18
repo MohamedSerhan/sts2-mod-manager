@@ -34,6 +34,72 @@ use super::crud::{
 use super::membership::sync_profile_load_order_to_settings;
 use super::{Profile, ProfileMod, APP_CREATED_BY};
 
+fn profile_runtime_rank(
+    profile: &Profile,
+    disk_mod: &crate::mods::ModInfo,
+    config_path: &Path,
+) -> usize {
+    profile
+        .mods
+        .iter()
+        .enumerate()
+        .find(|(_, pm)| {
+            pm.enabled && profile_mod_matches_installed_with_registry(pm, disk_mod, config_path)
+        })
+        .map(|(index, _)| index)
+        .unwrap_or(usize::MAX)
+}
+
+fn move_profile_runtime_duplicates_to_disabled(
+    profile: &Profile,
+    mods_path: &Path,
+    disabled_path: &Path,
+    config_path: &Path,
+) -> Result<Vec<String>> {
+    let mut active = scan_mods(mods_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut active, config_path);
+    let mut keepers: std::collections::HashMap<String, (usize, usize)> =
+        std::collections::HashMap::new();
+
+    for (index, disk_mod) in active.iter().enumerate() {
+        let rank = profile_runtime_rank(profile, disk_mod, config_path);
+        for runtime_id in crate::mods::runtime_mod_ids(disk_mod) {
+            let key = runtime_id.to_lowercase();
+            let candidate = (rank, index);
+            keepers
+                .entry(key)
+                .and_modify(|current| {
+                    if candidate < *current {
+                        *current = candidate;
+                    }
+                })
+                .or_insert(candidate);
+        }
+    }
+
+    let mut moved = Vec::new();
+    for (index, disk_mod) in active.iter().enumerate() {
+        let should_move = crate::mods::runtime_mod_ids(disk_mod)
+            .into_iter()
+            .map(|id| id.to_lowercase())
+            .any(|id| {
+                keepers
+                    .get(&id)
+                    .is_some_and(|(_, keep_index)| *keep_index != index)
+            });
+        if !should_move {
+            continue;
+        }
+        moved.push(crate::mods::move_mod_to_disabled_preserving_storage(
+            disk_mod,
+            mods_path,
+            disabled_path,
+        )?);
+    }
+
+    Ok(moved)
+}
+
 /// Create a snapshot with optional source enrichment from config_path.
 /// Captures BOTH enabled and disabled mods with their current state.
 ///
@@ -242,6 +308,7 @@ fn snapshot_current_inner(
                 }
             }),
             bundle_members: m.bundle_members.clone(),
+            bundle_member_ids: m.bundle_member_ids.clone(),
         }
     };
 
@@ -454,6 +521,20 @@ pub fn apply_profile_with_pins(
                 pm.name, pm.folder_name, pm.mod_id
             );
         }
+    }
+
+    let moved = move_profile_runtime_duplicates_to_disabled(
+        profile,
+        mods_path,
+        disabled_path,
+        config_path,
+    )?;
+    if !moved.is_empty() {
+        log::warn!(
+            "Profile apply moved {} active runtime-ID duplicate(s) to disabled storage: {}",
+            moved.len(),
+            moved.join(", ")
+        );
     }
 
     Ok(())
@@ -1260,6 +1341,7 @@ mod snapshot_metadata_tests {
                     bundle_url: Some("https://example.test/bundles/BaseLib.zip".into()),
                     bundle_sha256: Some("known-sha".into()),
                     bundle_members: vec![],
+                    bundle_member_ids: vec![],
                 }],
                 created_at: now,
                 updated_at: now,
@@ -1401,6 +1483,7 @@ mod pinned_download_tests {
             bundle_url: Some("https://example.test/UnifiedSavePath.zip".into()),
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -1430,6 +1513,7 @@ mod pinned_download_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -1588,6 +1672,7 @@ mod modpack_flow_tests {
                 bundle_url: Some(format!("{}{}", server.uri(), path_name)),
                 bundle_sha256: Some(sha256_hex(&zip)),
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             },
         }
     }
@@ -2151,6 +2236,7 @@ mod modpack_flow_tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             }],
             created_at: now,
             updated_at: now,
@@ -2197,6 +2283,7 @@ mod modpack_flow_tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             }],
             created_at: now,
             updated_at: now,
@@ -2245,6 +2332,7 @@ mod modpack_flow_tests {
             bundle_url: Some(format!("{}/missing/Keeper.zip", server.uri())),
             bundle_sha256: Some("00".repeat(32)),
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         save_pack(
             "Keeper Pack",

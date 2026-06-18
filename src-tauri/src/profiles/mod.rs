@@ -99,6 +99,10 @@ pub struct ProfileMod {
     /// Legacy manifests without this field deserialize as an empty Vec.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bundle_members: Vec<String>,
+    /// Member-mod runtime IDs when this entry is a bundle container.
+    /// Legacy manifests without this field deserialize as an empty Vec.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundle_member_ids: Vec<String>,
 }
 
 fn default_enabled() -> bool {
@@ -180,6 +184,10 @@ pub struct ProfileMembershipMod {
     pub folder_name: Option<String>,
     pub mod_id: Option<String>,
     pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundle_members: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundle_member_ids: Vec<String>,
     pub installed_enabled: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub version_options: Vec<LocalModVersionOption>,

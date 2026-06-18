@@ -667,6 +667,7 @@ mod publish_bundle_contract_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 

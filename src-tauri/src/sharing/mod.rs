@@ -995,6 +995,7 @@ fn merge_publish_enrichment(on_disk: &Profile, uploaded: &Profile) -> Profile {
         target.folder_name = uploaded_pm.folder_name.clone();
         target.mod_id = uploaded_pm.mod_id.clone();
         target.bundle_members = uploaded_pm.bundle_members.clone();
+        target.bundle_member_ids = uploaded_pm.bundle_member_ids.clone();
         if uploaded_pm.mod_version_id.is_some() {
             target.mod_version_id = uploaded_pm.mod_version_id.clone();
         }
@@ -2512,6 +2513,7 @@ mod listing_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         });
         crate::profiles::save_profile(&local, &profiles_path).unwrap();
 
@@ -2603,6 +2605,7 @@ mod listing_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         });
         crate::profiles::save_profile(&local, &profiles_path).unwrap();
 
@@ -2759,6 +2762,7 @@ mod share_orchestration_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -3352,6 +3356,7 @@ mod share_orchestration_tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             }],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -3474,6 +3479,7 @@ mod share_orchestration_tests {
             ),
             bundle_sha256: Some("already-uploaded-zip-hash".into()),
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         let fingerprint_key = bundle_source_fingerprint_key(&profile_mod);
         let source_fingerprint = bundle_source_fingerprint_value(
@@ -3627,6 +3633,7 @@ mod share_orchestration_tests {
             ),
             bundle_sha256: Some("already-uploaded-zip-hash".into()),
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         let fingerprint_key = bundle_source_fingerprint_key(&profile_mod);
         let source_fast_fingerprint = bundle_source_fast_fingerprint_value(
@@ -3762,6 +3769,7 @@ mod share_orchestration_tests {
             ),
             bundle_sha256: Some("already-uploaded-zip-hash".into()),
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         let fingerprint_key = bundle_source_fingerprint_key(&shared_mod);
         let source_fast_fingerprint = bundle_source_fast_fingerprint_value(
@@ -3817,6 +3825,7 @@ mod share_orchestration_tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             }],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -3920,6 +3929,7 @@ mod share_orchestration_tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             }],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -4012,6 +4022,7 @@ mod share_orchestration_tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             }],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -4421,6 +4432,7 @@ mod share_orchestration_tests {
                 bundle_url: None,
                 bundle_sha256: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             }],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -4612,10 +4624,15 @@ mod bundle_share_roundtrip_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: bundle.bundle_members.clone(),
+            bundle_member_ids: bundle.bundle_member_ids.clone(),
         };
         assert_eq!(
             pm.bundle_members, bundle.bundle_members,
             "ProfileMod must carry bundle_members from the installed ModInfo"
+        );
+        assert_eq!(
+            pm.bundle_member_ids, bundle.bundle_member_ids,
+            "ProfileMod must carry bundle_member_ids from the installed ModInfo"
         );
 
         // Zip the bundle (curator side — mirrors share_profile_impl).
@@ -4699,6 +4716,7 @@ mod publish_signature_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -4964,6 +4982,7 @@ mod merge_publish_enrichment_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 

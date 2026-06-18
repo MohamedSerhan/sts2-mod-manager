@@ -1083,6 +1083,7 @@ pub async fn download_and_install_github_mod(
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         })
     } else {
         Err(AppError::Other(format!(
@@ -1256,6 +1257,7 @@ pub async fn download_url_mod(
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         crate::mod_versions::ensure_mod_info_id(&mut info, &config_path);
         Ok(info)

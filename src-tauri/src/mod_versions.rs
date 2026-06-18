@@ -27,6 +27,8 @@ pub struct ModVersionRecord {
     pub folder_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mod_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundle_member_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -58,6 +60,8 @@ pub struct LocalModVersionOption {
     pub mod_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundle_member_ids: Vec<String>,
     pub installed: bool,
     pub installed_enabled: bool,
     pub cached: bool,
@@ -112,10 +116,15 @@ fn source_for_mod(info: &ModInfo) -> Option<String> {
 
 fn key_for_mod_with_version(info: &ModInfo, version: &str) -> String {
     let source = source_for_mod(info);
+    let mod_id = if info.bundle_member_ids.is_empty() {
+        info.mod_id.as_deref()
+    } else {
+        None
+    };
     artifact_identity_key(
         &info.name,
         info.folder_name.as_deref(),
-        info.mod_id.as_deref(),
+        mod_id,
         version,
         info.hash.as_deref(),
         source.as_deref(),
@@ -139,9 +148,14 @@ fn family_key(name: &str, mod_id: Option<&str>, source: Option<&str>) -> String 
 }
 
 fn family_key_for_mod(info: &ModInfo) -> String {
+    let mod_id = if info.bundle_member_ids.is_empty() {
+        info.mod_id.as_deref()
+    } else {
+        None
+    };
     family_key(
         &info.name,
-        info.mod_id.as_deref(),
+        mod_id,
         info.source
             .as_deref()
             .or(info.github_url.as_deref())
@@ -150,11 +164,12 @@ fn family_key_for_mod(info: &ModInfo) -> String {
 }
 
 fn family_key_for_record(record: &ModVersionRecord) -> String {
-    family_key(
-        &record.name,
-        record.mod_id.as_deref(),
-        record.source.as_deref(),
-    )
+    let mod_id = if record.bundle_member_ids.is_empty() {
+        record.mod_id.as_deref()
+    } else {
+        None
+    };
+    family_key(&record.name, mod_id, record.source.as_deref())
 }
 
 fn target_family_key(
@@ -172,10 +187,15 @@ fn target_family_key(
 }
 
 fn key_for_profile_mod(pm: &ProfileMod) -> String {
+    let mod_id = if pm.bundle_member_ids.is_empty() {
+        pm.mod_id.as_deref()
+    } else {
+        None
+    };
     artifact_identity_key(
         &pm.name,
         pm.folder_name.as_deref(),
-        pm.mod_id.as_deref(),
+        mod_id,
         &pm.version,
         pm.hash.as_deref().or(pm.bundle_sha256.as_deref()),
         pm.source.as_deref().or(pm.bundle_url.as_deref()),
@@ -317,6 +337,7 @@ fn upsert_record_for_mod_with_source_version(
             source_version: source_version.clone(),
             folder_name: info.folder_name.clone(),
             mod_id: info.mod_id.clone(),
+            bundle_member_ids: info.bundle_member_ids.clone(),
             source: source.clone(),
             content_hash: info.hash.clone(),
             archive_sha256: None,
@@ -342,6 +363,10 @@ fn upsert_record_for_mod_with_source_version(
     }
     if record.mod_id != info.mod_id {
         record.mod_id = info.mod_id.clone();
+        changed = true;
+    }
+    if record.bundle_member_ids != info.bundle_member_ids {
+        record.bundle_member_ids = info.bundle_member_ids.clone();
         changed = true;
     }
     if source_version.is_some() && record.source_version != source_version {
@@ -434,6 +459,7 @@ pub fn ensure_profile_mod_id(pm: &mut ProfileMod, config_path: &Path) -> Option<
                 source_version: None,
                 folder_name: pm.folder_name.clone(),
                 mod_id: pm.mod_id.clone(),
+                bundle_member_ids: pm.bundle_member_ids.clone(),
                 source: pm.source.clone().or_else(|| pm.bundle_url.clone()),
                 content_hash: pm.hash.clone().or_else(|| pm.bundle_sha256.clone()),
                 archive_sha256: pm.bundle_sha256.clone(),
@@ -681,6 +707,20 @@ fn local_version_options_by_family(
             }
         }
     }
+    let installed_bundle_families: Vec<(String, Option<String>, HashSet<String>)> = installed_mods
+        .iter()
+        .filter(|info| !info.bundle_member_ids.is_empty())
+        .map(|info| {
+            (
+                family_key_for_mod(info),
+                normalize_family_part(source_for_mod(info).as_deref()),
+                crate::mods::runtime_mod_ids(info)
+                    .into_iter()
+                    .filter_map(|id| normalize_family_part(Some(&id)))
+                    .collect(),
+            )
+        })
+        .collect();
 
     let mut options_by_family: HashMap<String, HashMap<String, LocalModVersionOption>> =
         HashMap::new();
@@ -706,6 +746,7 @@ fn local_version_options_by_family(
                 folder_name: info.folder_name.clone(),
                 mod_id: info.mod_id.clone(),
                 display_name: info.display_name.clone(),
+                bundle_member_ids: info.bundle_member_ids.clone(),
                 installed: true,
                 installed_enabled: info.enabled,
                 cached,
@@ -719,35 +760,71 @@ fn local_version_options_by_family(
         if !cached_ids.contains(&record.id) {
             continue;
         }
-        let family = family_key_for_record(record);
-        let pinned = family_pinned.contains(&family);
-        options_by_family
-            .entry(family)
-            .or_default()
-            .entry(record.id.clone())
-            .and_modify(|option| {
-                option.cached = true;
-                if option.used_by_profiles.is_empty() {
-                    option.used_by_profiles =
-                        used_by_id.get(&record.id).cloned().unwrap_or_default();
+        let mut families = vec![family_key_for_record(record)];
+        if record.bundle_member_ids.is_empty() {
+            let record_source = normalize_family_part(record.source.as_deref());
+            let record_candidates: HashSet<String> = [
+                record.mod_id.as_deref(),
+                record.folder_name.as_deref(),
+                Some(record.name.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            .filter_map(|id| normalize_family_part(Some(id)))
+            .collect();
+            let mut bundle_alias_families = Vec::new();
+            for (bundle_family, bundle_source, bundle_member_ids) in &installed_bundle_families {
+                if record_source.is_none() || record_source != *bundle_source {
+                    continue;
                 }
-            })
-            .or_insert_with(|| LocalModVersionOption {
-                mod_version_id: record.id.clone(),
-                name: record.name.clone(),
-                version: record
-                    .source_version
-                    .clone()
-                    .unwrap_or_else(|| record.version.clone()),
-                folder_name: record.folder_name.clone(),
-                mod_id: record.mod_id.clone(),
-                display_name: None,
-                installed: false,
-                installed_enabled: false,
-                cached: true,
-                pinned,
-                used_by_profiles: used_by_id.get(&record.id).cloned().unwrap_or_default(),
-            });
+                if record_candidates
+                    .iter()
+                    .any(|candidate| bundle_member_ids.contains(candidate))
+                    && !bundle_alias_families
+                        .iter()
+                        .any(|family| family == bundle_family)
+                {
+                    bundle_alias_families.push(bundle_family.clone());
+                }
+            }
+            if !bundle_alias_families.is_empty() {
+                families = bundle_alias_families;
+            }
+        }
+        for family in families {
+            let pinned = family_pinned.contains(&family);
+            options_by_family
+                .entry(family)
+                .or_default()
+                .entry(record.id.clone())
+                .and_modify(|option| {
+                    option.cached = true;
+                    if option.bundle_member_ids.is_empty() {
+                        option.bundle_member_ids = record.bundle_member_ids.clone();
+                    }
+                    if option.used_by_profiles.is_empty() {
+                        option.used_by_profiles =
+                            used_by_id.get(&record.id).cloned().unwrap_or_default();
+                    }
+                })
+                .or_insert_with(|| LocalModVersionOption {
+                    mod_version_id: record.id.clone(),
+                    name: record.name.clone(),
+                    version: record
+                        .source_version
+                        .clone()
+                        .unwrap_or_else(|| record.version.clone()),
+                    folder_name: record.folder_name.clone(),
+                    mod_id: record.mod_id.clone(),
+                    display_name: None,
+                    bundle_member_ids: record.bundle_member_ids.clone(),
+                    installed: false,
+                    installed_enabled: false,
+                    cached: true,
+                    pinned,
+                    used_by_profiles: used_by_id.get(&record.id).cloned().unwrap_or_default(),
+                });
+        }
     }
 
     options_by_family
@@ -1160,6 +1237,7 @@ mod tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -1230,6 +1308,7 @@ mod tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         assert_eq!(
             record_for_profile_mod(&pm, dir.path()).map(|record| record.id),
@@ -1259,6 +1338,7 @@ mod tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
 
         assert_eq!(
@@ -1296,6 +1376,7 @@ mod tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
 
         restore_mod_from_cache_by_id(cache.path(), config.path(), &pm, restore.path()).unwrap();
@@ -1329,6 +1410,7 @@ mod tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -1367,6 +1449,77 @@ mod tests {
         assert!(
             has_local_version_for_mod(config.path(), cache.path(), &installed, "29"),
             "a cached Nexus V29 archive should suppress another update pill for latest 29"
+        );
+    }
+
+    #[test]
+    fn legacy_member_cached_bundle_record_routes_to_bundle_family_only() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let bundle_source = "https://www.nexusmods.com/slaythespire2/mods/979";
+
+        write_manifest(base.path(), "2.1");
+        let mut bundle = mod_info("Pretty Pack", "2.1", Some("bundle-hash"));
+        bundle.folder_name = Some("Pretty Pack".into());
+        bundle.mod_id = None;
+        bundle.source = Some(bundle_source.into());
+        bundle.bundle_members = vec!["BaseLib".into(), "Kaguya Regent Skin".into()];
+        bundle.bundle_member_ids = vec!["BaseLib".into(), "KaguyaRegentMSGKSkin".into()];
+        let bundle_id = ensure_mod_info_id(&mut bundle, config.path()).unwrap();
+
+        let mut standalone = mod_info("BaseLib", "1.0.0", Some("standalone-hash"));
+        standalone.name = "BaseLib".into();
+        standalone.folder_name = Some("BaseLib".into());
+        standalone.mod_id = Some("BaseLib".into());
+        standalone.source = Some("github:basemod/baselib".into());
+        let standalone_id = ensure_mod_info_id(&mut standalone, config.path()).unwrap();
+
+        let mut legacy_bad_record = mod_info("BaseLib", "2.1", Some("legacy-bad-hash"));
+        legacy_bad_record.name = "BaseLib".into();
+        legacy_bad_record.folder_name = Some("BaseLib".into());
+        legacy_bad_record.mod_id = Some("BaseLib".into());
+        legacy_bad_record.source = Some(bundle_source.into());
+        let legacy_id = ensure_mod_info_id(&mut legacy_bad_record, config.path()).unwrap();
+        cache_mod_version_by_id(
+            &mut legacy_bad_record,
+            base.path(),
+            cache.path(),
+            config.path(),
+        )
+        .expect("legacy cached artifact should be written");
+
+        let installed = vec![bundle.clone(), standalone.clone()];
+        let bundle_options = local_version_options_for_target(
+            &installed,
+            &[],
+            config.path(),
+            cache.path(),
+            &bundle.name,
+            Some(&bundle_id),
+            bundle.mod_id.as_deref(),
+        );
+        assert!(
+            bundle_options
+                .iter()
+                .any(|option| option.mod_version_id == legacy_id),
+            "legacy member-shaped cache record should recover onto the owning bundle row"
+        );
+
+        let standalone_options = local_version_options_for_target(
+            &installed,
+            &[],
+            config.path(),
+            cache.path(),
+            &standalone.name,
+            Some(&standalone_id),
+            standalone.mod_id.as_deref(),
+        );
+        assert!(
+            standalone_options
+                .iter()
+                .all(|option| option.mod_version_id != legacy_id),
+            "standalone member row must not offer the cached bundle artifact"
         );
     }
 
@@ -1538,6 +1691,7 @@ mod tests {
                     bundle_url: None,
                     bundle_sha256: None,
                     bundle_members: vec![],
+                    bundle_member_ids: vec![],
                 });
             }
 

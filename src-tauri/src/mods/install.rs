@@ -22,7 +22,10 @@ use walkdir::WalkDir;
 
 use crate::error::{AppError, Result};
 
-use super::scan::{calculate_mod_size, hash_file, parse_manifest, scan_mods, strip_utf8_bom};
+use super::scan::{
+    calculate_mod_size, collect_bundle_member_metadata, hash_file, parse_manifest, scan_mods,
+    strip_utf8_bom,
+};
 use super::state::{path_is_inside, sanitize_path_segment};
 use super::ModInfo;
 
@@ -363,6 +366,9 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
         if entry.is_dir() || name.starts_with("__MACOSX") || name.starts_with("._") {
             continue;
         }
+        if entry.enclosed_name().is_none() {
+            continue;
+        }
         all_entries.push(name.clone());
         // Track top-level dirs for ALL files
         if let Some(first) = name.split('/').next() {
@@ -583,10 +589,41 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
             &dir,
             &super::bundle::BundleSidecar {
                 display_name: container_name.clone(),
-                installed_version,
+                installed_version: installed_version.clone(),
                 ..Default::default()
             },
         );
+
+        let size_bytes = calculate_mod_size(mods_path, &extracted_files);
+        let (bundle_members, bundle_member_ids) =
+            collect_bundle_member_metadata(&dir, mods_path, true);
+        return Ok(ModInfo {
+            mod_version_id: None,
+            name: container_name.clone(),
+            version: installed_version.unwrap_or_else(|| "unknown".to_string()),
+            description: String::new(),
+            enabled: true,
+            files: extracted_files,
+            source: None,
+            hash: hash_file(zip_path),
+            dependencies: Vec::new(),
+            size_bytes,
+            folder_name: Some(container_name),
+            mod_id: None,
+            github_url: None,
+            github_auto_detected: false,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            custom_url: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            bundle_members,
+            bundle_member_ids,
+        });
     }
 
     let size_bytes = calculate_mod_size(mods_path, &extracted_files);
@@ -642,6 +679,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 display_name: None,
                 display_description: None,
                 bundle_members: vec![],
+                bundle_member_ids: vec![],
             })
         }
     }
@@ -1250,7 +1288,21 @@ mod archive_dispatch_tests {
             ("AliceDefectVoiceBridge/AliceDefectVoiceBridge.dll", b"dll".to_vec()),
         ]);
         let mods = tempfile::tempdir().unwrap();
-        install_mod_from_archive(&zip, mods.path()).expect("multi-member installs");
+        let installed = install_mod_from_archive(&zip, mods.path()).expect("multi-member installs");
+        assert_eq!(installed.name, "AliceDefectSkin V2.0");
+        assert_eq!(
+            installed.folder_name.as_deref(),
+            Some("AliceDefectSkin V2.0")
+        );
+        assert_eq!(installed.mod_id, None);
+        assert_eq!(installed.bundle_members.len(), 2);
+        assert_eq!(
+            installed.bundle_member_ids,
+            vec![
+                "AliceDefectSkin".to_string(),
+                "AliceDefectVoiceBridge".to_string()
+            ]
+        );
         let tops: Vec<_> = fs::read_dir(mods.path())
             .unwrap()
             .flatten()
@@ -1695,6 +1747,7 @@ mod config_snapshot_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         let new_folder = mods_path.join("MyMod");
         fs::create_dir_all(&new_folder).unwrap();

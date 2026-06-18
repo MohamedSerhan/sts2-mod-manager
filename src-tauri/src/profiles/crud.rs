@@ -690,6 +690,7 @@ pub(crate) fn profile_mod_from_installed(installed: &ModInfo) -> ProfileMod {
         bundle_url: None,
         bundle_sha256: None,
         bundle_members: installed.bundle_members.clone(),
+        bundle_member_ids: installed.bundle_member_ids.clone(),
     }
 }
 
@@ -723,6 +724,7 @@ mod profile_mod_registry_match_tests {
             display_name: None,
             display_description: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -740,6 +742,7 @@ mod profile_mod_registry_match_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -957,6 +960,7 @@ mod profile_schema_compat_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         let json = serde_json::to_string(&pm).unwrap();
         assert!(
@@ -983,6 +987,7 @@ mod profile_schema_compat_tests {
             ),
             bundle_sha256: Some("deadbeef".into()),
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         };
         let json = serde_json::to_string(&pm).unwrap();
         let round: ProfileMod = serde_json::from_str(&json).unwrap();
@@ -1013,6 +1018,7 @@ mod persist_profile_mod_sources_tests {
             bundle_url: None,
             bundle_sha256: None,
             bundle_members: vec![],
+            bundle_member_ids: vec![],
         }
     }
 
@@ -1117,6 +1123,7 @@ mod profile_identity_storage_tests {
                     bundle_url: None,
                     bundle_sha256: None,
                     bundle_members: vec![],
+                    bundle_member_ids: vec![],
                 })
                 .collect(),
             created_at: chrono::Utc::now(),

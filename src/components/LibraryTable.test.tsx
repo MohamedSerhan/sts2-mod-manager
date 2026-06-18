@@ -1136,6 +1136,70 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(within(listbox).getByRole('option', { name: /0\.3\.1 \(active\)/i })).toBeInTheDocument();
   });
 
+  it('shows backend bundle options only on the owning bundle row', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'pretty-pack-20',
+        name: 'Pretty Pack',
+        version: '2.0.0',
+        folder_name: 'PrettyPack',
+        mod_id: null,
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/979',
+        bundle_members: ['BaseLib', 'Kaguya Skin'],
+        bundle_member_ids: ['BaseLib', 'KaguyaRegentMSGKSkin'],
+      }),
+      mkModInfo({
+        mod_version_id: 'baselib-10',
+        name: 'BaseLib',
+        version: '1.0.0',
+        folder_name: 'BaseLib',
+        mod_id: 'BaseLib',
+      }),
+    ]);
+    registerInvokeHandler('get_library_version_options', () => ({
+      'pretty-pack-20': [
+        {
+          mod_version_id: 'pretty-pack-21',
+          name: 'Pretty Pack',
+          version: '2.1.0',
+          folder_name: 'PrettyPack-v2.1.0',
+          mod_id: null,
+          bundle_member_ids: ['BaseLib', 'KaguyaRegentMSGKSkin'],
+          installed: false,
+          installed_enabled: false,
+          cached: true,
+          pinned: false,
+          used_by_profiles: [],
+        },
+        {
+          mod_version_id: 'pretty-pack-20',
+          name: 'Pretty Pack',
+          version: '2.0.0',
+          folder_name: 'PrettyPack',
+          mod_id: null,
+          bundle_member_ids: ['BaseLib', 'KaguyaRegentMSGKSkin'],
+          installed: true,
+          installed_enabled: true,
+          cached: true,
+          pinned: false,
+          used_by_profiles: [],
+        },
+      ],
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap modpackName={null} />);
+
+    const bundleRow = (await screen.findByRole('heading', { name: 'Pretty Pack' })).closest('[data-testid="library-row"]') as HTMLElement;
+    const standaloneRow = screen.getByRole('heading', { name: 'BaseLib' }).closest('[data-testid="library-row"]') as HTMLElement;
+    expect(within(bundleRow).getByRole('combobox', { name: /Choose version/i })).toBeInTheDocument();
+    expect(within(standaloneRow).queryByRole('combobox', { name: /Choose version/i })).toBeNull();
+
+    const listbox = await openSelect(user, /Choose version/i);
+    expect(within(listbox).getByRole('option', { name: /2\.1\.0 \(stored\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /2\.0\.0 \(active\)/i })).toBeInTheDocument();
+  });
+
   it('shows cached-only GitHub update versions in the no-focus Library selector', async () => {
     registerInvokeHandler('get_installed_mods', () => [
       mkModInfo({

@@ -559,10 +559,39 @@ pub(crate) fn profile_mod_matches_installed_with_registry(
     profile_mod_matches_installed(pm, installed)
 }
 
+pub(crate) fn profile_mod_matches_installed_with_version_db(
+    pm: &ProfileMod,
+    installed: &ModInfo,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> bool {
+    if pm
+        .mod_version_id
+        .as_deref()
+        .is_some_and(|id| !id.trim().is_empty())
+        && installed
+            .mod_version_id
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty())
+    {
+        return profile_mod_artifact_id_matches_in_db(pm, installed, version_db).unwrap_or(false);
+    }
+
+    profile_mod_matches_installed(pm, installed)
+}
+
 pub(crate) fn profile_mod_artifact_id_matches(
     pm: &ProfileMod,
     installed: &ModInfo,
     config_path: &Path,
+) -> Option<bool> {
+    let db = crate::mod_versions::load(config_path);
+    profile_mod_artifact_id_matches_in_db(pm, installed, &db)
+}
+
+fn profile_mod_artifact_id_matches_in_db(
+    pm: &ProfileMod,
+    installed: &ModInfo,
+    version_db: &crate::mod_versions::ModVersionsDb,
 ) -> Option<bool> {
     let profile_id = pm
         .mod_version_id
@@ -577,15 +606,15 @@ pub(crate) fn profile_mod_artifact_id_matches(
     if profile_id == installed_id {
         return Some(true);
     }
-    if let Some(record) = crate::mod_versions::record_for_profile_mod(pm, config_path) {
-        return Some(crate::mod_versions::ids_equivalent(
-            config_path,
+    if let Some(record) = crate::mod_versions::record_for_profile_mod_in_db(pm, version_db) {
+        return Some(crate::mod_versions::ids_equivalent_in_db(
+            version_db,
             &record.id,
             installed_id,
         ));
     }
-    Some(crate::mod_versions::ids_equivalent(
-        config_path,
+    Some(crate::mod_versions::ids_equivalent_in_db(
+        version_db,
         profile_id,
         installed_id,
     ))

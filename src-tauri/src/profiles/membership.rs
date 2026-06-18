@@ -32,7 +32,8 @@ use super::apply::disk_mod_matches_pin;
 use super::crud::{
     hide_app_created_by, installed_mod_matches_target, list_profiles, load_profile, mod_key,
     profile_has_json, profile_is_edit_locked, profile_mod_from_installed,
-    profile_mod_matches_installed_with_registry, profile_mod_matches_target, save_profile,
+    profile_mod_matches_installed_with_registry, profile_mod_matches_installed_with_version_db,
+    profile_mod_matches_target, save_profile,
 };
 use super::{
     LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod,
@@ -67,6 +68,13 @@ pub(crate) fn profile_membership_matrix(
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
     crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
+    let version_db = crate::mod_versions::load(config_path);
+    let version_options_by_id = crate::mod_versions::local_version_options_by_mod_version_id_in_db(
+        &installed_mods,
+        &profiles,
+        &version_db,
+        cache_path,
+    );
     let mods = installed_mods
         .iter()
         .map(|installed| {
@@ -75,7 +83,7 @@ pub(crate) fn profile_membership_matrix(
                 .zip(profile_rows.iter())
                 .map(|(profile, profile_row)| {
                     let matched = profile.mods.iter().enumerate().find(|(_, pm)| {
-                        profile_mod_matches_installed_with_registry(pm, &installed, config_path)
+                        profile_mod_matches_installed_with_version_db(pm, &installed, &version_db)
                     });
                     ProfileMembershipState {
                         profile_id: profile.id.clone(),
@@ -96,15 +104,11 @@ pub(crate) fn profile_membership_matrix(
                 mod_id: installed.mod_id.clone(),
                 display_name: installed.display_name.clone(),
                 installed_enabled: installed.enabled,
-                version_options: crate::mod_versions::local_version_options_for_target(
-                    &installed_mods,
-                    &profiles,
-                    config_path,
-                    cache_path,
-                    &installed.name,
-                    installed.mod_version_id.as_deref(),
-                    installed.mod_id.as_deref(),
-                ),
+                version_options: installed
+                    .mod_version_id
+                    .as_deref()
+                    .and_then(|id| version_options_by_id.get(id).cloned())
+                    .unwrap_or_default(),
                 profiles: states,
             }
         })

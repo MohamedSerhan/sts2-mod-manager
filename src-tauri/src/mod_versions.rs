@@ -234,6 +234,11 @@ fn record_has_canonical_alias(db: &ModVersionsDb, record_id: &str, alias: &str) 
 }
 
 pub fn ids_equivalent(config_path: &Path, a: &str, b: &str) -> bool {
+    let db = load(config_path);
+    ids_equivalent_in_db(&db, a, b)
+}
+
+pub(crate) fn ids_equivalent_in_db(db: &ModVersionsDb, a: &str, b: &str) -> bool {
     let a = a.trim();
     let b = b.trim();
     if a.is_empty() || b.is_empty() {
@@ -242,7 +247,6 @@ pub fn ids_equivalent(config_path: &Path, a: &str, b: &str) -> bool {
     if a == b {
         return true;
     }
-    let db = load(config_path);
     let resolved_a = resolve_alias(&db, a);
     let resolved_b = resolve_alias(&db, b);
     if resolved_a == resolved_b {
@@ -486,6 +490,13 @@ pub fn alias_shared_id(
 
 pub fn record_for_profile_mod(pm: &ProfileMod, config_path: &Path) -> Option<ModVersionRecord> {
     let db = load(config_path);
+    record_for_profile_mod_in_db(pm, &db)
+}
+
+pub(crate) fn record_for_profile_mod_in_db(
+    pm: &ProfileMod,
+    db: &ModVersionsDb,
+) -> Option<ModVersionRecord> {
     let identity_key = key_for_profile_mod(pm);
     pm.mod_version_id
         .as_deref()
@@ -589,41 +600,95 @@ pub fn local_version_options_for_target(
     mod_id: Option<&str>,
 ) -> Vec<LocalModVersionOption> {
     let db = load(config_path);
+    let by_family = local_version_options_by_family(installed_mods, profiles, &db, cache_path);
     let target_family = target_family_key(&db, name, mod_version_id, mod_id);
+    by_family.get(&target_family).cloned().unwrap_or_default()
+}
+
+pub fn local_version_options_by_mod_version_id(
+    installed_mods: &[ModInfo],
+    profiles: &[crate::profiles::Profile],
+    config_path: &Path,
+    cache_path: &Path,
+) -> HashMap<String, Vec<LocalModVersionOption>> {
+    let db = load(config_path);
+    local_version_options_by_mod_version_id_in_db(installed_mods, profiles, &db, cache_path)
+}
+
+pub(crate) fn local_version_options_by_mod_version_id_in_db(
+    installed_mods: &[ModInfo],
+    profiles: &[crate::profiles::Profile],
+    db: &ModVersionsDb,
+    cache_path: &Path,
+) -> HashMap<String, Vec<LocalModVersionOption>> {
+    let by_family = local_version_options_by_family(installed_mods, profiles, &db, cache_path);
+    let mut by_mod_version_id = HashMap::new();
+    for info in installed_mods {
+        let Some(id) = info.mod_version_id.as_deref() else {
+            continue;
+        };
+        let target_family = target_family_key(&db, &info.name, Some(id), info.mod_id.as_deref());
+        if let Some(options) = by_family.get(&target_family) {
+            by_mod_version_id.insert(id.to_string(), options.clone());
+            let resolved = resolve_alias(&db, id);
+            if resolved != id {
+                by_mod_version_id.insert(resolved.to_string(), options.clone());
+            }
+        }
+    }
+    by_mod_version_id
+}
+
+fn local_version_options_by_family(
+    installed_mods: &[ModInfo],
+    profiles: &[crate::profiles::Profile],
+    db: &ModVersionsDb,
+    cache_path: &Path,
+) -> HashMap<String, Vec<LocalModVersionOption>> {
     let mut used_by_id: HashMap<String, Vec<String>> = HashMap::new();
     for profile in profiles {
         for pm in &profile.mods {
-            if let Some(record) = record_for_profile_mod(pm, config_path) {
-                if family_key_for_record(&record) == target_family {
-                    used_by_id
-                        .entry(record.id)
-                        .or_default()
-                        .push(profile.name.clone());
-                }
+            if let Some(record) = record_for_profile_mod_in_db(pm, db) {
+                used_by_id
+                    .entry(record.id)
+                    .or_default()
+                    .push(profile.name.clone());
             }
         }
     }
 
-    let mut options: HashMap<String, LocalModVersionOption> = HashMap::new();
-    let family_pinned = installed_mods
-        .iter()
-        .any(|info| family_key_for_mod(info) == target_family && info.pinned);
+    let cached_ids: HashSet<String> = db
+        .records
+        .values()
+        .filter(|record| cached_record_path(cache_path, record).is_some())
+        .map(|record| record.id.clone())
+        .collect();
+    let mut family_pinned: HashSet<String> = HashSet::new();
+    for info in installed_mods.iter().filter(|info| info.pinned) {
+        family_pinned.insert(family_key_for_mod(info));
+        if let Some(id) = info.mod_version_id.as_deref() {
+            if let Some(record) = db.records.get(resolve_alias(db, id)) {
+                family_pinned.insert(family_key_for_record(record));
+            }
+        }
+    }
 
-    for info in installed_mods
-        .iter()
-        .filter(|info| family_key_for_mod(info) == target_family)
-    {
+    let mut options_by_family: HashMap<String, HashMap<String, LocalModVersionOption>> =
+        HashMap::new();
+    for info in installed_mods {
         let Some(id) = info.mod_version_id.clone() else {
             continue;
         };
-        let record = db.records.get(resolve_alias(&db, &id));
-        let cached = record
-            .and_then(|record| cached_record_path(cache_path, record))
-            .is_some();
+        let resolved_id = resolve_alias(db, &id).to_string();
+        let record = db.records.get(&resolved_id);
+        let family = record
+            .map(family_key_for_record)
+            .unwrap_or_else(|| family_key_for_mod(info));
+        let cached = cached_ids.contains(&resolved_id);
         let version = record
             .and_then(|record| record.source_version.clone())
             .unwrap_or_else(|| info.version.clone());
-        options.insert(
+        options_by_family.entry(family).or_default().insert(
             id.clone(),
             LocalModVersionOption {
                 mod_version_id: id.clone(),
@@ -636,25 +701,26 @@ pub fn local_version_options_for_target(
                 installed_enabled: info.enabled,
                 cached,
                 pinned: info.pinned,
-                used_by_profiles: used_by_id.remove(&id).unwrap_or_default(),
+                used_by_profiles: used_by_id.get(&resolved_id).cloned().unwrap_or_default(),
             },
         );
     }
 
-    for record in db
-        .records
-        .values()
-        .filter(|record| family_key_for_record(record) == target_family)
-    {
-        if cached_record_path(cache_path, record).is_none() {
+    for record in db.records.values() {
+        if !cached_ids.contains(&record.id) {
             continue;
         }
-        options
+        let family = family_key_for_record(record);
+        let pinned = family_pinned.contains(&family);
+        options_by_family
+            .entry(family)
+            .or_default()
             .entry(record.id.clone())
             .and_modify(|option| {
                 option.cached = true;
                 if option.used_by_profiles.is_empty() {
-                    option.used_by_profiles = used_by_id.remove(&record.id).unwrap_or_default();
+                    option.used_by_profiles =
+                        used_by_id.get(&record.id).cloned().unwrap_or_default();
                 }
             })
             .or_insert_with(|| LocalModVersionOption {
@@ -670,20 +736,25 @@ pub fn local_version_options_for_target(
                 installed: false,
                 installed_enabled: false,
                 cached: true,
-                pinned: family_pinned,
-                used_by_profiles: used_by_id.remove(&record.id).unwrap_or_default(),
+                pinned,
+                used_by_profiles: used_by_id.get(&record.id).cloned().unwrap_or_default(),
             });
     }
 
-    let mut options: Vec<LocalModVersionOption> = options.into_values().collect();
-    options.sort_by(|a, b| {
-        let version = b.version.to_lowercase().cmp(&a.version.to_lowercase());
-        version
-            .then_with(|| b.installed_enabled.cmp(&a.installed_enabled))
-            .then_with(|| b.installed.cmp(&a.installed))
-            .then_with(|| a.name.cmp(&b.name))
-    });
-    options
+    options_by_family
+        .into_iter()
+        .map(|(family, options)| {
+            let mut options: Vec<LocalModVersionOption> = options.into_values().collect();
+            options.sort_by(|a, b| {
+                let version = b.version.to_lowercase().cmp(&a.version.to_lowercase());
+                version
+                    .then_with(|| b.installed_enabled.cmp(&a.installed_enabled))
+                    .then_with(|| b.installed.cmp(&a.installed))
+                    .then_with(|| a.name.cmp(&b.name))
+            });
+            (family, options)
+        })
+        .collect()
 }
 
 pub fn has_local_version_for_mod(
@@ -1320,6 +1391,103 @@ mod tests {
             has_local_version_for_mod(config.path(), cache.path(), &installed, "1"),
             "cached Nexus V1 should suppress the update pill for latest 1"
         );
+    }
+
+    #[test]
+    fn batched_local_version_options_match_per_target_for_large_library() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+
+        write_manifest(base.path(), "1.0.0");
+
+        let mut installed = Vec::new();
+        let mut profile = crate::profiles::Profile {
+            id: "profile-id".into(),
+            name: "Large Pack".into(),
+            game_version: None,
+            created_by: None,
+            mods: Vec::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: std::collections::HashMap::new(),
+        };
+
+        for index in 0..120 {
+            let name = format!("Test {}", index);
+            let folder = format!("Mod{}", index);
+            let mod_id = format!("mod-id-{}", index);
+            let hash = format!("hash-{}", index);
+            let mut info = mod_info(&name, "1.0.0", Some(&hash));
+            info.folder_name = Some(folder.clone());
+            info.mod_id = Some(mod_id.clone());
+            info.source = Some(format!("github:owner/repo{}", index));
+            let id = ensure_mod_info_id(&mut info, config.path()).unwrap();
+
+            if index % 10 == 0 {
+                profile.mods.push(ProfileMod {
+                    mod_version_id: Some(id.clone()),
+                    name: name.clone(),
+                    version: "1.0.0".into(),
+                    source: info.source.clone(),
+                    hash: info.hash.clone(),
+                    files: info.files.clone(),
+                    folder_name: Some(folder.clone()),
+                    mod_id: Some(mod_id.clone()),
+                    enabled: true,
+                    bundle_url: None,
+                    bundle_sha256: None,
+                    bundle_members: vec![],
+                });
+            }
+
+            if index == 42 {
+                let mut cached = info.clone();
+                cached.mod_version_id = None;
+                cached.hash = Some("hash-42-new".into());
+                cache_mod_version_by_id_with_source_version(
+                    &mut cached,
+                    base.path(),
+                    cache.path(),
+                    config.path(),
+                    Some("V2"),
+                )
+                .unwrap();
+            }
+
+            installed.push(info);
+        }
+
+        let profiles = vec![profile];
+        let batched = local_version_options_by_mod_version_id(
+            &installed,
+            &profiles,
+            config.path(),
+            cache.path(),
+        );
+
+        for info in &installed {
+            let id = info
+                .mod_version_id
+                .as_deref()
+                .expect("installed mod should have a local version id");
+            let per_target = local_version_options_for_target(
+                &installed,
+                &profiles,
+                config.path(),
+                cache.path(),
+                &info.name,
+                Some(id),
+                info.mod_id.as_deref(),
+            );
+            assert_eq!(
+                batched.get(id).cloned().unwrap_or_default(),
+                per_target,
+                "batched options should match per-target options for {}",
+                info.name
+            );
+        }
     }
 
     #[test]

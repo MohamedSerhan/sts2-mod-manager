@@ -1133,6 +1133,54 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(within(picker).getByRole('option', { name: /0\.3\.1 \(active\)/i })).toBeInTheDocument();
   });
 
+  it('shows cached-only GitHub update versions in the no-focus Library selector', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'watcher-142',
+        name: 'Watcher',
+        version: '1.4.2',
+        folder_name: 'Watcher',
+        mod_id: 'Watcher',
+        github_url: 'https://github.com/owner/watcher',
+        enabled: true,
+      }),
+    ]);
+    registerInvokeHandler('get_library_version_options', () => ({
+      'watcher-142': [
+        {
+          mod_version_id: 'watcher-143',
+          name: 'Watcher',
+          version: '1.4.3',
+          folder_name: 'Watcher-v1.4.3',
+          mod_id: 'Watcher',
+          installed: false,
+          installed_enabled: false,
+          cached: true,
+          pinned: false,
+          used_by_profiles: [],
+        },
+        {
+          mod_version_id: 'watcher-142',
+          name: 'Watcher',
+          version: '1.4.2',
+          folder_name: 'Watcher',
+          mod_id: 'Watcher',
+          installed: true,
+          installed_enabled: true,
+          cached: true,
+          pinned: false,
+          used_by_profiles: ['TesterW'],
+        },
+      ],
+    }));
+
+    render(<Wrap modpackName={null} />);
+
+    const picker = await screen.findByRole('combobox', { name: /Choose version/i });
+    expect(within(picker).getByRole('option', { name: /1\.4\.3 \(stored\)/i })).toBeInTheDocument();
+    expect(within(picker).getByRole('option', { name: /1\.4\.2 \(active\)/i })).toBeInTheDocument();
+  });
+
   it('renders rows without the storage chip or per-row Store button', async () => {
     seedInstalledMods();
     const { container } = render(<Wrap modpackName={null} />);

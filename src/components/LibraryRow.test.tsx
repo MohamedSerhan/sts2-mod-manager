@@ -696,12 +696,12 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(onUnsnooze).toHaveBeenCalledTimes(1);
   });
 
-  it('audit pill — Update available pill renders when audit reports a pending update', () => {
+  it('audit pill — Download update pill renders when audit reports a pending update', () => {
     renderRow({
       mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
       audit: baseAudit(),
     });
-    expect(screen.getByText(/Update available → v3\.2\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/Download update → v3\.2\.0/)).toBeInTheDocument();
   });
 
   it('audit pill — clicking the Update pill fires onUpdate', async () => {
@@ -712,7 +712,7 @@ describe('<LibraryRow> kebab + audit pills', () => {
       audit: baseAudit(),
       onUpdate,
     });
-    await user.click(screen.getByRole('button', { name: /Update available → v3\.2\.0/i }));
+    await user.click(screen.getByRole('button', { name: /Download update → v3\.2\.0/i }));
     expect(onUpdate).toHaveBeenCalledTimes(1);
   });
 
@@ -1014,7 +1014,7 @@ describe('<LibraryRow> Nexus-only update pill', () => {
       }),
     });
     // The pill must be visible.
-    expect(screen.getByRole('button', { name: /Update available/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Download update/i })).toBeInTheDocument();
   });
 
   it('shows the Nexus version in the pill label for a Nexus-only mod', () => {
@@ -1032,9 +1032,9 @@ describe('<LibraryRow> Nexus-only update pill', () => {
       }),
     });
     // The pill label should show the Nexus version, not undefined.
-    // The i18n key is "Update available → v{{version}}" with v stripped in
+    // The i18n key is "Download update → v{{version}}" with v stripped in
     // the template then re-added, so the rendered text is "v2.1.0".
-    expect(screen.getByText(/Update available → v2\.1\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/Download update → v2\.1\.0/)).toBeInTheDocument();
   });
 
   it('clicking the Nexus update pill fires onUpdate', async () => {
@@ -1054,7 +1054,7 @@ describe('<LibraryRow> Nexus-only update pill', () => {
       }),
       onUpdate,
     });
-    await user.click(screen.getByRole('button', { name: /Update available/i }));
+    await user.click(screen.getByRole('button', { name: /Download update/i }));
     expect(onUpdate).toHaveBeenCalledTimes(1);
   });
 
@@ -1063,7 +1063,7 @@ describe('<LibraryRow> Nexus-only update pill', () => {
       mod: baseModInfo({ github_url: 'https://github.com/x/y' }),
       audit: baseAudit({ needs_update: true, nexus_update_available: false }),
     });
-    expect(screen.getByRole('button', { name: /Update available/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Download update/i })).toBeInTheDocument();
   });
 
   it('does NOT show the update pill when needs_update is false (even if nexus_update_available is true)', () => {
@@ -1073,7 +1073,7 @@ describe('<LibraryRow> Nexus-only update pill', () => {
       mod: baseModInfo({ github_url: null }),
       audit: baseAudit({ needs_update: false, nexus_update_available: true, nexus_version: '9.9.9' }),
     });
-    expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Download update/i })).toBeNull();
   });
 
   it('does NOT show the update pill when the mod is pinned (nexus update ignored)', () => {
@@ -1081,7 +1081,7 @@ describe('<LibraryRow> Nexus-only update pill', () => {
       mod: baseModInfo({ github_url: null, pinned: true }),
       audit: baseAudit({ needs_update: true, nexus_update_available: true, nexus_version: '2.1.0', pinned: true }),
     });
-    expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Download update/i })).toBeNull();
   });
 
   it('offers Skip this update for a Nexus-only update and fires onSnooze', async () => {
@@ -1127,7 +1127,7 @@ describe('<LibraryRow> Nexus-only update pill', () => {
     });
 
     expect(screen.getByText(/Latest/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Update available/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Download update/i })).toBeNull();
   });
 
   it('distinguishes the audited Nexus version from the manifest version when they differ', () => {

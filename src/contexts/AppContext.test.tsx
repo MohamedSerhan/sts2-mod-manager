@@ -714,7 +714,7 @@ describe('<AppProvider>', () => {
     act(() => {
       bulkPromise = bulkCaptured!.updateAllGithub(['A']);
     });
-    const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
+    const confirmBtn = await screen.findByRole('button', { name: /^Download 1 update$/ });
     await user.click(confirmBtn);
     const updated = await bulkPromise!;
 
@@ -871,7 +871,7 @@ describe('<AppProvider>', () => {
     const user = userEvent.setup();
     let bulkPromise: Promise<unknown> | null = null;
     act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
-    const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
+    const confirmBtn = await screen.findByRole('button', { name: /^Download 1 update$/ });
     await user.click(confirmBtn);
     await bulkPromise!;
 
@@ -892,7 +892,7 @@ describe('<AppProvider>', () => {
     const user = userEvent.setup();
     let bulkPromise: Promise<unknown> | null = null;
     act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
-    const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
+    const confirmBtn = await screen.findByRole('button', { name: /^Download 1 update$/ });
     await user.click(confirmBtn);
     await bulkPromise!;
 
@@ -915,7 +915,7 @@ describe('<AppProvider>', () => {
     const user = userEvent.setup();
     let bulkPromise: Promise<unknown> | null = null;
     act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
-    const confirmBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
+    const confirmBtn = await screen.findByRole('button', { name: /^Download 1 update$/ });
     await user.click(confirmBtn);
     await bulkPromise!;
 

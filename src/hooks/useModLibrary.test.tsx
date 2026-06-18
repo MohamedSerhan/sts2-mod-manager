@@ -296,11 +296,28 @@ describe('useModLibrary', () => {
     expect(updateModCalls()).toHaveLength(0);
   });
 
+  it('handleInlineUpdate on an unlinked local mod shows a no-GitHub-source error', async () => {
+    const localMod = makeMod({
+      name: 'LocalOnly',
+      display_name: 'Local Only',
+      github_url: null,
+      nexus_url: null,
+    });
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(localMod);
+    });
+
+    expect(updateModCalls()).toHaveLength(0);
+    expect(await screen.findByText(/Update failed for 'Local Only'.*has no GitHub source linked/i)).toBeInTheDocument();
+  });
+
   it('handleInlineUpdate promotes auto-detected GitHub plus Nexus before using the GitHub update path', async () => {
     const nexusMod = makeMod({
       name: 'Route Planner',
       folder_name: 'route_planner',
-      github_url: 'https://github.com/auto/guess',
+      github_url: 'auto/guess',
       github_auto_detected: true,
       nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1260',
     });
@@ -313,7 +330,7 @@ describe('useModLibrary', () => {
       name: 'Route Planner',
       folder_name: 'route_planner',
       version: '2.0.0',
-      github_url: 'https://github.com/auto/guess',
+      github_url: 'auto/guess',
       github_auto_detected: false,
       nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1260',
     }));
@@ -395,6 +412,27 @@ describe('useModLibrary', () => {
     });
   });
 
+  it('handleInlineUpdate reports when the Nexus fallback cannot open after a GitHub update failure', async () => {
+    const bothSourceMod = makeMod({
+      name: 'Route Planner',
+      folder_name: 'route_planner',
+      github_url: 'https://github.com/llzcx/STS2-RoutePlanner',
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+    });
+    registerInvokeHandler('update_mod', () => {
+      throw new Error('GitHub release asset is broken');
+    });
+    vi.mocked(openUrl).mockRejectedValueOnce(new Error('browser blocked'));
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(bothSourceMod);
+    });
+
+    expect(updateModCalls()).toHaveLength(1);
+    expect(await screen.findByText(/browser blocked/i)).toBeInTheDocument();
+  });
+
   it('suppresses duplicate inline update calls before React state catches up', async () => {
     const githubMod = makeMod({
       name: 'RelicsReminder',
@@ -428,7 +466,7 @@ describe('useModLibrary', () => {
     expect(updateModCalls()).toHaveLength(1);
   });
 
-  it('handleInlineUpdate syncs a targeted modpack manifest before marking the pack changed', async () => {
+  it('handleInlineUpdate downloads a targeted modpack update without changing the manifest', async () => {
     const githubMod = makeMod({
       name: 'RelicsReminder',
       folder_name: 'RelicsReminder',
@@ -454,19 +492,11 @@ describe('useModLibrary', () => {
     });
 
     await waitFor(() => expect(updateModCalls()).toHaveLength(1));
-    expect(membershipCalls()).toHaveLength(1);
-    expect(membershipCalls()[0].args).toMatchObject({
-      profileId: 'profile-123',
-      modName: 'RelicsReminder',
-      folderName: 'RelicsReminder',
-      modId: 'relics-reminder',
-      included: true,
-      sourceHint: 'https://github.com/some/relics-reminder',
-    });
-    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+    expect(membershipCalls()).toHaveLength(0);
+    expect(onTargetPackChanged).not.toHaveBeenCalled();
   });
 
-  it('bulk GitHub updates sync only targeted mods into the target pack manifest', async () => {
+  it('bulk GitHub updates download versions without changing the target pack manifest', async () => {
     registerInvokeHandler('update_all_mods', () => [
       makeMod({
         name: 'PackMod',
@@ -496,19 +526,11 @@ describe('useModLibrary', () => {
     act(() => {
       updatePromise = result.current.updateAllGithub(['PackMod']);
     });
-    await user.click(await screen.findByRole('button', { name: /^Update 1 mod$/ }));
+    await user.click(await screen.findByRole('button', { name: /^Download 1 update$/ }));
     await updatePromise;
 
-    expect(membershipCalls()).toHaveLength(1);
-    expect(membershipCalls()[0].args).toMatchObject({
-      profileId: 'profile-123',
-      modName: 'PackMod',
-      folderName: 'PackMod',
-      modId: 'pack-mod',
-      included: true,
-      sourceHint: 'https://github.com/some/pack-mod',
-    });
-    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+    expect(membershipCalls()).toHaveLength(0);
+    expect(onTargetPackChanged).not.toHaveBeenCalled();
   });
 
   it('does not sync updated mods into a followed target pack', async () => {
@@ -550,7 +572,7 @@ describe('useModLibrary', () => {
     expect(onTargetPackChanged).not.toHaveBeenCalled();
   });
 
-  it('still syncs targeted updates when subscription lookup fails', async () => {
+  it('still avoids manifest sync when subscription lookup fails during update download', async () => {
     const githubMod = makeMod({
       name: 'LocalPackMod',
       folder_name: 'LocalPackMod',
@@ -577,8 +599,8 @@ describe('useModLibrary', () => {
       await result.current.tableActionProps.onUpdate(githubMod);
     });
 
-    expect(membershipCalls()).toHaveLength(1);
-    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+    expect(membershipCalls()).toHaveLength(0);
+    expect(onTargetPackChanged).not.toHaveBeenCalled();
   });
 
   it('repair syncs the refreshed mod into a targeted modpack manifest', async () => {

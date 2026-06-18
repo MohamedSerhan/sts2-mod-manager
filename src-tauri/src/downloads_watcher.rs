@@ -145,7 +145,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
 
                         recent.insert(path.clone(), Instant::now());
 
-                        let (mods_path, disabled_path, config_path) = {
+                        let (mods_path, disabled_path, profiles_path, cache_path, config_path) = {
                             let s = match state.lock() {
                                 Ok(s) => s,
                                 Err(_) => continue,
@@ -155,8 +155,10 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 None => continue,
                             };
                             let dp = s.disabled_mods_path.clone();
+                            let pp = s.profiles_path.clone();
+                            let cache = s.cache_path.clone();
                             let cp = s.config_path.clone();
-                            (mp, dp, cp)
+                            (mp, dp, pp, cache, cp)
                         };
 
                         log::info!("Downloads watcher: detected mod zip {:?}", path);
@@ -241,6 +243,125 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                         let replaced_identity = existing_mod
                             .as_ref()
                             .map(|e| (e.name.clone(), e.folder_name.clone()));
+
+                        if let Some(existing) = existing_mod.as_ref() {
+                            let file_name = path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
+                            let cache_result: std::result::Result<ModInfo, String> = (|| {
+                                let staging = tempfile::tempdir().map_err(|e| e.to_string())?;
+                                let mut staged = install_mod_from_archive(path, staging.path())
+                                    .map_err(|e| e.to_string())?;
+                                attach_pending_nexus_source(
+                                    &staged.name,
+                                    staged.folder_name.as_deref(),
+                                    staged.mod_id.as_deref(),
+                                    &file_name,
+                                    &config_path,
+                                    &state,
+                                );
+                                if staged.source.is_none() {
+                                    staged.source = crate::mod_versions::source_hint_for_mod(
+                                        existing,
+                                        &config_path,
+                                    )
+                                    .or_else(|| {
+                                        crate::mod_versions::source_hint_for_mod(
+                                            &staged,
+                                            &config_path,
+                                        )
+                                    });
+                                }
+                                crate::mod_versions::cache_mod_version_by_id(
+                                    &mut staged,
+                                    staging.path(),
+                                    &cache_path,
+                                    &config_path,
+                                )
+                                .ok_or_else(|| {
+                                    format!("Failed to cache '{}' v{}", staged.name, staged.version)
+                                })?;
+                                if let Some(id) = staged.mod_version_id.clone() {
+                                    if let Some(version) =
+                                        crate::mods::bundle::nexus_file_version(path)
+                                    {
+                                        let _ = crate::mod_versions::set_record_source_version(
+                                            &config_path,
+                                            &id,
+                                            Some(&version),
+                                        );
+                                    }
+                                    let mut installed = scan_mods(&mods_path);
+                                    if let Some(ref disabled_path) = disabled_path {
+                                        installed.extend(scan_disabled_mods(disabled_path));
+                                    }
+                                    crate::mod_sources::enrich_mods_with_sources(
+                                        &mut installed,
+                                        &config_path,
+                                    );
+                                    crate::mod_versions::enrich_mods_with_versions(
+                                        &mut installed,
+                                        &config_path,
+                                    );
+                                    let profiles = crate::profiles::list_profiles(&profiles_path);
+                                    let anchor_ids: Vec<String> =
+                                        [existing.mod_version_id.clone(), Some(id.clone())]
+                                            .into_iter()
+                                            .flatten()
+                                            .collect();
+                                    let _ = crate::mod_versions::prune_cached_versions_around(
+                                        &config_path,
+                                        &cache_path,
+                                        &installed,
+                                        &profiles,
+                                        &anchor_ids,
+                                        &[id],
+                                    );
+                                }
+                                Ok(staged)
+                            })(
+                            );
+
+                            match cache_result {
+                                Ok(mod_info) => {
+                                    log::info!(
+                                        "Downloads watcher: cached '{}' from {} as an available version for existing '{}'",
+                                        mod_info.name,
+                                        file_name,
+                                        existing.name
+                                    );
+                                    let _ = app.emit(
+                                        "mod-auto-installed",
+                                        ModAutoInstalled {
+                                            mod_version_id: mod_info.mod_version_id,
+                                            mod_name: mod_info.name,
+                                            folder_name: mod_info.folder_name,
+                                            mod_id: mod_info.mod_id,
+                                            file_name,
+                                            replaced: Some(existing.name.clone()),
+                                            preserved_configs: Vec::new(),
+                                        },
+                                    );
+                                }
+                                Err(e) => {
+                                    log::error!(
+                                        "Downloads watcher: failed to cache {}: {}",
+                                        file_name,
+                                        e
+                                    );
+                                    let _ = app.emit(
+                                        "mod-auto-install-failed",
+                                        ModAutoInstallFailed {
+                                            file_name,
+                                            error: e.to_string(),
+                                        },
+                                    );
+                                }
+                            }
+                            continue;
+                        }
 
                         // Step 1 (update only): read user-edited configs.
                         // Must happen BEFORE remove_existing_mod_files —

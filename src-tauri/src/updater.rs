@@ -3,11 +3,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::download::{fetch_latest_release, fetch_releases};
 use crate::error::Result;
-use crate::mod_sources::{
-    load_sources, lookup_entry, save_sources, update_installed_version_from_source, ModSourceEntry,
-};
+use crate::mod_sources::{load_sources, lookup_entry, ModSourceEntry};
 use crate::mods::{scan_mods, ModInfo};
 use crate::state::AppState;
+#[cfg(test)]
 use std::path::Path;
 
 // ── Version Comparison ─────────────────────────────────────────────────────
@@ -307,6 +306,8 @@ pub async fn check_all_updates(
     sources: &std::collections::HashMap<String, ModSourceEntry>,
     token: Option<&str>,
     nexus_api_key: Option<&str>,
+    config_path: Option<&std::path::Path>,
+    cache_path: Option<&std::path::Path>,
 ) -> Result<Vec<ModUpdate>> {
     let mut updates = Vec::new();
     // Track which mods already got a GitHub update so we don't double-list.
@@ -408,6 +409,18 @@ pub async fn check_all_updates(
             );
             continue;
         }
+        if let (Some(config_path), Some(cache_path)) = (config_path, cache_path) {
+            if crate::mod_versions::has_local_version_for_mod(config_path, cache_path, m, latest) {
+                log::info!(
+                    "Skipping update for {} ({}/{}): v{} is already cached locally",
+                    m.name,
+                    owner,
+                    repo,
+                    latest
+                );
+                continue;
+            }
+        }
 
         let download_url = release
             .assets
@@ -497,6 +510,22 @@ pub async fn check_all_updates(
                             && current_ver != "0.0.0"
                             && is_newer_version(current_ver, nexus_ver)
                         {
+                            if let (Some(config_path), Some(cache_path)) = (config_path, cache_path)
+                            {
+                                if crate::mod_versions::has_local_version_for_mod(
+                                    config_path,
+                                    cache_path,
+                                    m,
+                                    nexus_ver,
+                                ) {
+                                    log::info!(
+                                        "Skipping Nexus update for {}: v{} is already cached locally",
+                                        m.name,
+                                        nexus_ver,
+                                    );
+                                    continue;
+                                }
+                            }
                             updates.push(ModUpdate {
                                 mod_name: m.name.clone(),
                                 folder_name: m.folder_name.clone(),
@@ -531,13 +560,14 @@ pub async fn check_all_updates(
 pub async fn check_for_updates(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModUpdate>, String> {
-    let (mods_path, config_path, token, nexus_key) = {
+    let (mods_path, config_path, cache_path, token, nexus_key) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
         let config_path = s.config_path.clone();
+        let cache_path = s.cache_path.clone();
         let token = s.github_token.clone();
         let nexus_key = s.nexus_api_key.clone();
-        (mods_path, config_path, token, nexus_key)
+        (mods_path, config_path, cache_path, token, nexus_key)
     };
 
     let installed = scan_mods(&mods_path);
@@ -547,6 +577,8 @@ pub async fn check_for_updates(
         &sources_db.mods,
         token.as_deref(),
         nexus_key.as_deref(),
+        Some(&config_path),
+        Some(&cache_path),
     )
     .await
     .map_err(|e| e.to_string())
@@ -781,26 +813,7 @@ fn rollback_release_target(
     }
 }
 
-fn profile_references_installed_mod(
-    mod_info: &ModInfo,
-    profiles_path: &Path,
-    config_path: &Path,
-) -> bool {
-    let mut candidate = mod_info.clone();
-    crate::mod_versions::ensure_mod_info_id(&mut candidate, config_path);
-    crate::profiles::list_profiles(profiles_path)
-        .iter()
-        .any(|profile| {
-            profile.mods.iter().any(|pm| {
-                crate::profiles::profile_mod_matches_installed_with_registry(
-                    pm,
-                    &candidate,
-                    config_path,
-                )
-            })
-        })
-}
-
+#[cfg(test)]
 fn cache_downloaded_mod_artifact(
     zip_path: &Path,
     source_hint: Option<String>,
@@ -824,14 +837,15 @@ fn cache_downloaded_mod_artifact(
     Ok(info)
 }
 
-/// Download and install the newest version of a specific mod from its
+/// Download and cache the newest version of a specific mod from its
 /// GitHub source that's compatible with the user's Slay the Spire 2 build.
 ///
 /// This walks releases newest → oldest (same logic as `repair_mod`) so a
 /// curator's freshly-published release that requires a beta game build
-/// doesn't get installed on a stable-branch user — that produced the
+/// doesn't get saved as the user's next selectable version on a stable branch.
+/// The old install-over-active behavior produced the
 /// "vunknown" stub state that Repair was invented to fix in the first
-/// place. The Update button in the audit calls this; we only refuse if
+/// place. The update pill in the audit calls this; we only refuse if
 /// the walk-back lands on a tag the user already has.
 ///
 /// When `game_version` is unknown (release_info.json missing) we fail
@@ -841,8 +855,8 @@ fn cache_downloaded_mod_artifact(
 pub async fn update_mod(
     name: String,
     folder_name: Option<String>,
-    profile_id: Option<String>,
-    app: tauri::AppHandle,
+    _profile_id: Option<String>,
+    _app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
@@ -894,7 +908,6 @@ pub async fn update_mod(
     // compatible release, we want the user to keep what they had.
     let chosen_tag: String;
     let chosen_zip: std::path::PathBuf;
-    let chosen_mgv: Option<String>;
     if game_version.is_some() {
         let chosen = pick_compatible_release(
             &owner,
@@ -922,7 +935,6 @@ pub async fn update_mod(
         }
 
         chosen_tag = chosen.tag;
-        chosen_mgv = chosen.min_game_version;
         chosen_zip = chosen.zip_path;
     } else {
         // Fail open: no game version means we can't compare. Grab latest.
@@ -931,7 +943,7 @@ pub async fn update_mod(
             .map_err(|e| e.to_string())?;
         let tag = release.tag_name.clone();
         log::warn!(
-            "update_mod: no game_version detected — installing latest {}/{}@{} without compatibility check",
+            "update_mod: no game_version detected — downloading latest {}/{}@{} without compatibility check",
             owner, repo, tag,
         );
         chosen_zip = crate::download::download_release_zip_to_cache(
@@ -944,156 +956,48 @@ pub async fn update_mod(
         )
         .await
         .map_err(|e| e.to_string())?;
-        chosen_mgv = crate::download::peek_zip_min_game_version(&chosen_zip)
-            .ok()
-            .flatten();
         chosen_tag = tag;
     }
 
-    let has_profile_context = profile_id
-        .as_deref()
-        .is_some_and(|id| !id.trim().is_empty());
-    if !has_profile_context
-        && profile_references_installed_mod(mod_info, &profiles_path, &config_path)
-    {
-        log::info!(
-            "update_mod: '{}' is referenced by a saved modpack; caching {}/{}@{} without changing the library copy",
-            name,
-            owner,
-            repo,
-            chosen_tag,
-        );
-        return cache_downloaded_mod_artifact(
-            &chosen_zip,
-            Some(format!("github:{}/{}", owner, repo)),
-            &cache_path,
-            &config_path,
-        )
-        .map_err(|e| e.to_string());
-    }
-
-    // Read user-edited configs BEFORE the destructive delete pass. Empty
-    // when the mod has no snapshot (rollout case) or no edits.
-    let pre_update_preserved = {
-        let old_info = if let Some(ref folder) = folder_name {
-            installed
-                .iter()
-                .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
-        } else {
-            installed.iter().find(|m| m.name == name)
-        };
-        old_info
-            .and_then(|m| m.folder_name.clone().or_else(|| Some(m.name.clone())))
-            .map(|folder| {
-                crate::mods::prepare_update_with_preserved_configs(
-                    &folder,
-                    &name,
-                    &mods_path,
-                    &config_path,
-                )
-            })
-            .unwrap_or_default()
-    };
-
-    // Move the old mod files ASIDE (instead of deleting them) before
-    // installing the update, to prevent duplicates (e.g., old mod in
-    // "ModConfig-v0.2.1/" and new one in "ModConfig-v0.2.2/") while still
-    // letting us restore the original if the extract below fails (#174).
-    // Reuse the same folder-first resolution so two same-named mods don't
-    // step on each other.
-    let stashed_existing = {
-        let old_info = if let Some(ref folder) = folder_name {
-            installed
-                .iter()
-                .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
-        } else {
-            installed.iter().find(|m| m.name == name)
-        };
-        old_info.map(|old_info| {
-            crate::downloads_watcher::sweep_stale_update_stashes(old_info, &mods_path);
-            log::info!("Stashing old files for '{}' aside before updating", name);
-            crate::downloads_watcher::stash_existing_mod_files(old_info, &mods_path, None)
-        })
-    };
-
     log::info!(
-        "update_mod: installing {}/{}@{} for {} (game v{}, min_game_version={}, preserving {} configs)",
-        owner, repo, chosen_tag, name,
-        game_version.as_deref().unwrap_or("?"),
-        chosen_mgv.as_deref().unwrap_or("none"),
-        pre_update_preserved.len(),
+        "update_mod: caching {}/{}@{} for '{}' without changing the active library copy",
+        owner,
+        repo,
+        chosen_tag,
+        name,
     );
-    // On failure, restore the stashed original so the user keeps their
-    // existing install instead of ending up with nothing (#174).
-    let mut info = match crate::mods::install_mod_from_zip(&chosen_zip, &mods_path) {
-        Ok(info) => info,
-        Err(e) => {
-            if let Some(stash) = stashed_existing {
-                log::error!(
-                    "update_mod: extract of '{}' from {}/{}@{} failed ({}); restoring previous install",
-                    name, owner, repo, chosen_tag, e,
-                );
-                stash.restore();
-            }
-            return Err(e.to_string());
-        }
-    };
+    let info = crate::mod_versions::cache_archive_as_mod_version(
+        &chosen_zip,
+        Some(format!("github:{}/{}", owner, repo)),
+        &cache_path,
+        &config_path,
+    )
+    .map_err(|e| e.to_string())?;
 
     if let Err(e) =
         validate_update_install_result(&old_info_for_validation, &info, game_version.as_deref())
     {
-        if let Some(stash) = stashed_existing {
-            log::error!(
-                "update_mod: validation of '{}' from {}/{}@{} failed ({}); restoring previous install",
-                name, owner, repo, chosen_tag, e,
-            );
-            stash.restore();
-        }
         return Err(e);
     }
 
-    crate::mod_versions::ensure_mod_info_id(&mut info, &config_path);
-
-    if let Some(stash) = stashed_existing {
-        stash.discard();
-    }
-
-    // Validation already rejected unknown/empty manifests, wrong identities,
-    // empty extracts, and incompatible game versions. Only now is it safe to
-    // forget the stash and remember the release tag we chose.
-    let install_healthy = true;
-    if install_healthy {
-        // Write under folder_name when available so the installed_version
-        // travels with the same DB key the pin lookup uses (folder-first).
-        let install_key = info.folder_name.as_deref().unwrap_or(name.as_str());
-        update_installed_version_from_source(install_key, &chosen_tag, "github", &config_path);
-        if info.name != name {
-            // When the install renamed the mod (manifest's Name field changed
-            // between releases — e.g. "STS2-ShowPlayerHandCards" → "Highlight
-            // Card Types in Potion Description"), carry the source link / pin /
-            // version over so the audit doesn't lose track and report "no
-            // source" on the freshly-installed copy.
-            crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
-            update_installed_version_from_source(&info.name, &chosen_tag, "github", &config_path);
-        }
-
-        // Overlay user-edited configs + refresh snapshot. Emits the
-        // mod-configs-preserved event for the toast when anything was
-        // actually preserved.
-        let outcome = crate::mods::finalize_update_with_preserved_configs(
-            &info,
-            &mods_path,
-            pre_update_preserved,
+    if let Some(id) = info.mod_version_id.clone() {
+        let _ =
+            crate::mod_versions::set_record_source_version(&config_path, &id, Some(&chosen_tag));
+        let profiles = crate::profiles::list_profiles(&profiles_path);
+        let mut refreshed = scan_mods(&mods_path);
+        crate::mod_sources::enrich_mods_with_sources(&mut refreshed, &config_path);
+        crate::mod_versions::enrich_mods_with_versions(&mut refreshed, &config_path);
+        let anchor_ids: Vec<String> = [mod_info.mod_version_id.clone(), Some(id.clone())]
+            .into_iter()
+            .flatten()
+            .collect();
+        let _ = crate::mod_versions::prune_cached_versions_around(
             &config_path,
-        )
-        .map_err(|e| e.to_string())?;
-        crate::mod_sources::emit_configs_preserved(&app, &info.name, &outcome.preserved);
-        crate::mod_sources::emit_configs_lost(&app, &info.name, &outcome.lost);
-    } else {
-        log::error!(
-            "update_mod: install of '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
-             leaving installed_version untouched so the previously-recorded value survives for Repair walk-back.",
-            name, owner, repo, chosen_tag, info.version,
+            &cache_path,
+            &refreshed,
+            &profiles,
+            &anchor_ids,
+            &[id],
         );
     }
 
@@ -1698,8 +1602,8 @@ pub async fn pick_previous_compatible_release(
 /// logged but don't fail the batch.
 #[tauri::command]
 pub async fn update_all_mods(
-    profile_id: Option<String>,
-    app: tauri::AppHandle,
+    _profile_id: Option<String>,
+    _app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModInfo>, String> {
     crate::game::ensure_game_not_running()?;
@@ -1732,6 +1636,8 @@ pub async fn update_all_mods(
         &sources_db.mods,
         token.as_deref(),
         nexus_key.as_deref(),
+        Some(&config_path),
+        Some(&cache_path),
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -1807,7 +1713,7 @@ pub async fn update_all_mods(
             }
         } else {
             log::warn!(
-                "update_all_mods: no game_version detected — installing latest {}/{}@{} without compatibility check",
+                "update_all_mods: no game_version detected — downloading latest {}/{}@{} without compatibility check",
                 owner, repo, update.latest_version,
             );
             let zip = match crate::download::download_release_zip_to_cache(
@@ -1845,151 +1751,59 @@ pub async fn update_all_mods(
         } else {
             installed.iter().find(|m| m.name == update.mod_name)
         };
-        let pre_update_preserved = old_info_opt
-            .and_then(|m| m.folder_name.clone().or_else(|| Some(m.name.clone())))
-            .map(|folder| {
-                crate::mods::prepare_update_with_preserved_configs(
-                    &folder,
-                    &update.mod_name,
-                    &mods_path,
-                    &config_path,
-                )
-            })
-            .unwrap_or_default();
-
-        // Delete old files before extracting the new zip — same shape as
-        // update_mod / repair_mod. Folder-first lookup so two same-named
-        // mods don't accidentally share or steal each other's installs.
-        let has_profile_context = profile_id
-            .as_deref()
-            .is_some_and(|id| !id.trim().is_empty());
-        if let Some(old_info) = old_info_opt {
-            if !has_profile_context
-                && profile_references_installed_mod(old_info, &profiles_path, &config_path)
-            {
-                log::info!(
-                    "update_all_mods: '{}' is referenced by a saved modpack; caching {}/{}@{} without changing the library copy",
-                    update.mod_name,
-                    owner,
-                    repo,
-                    chosen_tag,
-                );
-                match cache_downloaded_mod_artifact(
-                    &chosen_zip,
-                    Some(format!("github:{}/{}", owner, repo)),
-                    &cache_path,
-                    &config_path,
-                ) {
-                    Ok(info) => results.push(info),
-                    Err(e) => {
+        match crate::mod_versions::cache_archive_as_mod_version(
+            &chosen_zip,
+            Some(format!("github:{}/{}", owner, repo)),
+            &cache_path,
+            &config_path,
+        ) {
+            Ok(info) => {
+                if let Some(old_info) = old_info_opt {
+                    if let Err(e) =
+                        validate_update_install_result(old_info, &info, game_version.as_deref())
+                    {
                         log::error!(
-                            "update_all_mods: failed to cache update artifact for '{}': {}",
+                            "update_all_mods: cached update for '{}' from {}/{}@{} failed validation: {}",
                             update.mod_name,
+                            owner,
+                            repo,
+                            chosen_tag,
                             e,
                         );
+                        continue;
                     }
                 }
-                continue;
-            }
-
-            let mut parent_dirs = std::collections::HashSet::new();
-            for file_rel in &old_info.files {
-                let normalized = file_rel.replace('\\', "/");
-                let file_path = mods_path.join(&normalized);
-                if file_path.is_dir() {
-                    let _ = std::fs::remove_dir_all(&file_path);
-                } else if file_path.exists() {
-                    let _ = std::fs::remove_file(&file_path);
-                }
-                if let Some(parent_rel) = std::path::Path::new(&normalized).parent() {
-                    if !parent_rel.as_os_str().is_empty() {
-                        parent_dirs.insert(mods_path.join(parent_rel));
-                    }
-                }
-            }
-            for dir in &parent_dirs {
-                if dir.is_dir()
-                    && std::fs::read_dir(dir)
-                        .map(|mut d| d.next().is_none())
-                        .unwrap_or(false)
-                {
-                    let _ = std::fs::remove_dir(dir);
-                }
-            }
-            if let Some(folder) = old_info.folder_name.as_deref() {
-                let folder_path = mods_path.join(folder);
-                if folder_path.is_dir() {
-                    let _ = std::fs::remove_dir_all(&folder_path);
-                }
-            }
-        }
-
-        match crate::mods::install_mod_from_zip(&chosen_zip, &mods_path) {
-            Ok(mut info) => {
-                crate::mod_versions::ensure_mod_info_id(&mut info, &config_path);
-                let install_healthy = info.version != "unknown" && !info.version.is_empty();
-                if !install_healthy {
-                    log::error!(
-                        "update_all_mods: '{}' from {}/{}@{} produced an unhealthy ModInfo (version='{}'); \
-                         leaving installed_version untouched.",
-                        update.mod_name, owner, repo, chosen_tag, info.version,
-                    );
-                    results.push(info);
-                    continue;
-                }
-
-                if info.name != update.mod_name {
-                    crate::mod_sources::migrate_source_entry(
-                        &update.mod_name,
-                        &info.name,
+                if let Some(id) = info.mod_version_id.clone() {
+                    let _ = crate::mod_versions::set_record_source_version(
                         &config_path,
+                        &id,
+                        Some(&chosen_tag),
+                    );
+                    let profiles = crate::profiles::list_profiles(&profiles_path);
+                    let anchor_ids: Vec<String> = [
+                        old_info_opt.and_then(|m| m.mod_version_id.clone()),
+                        Some(id.clone()),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                    let _ = crate::mod_versions::prune_cached_versions_around(
+                        &config_path,
+                        &cache_path,
+                        &installed,
+                        &profiles,
+                        &anchor_ids,
+                        &[id],
                     );
                 }
-                let mut db = load_sources(&config_path);
-                // Write under folder_name when available — keeps two
-                // same-named mods independent in the sources DB and matches
-                // the folder-first read path in enrich_mods_with_sources.
-                let key = info
-                    .folder_name
-                    .clone()
-                    .unwrap_or_else(|| info.name.clone());
-                let entry = db.mods.entry(key).or_default();
-                entry.github_repo = Some(format!("{}/{}", owner, repo));
-                entry.installed_version = Some(chosen_tag.clone());
-                entry.installed_version_source = Some("github".into());
-                let _ = save_sources(&db, &config_path);
-
-                // Overlay user-edited configs + refresh snapshot. Emits
-                // the mod-configs-preserved event per mod, so a bulk
-                // update produces one toast per affected mod (acceptable
-                // for the typical 1-2 preserve-affected mods in a batch).
-                match crate::mods::finalize_update_with_preserved_configs(
-                    &info,
-                    &mods_path,
-                    pre_update_preserved,
-                    &config_path,
-                ) {
-                    Ok(outcome) => {
-                        crate::mod_sources::emit_configs_preserved(
-                            &app,
-                            &info.name,
-                            &outcome.preserved,
-                        );
-                        crate::mod_sources::emit_configs_lost(&app, &info.name, &outcome.lost);
-                    }
-                    Err(e) => {
-                        log::error!(
-                            "update_all_mods: finalize preserve for '{}' failed: {}",
-                            info.name,
-                            e,
-                        );
-                    }
-                }
-
                 results.push(info);
             }
             Err(e) => {
-                log::error!("Failed to update mod '{}': {}", update.mod_name, e);
+                log::error!(
+                    "update_all_mods: failed to cache update artifact for '{}': {}",
+                    update.mod_name,
+                    e,
+                );
             }
         }
     }
@@ -3175,6 +2989,7 @@ struct AuditCtx<'a> {
     sources_db: &'a crate::mod_sources::ModSourcesDb,
     nexus_api_key: Option<&'a str>,
     user_game_version: Option<&'a str>,
+    config_path: &'a std::path::Path,
     cache_path: &'a std::path::Path,
     token: Option<&'a str>,
 }
@@ -3235,6 +3050,7 @@ pub async fn audit_mod_versions(
         sources_db: &sources_db,
         nexus_api_key: nexus_api_key.as_deref(),
         user_game_version: user_game_version.as_deref(),
+        config_path: &config_path,
         cache_path: &cache_path,
         token: token.as_deref(),
     };
@@ -3366,6 +3182,21 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                 if !installed_ver_matches && current_ver != "unknown" && current_ver != "0.0.0" {
                     // Use semver comparison — only flag if latest > current
                     github_needs_update = is_newer_version(current_ver, latest_ver);
+                    if github_needs_update
+                        && crate::mod_versions::has_local_version_for_mod(
+                            ctx.config_path,
+                            ctx.cache_path,
+                            m,
+                            latest_ver,
+                        )
+                    {
+                        log::info!(
+                            "audit: suppressing GitHub update for '{}' because v{} is already cached locally",
+                            m.name,
+                            latest_ver,
+                        );
+                        github_needs_update = false;
+                    }
                 }
             }
 
@@ -3550,6 +3381,21 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                         let nexus_ver = strip_version_prefix(nv);
                         if current_ver != "unknown" && current_ver != "0.0.0" {
                             nexus_update_available = is_newer_version(current_ver, nexus_ver);
+                            if nexus_update_available
+                                && crate::mod_versions::has_local_version_for_mod(
+                                    ctx.config_path,
+                                    ctx.cache_path,
+                                    m,
+                                    nexus_ver,
+                                )
+                            {
+                                log::info!(
+                                    "audit: suppressing Nexus update for '{}' because v{} is already cached locally",
+                                    m.name,
+                                    nexus_ver,
+                                );
+                                nexus_update_available = false;
+                            }
                         }
                         // Nexus and GitHub typically host the same
                         // mod release at the same version. If the

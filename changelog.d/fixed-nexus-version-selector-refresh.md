@@ -1,1 +1,1 @@
-Nexus-updated mods now clear stale update badges and same-mod installed versions stay together in the version selector.
+Nexus-downloaded mods now clear stale update badges and same-mod versions stay together in the version selector.

@@ -47,6 +47,8 @@ import { isActionableUpdate } from '../lib/auditState';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
 import {
   getProfileMemberships,
+  selectLibraryModVersion,
+  selectProfileModVersion,
   setProfileLoadOrder,
   setProfileModMembership,
   toggleMod,
@@ -54,6 +56,7 @@ import {
 import type {
   ModAuditEntry,
   ModInfo,
+  LocalModVersionOption,
   Profile,
   ProfileMembershipGrid,
   ProfileMembershipMod,
@@ -177,7 +180,7 @@ export interface LibraryTableProps {
   onFindGithubFromNexus?: (mod: ModInfo) => void;
   onOpenExternalUrl?: (url: string, mod: ModInfo) => void;
   onAutoDetectSource?: (mod: ModInfo) => void;
-  onSelectProfileVersion?: (current: ProfileMembershipMod, selected: ProfileMembershipMod) => Promise<void> | void;
+  onSelectProfileVersion?: (current: ProfileMembershipMod, selected: LocalModVersionOption, applyToDisk: boolean) => Promise<void> | void;
   /** Render-prop for the inline source editor: when a row's key
    *  matches, the parent returns the editor JSX to slot inside the
    *  row. Returns null otherwise. */
@@ -369,6 +372,7 @@ export function LibraryTable({
     return {
       profiles: [],
       mods: appMods.map((mod) => ({
+        mod_version_id: mod.mod_version_id ?? null,
         name: mod.name,
         version: mod.version,
         folder_name: mod.folder_name,
@@ -585,10 +589,25 @@ export function LibraryTable({
   const visibleItems = filteredRows.slice(0, visibleLimit);
 
   const versionOptionsByKey = useMemo(() => {
-    const map = new Map<string, ProfileMembershipMod[]>();
+    const map = new Map<string, LocalModVersionOption[]>();
     if (!effectiveGrid) return map;
+    for (const row of effectiveGrid.mods) {
+      const options = row.version_options ?? [];
+      const versionCount = new Set(options.map((option) => modVersionSortValue(option.version))).size;
+      if (options.length > 1 && versionCount > 1) {
+        map.set(membershipRowKey(row), [...options].sort((a, b) => {
+          const byVersion = modVersionSortValue(b.version).localeCompare(
+            modVersionSortValue(a.version),
+            undefined,
+            { sensitivity: 'base', numeric: true },
+          );
+          return byVersion || a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+        }));
+      }
+    }
     const groups = new Map<string, ProfileMembershipMod[]>();
     for (const row of effectiveGrid.mods) {
+      if (map.has(membershipRowKey(row))) continue;
       const info =
         modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
       const groupKey = logicalModKey(row, info);
@@ -608,7 +627,25 @@ export function LibraryTable({
         );
         return byVersion || compareMembershipDisplayName(a, b);
       });
-      for (const row of group) map.set(membershipRowKey(row), sortedGroup);
+      for (const row of group) {
+        if (map.has(membershipRowKey(row))) continue;
+        map.set(
+          membershipRowKey(row),
+          sortedGroup.map((option) => ({
+            mod_version_id: membershipRowKey(option),
+            name: option.name,
+            version: option.version,
+            folder_name: option.folder_name,
+            mod_id: option.mod_id,
+            display_name: option.display_name,
+            installed: true,
+            installed_enabled: option.installed_enabled,
+            cached: false,
+            pinned: false,
+            used_by_profiles: option.profiles.filter((profile) => profile.included).map((profile) => profile.profile_name),
+          })),
+        );
+      }
     }
     return map;
   }, [effectiveGrid, modInfoByKey]);
@@ -617,34 +654,52 @@ export function LibraryTable({
     /* v8 ignore next -- rendered selects only emit real option changes. */
     if (!effectiveGrid || selectedKey === membershipRowKey(row)) return;
     const options = versionOptionsByKey.get(membershipRowKey(row)) ?? [];
-    const selected = options.find((option) => membershipRowKey(option) === selectedKey);
+    const selected = options.find((option) => option.mod_version_id === selectedKey);
     /* v8 ignore next -- selectedKey comes from the rendered option list. */
     if (!selected) return;
     const packActive =
       modpackName != null && (modpackName === activeProfileId || (!activeProfileId && modpackName === activeProfile));
     try {
       pinScroll();
+      const state = focusedState(row);
       if (packScoped && modpackName) {
-        await onSelectProfileVersion?.(row, selected);
-        if (packActive) {
-          if (!selected.installed_enabled) {
-            await toggleMod(selected.name, selected.folder_name ?? null, true);
-          }
-          if (row.installed_enabled) {
-            await toggleMod(row.name, row.folder_name ?? null, false);
-          }
-        }
+        await onSelectProfileVersion?.(row, selected, packActive);
+        await onMembershipChanged?.();
+        await onLoadOrderChanged?.();
+      } else if (modpackName && state?.included) {
+        await selectProfileModVersion(
+          modpackName,
+          {
+            mod_version_id: row.mod_version_id ?? null,
+            folder_name: row.folder_name ?? null,
+            mod_id: row.mod_id ?? null,
+            name: row.name,
+          },
+          {
+            mod_version_id: selected.mod_version_id,
+            folder_name: selected.folder_name ?? null,
+            mod_id: selected.mod_id ?? null,
+            name: selected.name,
+          },
+          packActive,
+        );
         await onMembershipChanged?.();
         await onLoadOrderChanged?.();
       } else {
-        if (!selected.installed_enabled) {
-          await toggleMod(selected.name, selected.folder_name ?? null, true);
-        }
-        for (const option of options) {
-          if (membershipRowKey(option) !== selectedKey && option.installed_enabled) {
-            await toggleMod(option.name, option.folder_name ?? null, false);
-          }
-        }
+        await selectLibraryModVersion(
+          {
+            mod_version_id: row.mod_version_id ?? null,
+            folder_name: row.folder_name ?? null,
+            mod_id: row.mod_id ?? null,
+            name: row.name,
+          },
+          {
+            mod_version_id: selected.mod_version_id,
+            folder_name: selected.folder_name ?? null,
+            mod_id: selected.mod_id ?? null,
+            name: selected.name,
+          },
+        );
       }
       await refreshAll();
       await load();
@@ -1130,7 +1185,7 @@ export function LibraryTable({
               anyRecoveryInFlight={anyRecoveryInFlight}
               {...rowActionHandlers}
               versionOptions={versionRows.map((option) => ({
-                key: membershipRowKey(option),
+                key: option.mod_version_id,
                 version: option.version,
                 label: `${option.version.replace(/^v/i, 'v')}${option.installed_enabled ? ` ${t('mods.versionActiveSuffix')}` : ` ${t('mods.versionStoredSuffix')}`}`,
               }))}

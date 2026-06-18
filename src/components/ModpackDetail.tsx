@@ -68,7 +68,7 @@ import { usePinScroll } from '../hooks/usePinScroll';
 import { deleteMod, selectProfileModVersion, setProfileModMembership, setProfileModsEnabled, toggleMod } from '../hooks/useTauri';
 import { identitiesMatch } from '../lib/modIdentity';
 import { auditEntryKeys, isGithubBulkUpdate } from '../lib/auditState';
-import type { ModInfo, Profile, ProfileMembershipMod, ShareResult } from '../types';
+import type { LocalModVersionOption, ModInfo, Profile, ProfileMembershipMod, ShareResult } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
 export interface ModpackDetailProps {
@@ -416,7 +416,8 @@ export function ModpackDetail({
 
   const handleSelectPackVersion = async (
     current: ProfileMembershipMod,
-    selected: ProfileMembershipMod,
+    selected: LocalModVersionOption,
+    applyToDisk: boolean,
   ) => {
     await selectProfileModVersion(
       profileKey,
@@ -427,11 +428,12 @@ export function ModpackDetail({
         name: current.name,
       },
       {
-        mod_version_id: selected.mod_version_id ?? null,
+        mod_version_id: selected.mod_version_id,
         folder_name: selected.folder_name ?? null,
         mod_id: selected.mod_id ?? null,
         name: selected.name,
       },
+      applyToDisk,
     );
     markSharedLocalEdit();
     await refreshAfterMutation();

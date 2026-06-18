@@ -235,9 +235,27 @@ export async function selectProfileModVersion(
   profileId: string,
   current: ModAuditTarget,
   selected: ModAuditTarget,
+  applyToDisk = false,
 ): Promise<Profile> {
   return invoke('select_profile_mod_version', {
     profileId,
+    currentName: current.name,
+    currentModVersionId: current.mod_version_id ?? null,
+    currentFolderName: current.folder_name ?? null,
+    currentModId: current.mod_id ?? null,
+    selectedName: selected.name,
+    selectedModVersionId: selected.mod_version_id ?? null,
+    selectedFolderName: selected.folder_name ?? null,
+    selectedModId: selected.mod_id ?? null,
+    applyToDisk,
+  });
+}
+
+export async function selectLibraryModVersion(
+  current: ModAuditTarget,
+  selected: ModAuditTarget,
+): Promise<ModInfo> {
+  return invoke('select_library_mod_version', {
     currentName: current.name,
     currentModVersionId: current.mod_version_id ?? null,
     currentFolderName: current.folder_name ?? null,

@@ -902,7 +902,7 @@ describe('<App>', () => {
     });
   });
 
-  it('mod-auto-installed event with replaced shows update toast', async () => {
+  it('mod-auto-installed event with replaced shows saved-version toast', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await fireTauriEvent('mod-auto-installed', {
@@ -911,7 +911,7 @@ describe('<App>', () => {
       replaced: 'SuperMod v1',
     });
     await waitFor(() => {
-      expect(screen.getByText(/Updated "SuperMod v1" → "SuperMod v2" from super2\.zip/)).toBeInTheDocument();
+      expect(screen.getByText(/Saved "SuperMod v2" from super2\.zip in Versions\. "SuperMod v1" stays active\./)).toBeInTheDocument();
     });
   });
 

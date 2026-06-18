@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import type { ModAuditEntry } from '../types';
 import {
+  auditEntryKeys,
   auditEntryKey,
   auditTargetForMod,
+  auditTargetKeys,
   auditTargetKey,
   isActionableUpdate,
   isGithubBulkUpdate,
@@ -173,6 +175,25 @@ describe('audit identity helpers', () => {
       mod_id: 'mod-id',
       name: 'Name',
     });
+  });
+
+  it('exposes every stable identity so targeted refreshes can replace stale artifact rows', () => {
+    expect(auditEntryKeys(entry({ mod_version_id: 'artifact-old', folder_name: 'Folder', mod_name: 'Name' }))).toEqual([
+      'artifact-old',
+      'Folder',
+      'Name',
+    ]);
+    expect(auditTargetKeys({
+      mod_version_id: 'artifact-new',
+      folder_name: 'Folder',
+      mod_id: 'mod-id',
+      name: 'Name',
+    })).toEqual([
+      'artifact-new',
+      'Folder',
+      'mod-id',
+      'Name',
+    ]);
   });
 });
 

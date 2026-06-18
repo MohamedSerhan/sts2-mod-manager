@@ -41,7 +41,7 @@ WebDriver-driven via `specAuditAgainstCassettesShowsOnePending`:
 ## Assert
 
 - Toolbar button text matches `/^1 update$/i` exactly.
-- An "Update available" pill renders on the `QaTestMod` row (catches the case where the count is right but the per-row UI didn't update).
+- A "Download update" pill renders on the `QaTestMod` row (catches the case where the count is right but the per-row UI didn't update).
 
 ## Notes
 

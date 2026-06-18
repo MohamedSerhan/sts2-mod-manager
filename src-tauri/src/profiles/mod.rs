@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::mod_versions::LocalModVersionOption;
 use crate::state::AppState;
 
 // ── Submodules ─────────────────────────────────────────────────────────────
@@ -48,9 +49,9 @@ pub use membership::SetProfileModsEnabledResult;
 use apply::switch_profile_from_paths;
 use crud::delete_profile;
 use membership::{
-    profile_membership_matrix, set_profile_load_order_from_paths,
-    set_profile_mod_membership_from_paths, set_profile_mods_enabled_from_paths,
-    sync_profile_load_order_to_settings,
+    profile_membership_matrix, select_library_mod_version_from_paths,
+    set_profile_load_order_from_paths, set_profile_mod_membership_from_paths,
+    set_profile_mods_enabled_from_paths, sync_profile_load_order_to_settings,
 };
 
 pub(super) const APP_CREATED_BY: &str = "sts2-mod-manager";
@@ -180,6 +181,8 @@ pub struct ProfileMembershipMod {
     pub mod_id: Option<String>,
     pub display_name: Option<String>,
     pub installed_enabled: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub version_options: Vec<LocalModVersionOption>,
     pub profiles: Vec<ProfileMembershipState>,
 }
 
@@ -245,8 +248,14 @@ pub fn get_profile_memberships(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
-    profile_membership_matrix(mods_path, disabled_path, &s.profiles_path, &s.config_path)
-        .map_err(|e| e.to_string())
+    profile_membership_matrix(
+        mods_path,
+        disabled_path,
+        &s.profiles_path,
+        &s.config_path,
+        &s.cache_path,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -290,8 +299,12 @@ pub fn select_profile_mod_version(
     selected_mod_version_id: Option<String>,
     selected_folder_name: Option<String>,
     selected_mod_id: Option<String>,
+    apply_to_disk: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
+    if apply_to_disk.unwrap_or(false) {
+        crate::game::ensure_game_not_running()?;
+    }
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
@@ -309,6 +322,42 @@ pub fn select_profile_mod_version(
         disabled_path,
         &s.profiles_path,
         &s.config_path,
+        &s.cache_path,
+        apply_to_disk.unwrap_or(false),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn select_library_mod_version(
+    current_name: String,
+    current_mod_version_id: Option<String>,
+    current_folder_name: Option<String>,
+    current_mod_id: Option<String>,
+    selected_name: String,
+    selected_mod_version_id: Option<String>,
+    selected_folder_name: Option<String>,
+    selected_mod_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<crate::mods::ModInfo, String> {
+    crate::game::ensure_game_not_running()?;
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    select_library_mod_version_from_paths(
+        &current_name,
+        current_mod_version_id.as_deref(),
+        current_folder_name.as_deref(),
+        current_mod_id.as_deref(),
+        &selected_name,
+        selected_mod_version_id.as_deref(),
+        selected_folder_name.as_deref(),
+        selected_mod_id.as_deref(),
+        mods_path,
+        disabled_path,
+        &s.profiles_path,
+        &s.config_path,
+        &s.cache_path,
     )
     .map_err(|e| e.to_string())
 }

@@ -103,7 +103,7 @@ async fn cassette_reports_pending_github_update_only_for_stale_mod() {
         entry_with_github("qa-fixture/uptodate-mod"),
     );
 
-    let updates = check_all_updates(&[stale, fresh], &sources, None, None)
+    let updates = check_all_updates(&[stale, fresh], &sources, None, None, None, None)
         .await
         .expect("check_all_updates against cassettes should succeed");
 
@@ -143,7 +143,7 @@ async fn cassette_reports_pending_nexus_update_with_dummy_api_key() {
 
     // A non-empty key is required to enter the Nexus phase of
     // `check_all_updates`; the cassette never actually sends it.
-    let updates = check_all_updates(&[m], &sources, None, Some("qa-dummy-key"))
+    let updates = check_all_updates(&[m], &sources, None, Some("qa-dummy-key"), None, None)
         .await
         .expect("check_all_updates against Nexus cassette should succeed");
 
@@ -171,7 +171,7 @@ async fn unlinked_mod_produces_no_update() {
 
     let m = make_mod("Orphan", "1.0.0", "Orphan");
     let sources: HashMap<String, ModSourceEntry> = HashMap::new();
-    let updates = check_all_updates(&[m], &sources, None, None)
+    let updates = check_all_updates(&[m], &sources, None, None, None, None)
         .await
         .expect("check_all_updates on an unlinked mod should not error");
     assert!(updates.is_empty(), "expected no updates, got {:?}", updates);

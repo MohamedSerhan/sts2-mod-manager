@@ -774,13 +774,82 @@ pub fn install_mod_from_file(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
-    let (mods_path, config_path) = {
+    let (mods_path, disabled_path, profiles_path, cache_path, config_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?.clone();
+        let disabled_path = s.disabled_mods_path.clone();
+        let profiles_path = s.profiles_path.clone();
+        let cache_path = s.cache_path.clone();
         let config_path = s.config_path.clone();
-        (mods_path, config_path)
+        (
+            mods_path,
+            disabled_path,
+            profiles_path,
+            cache_path,
+            config_path,
+        )
     };
     let archive_path = PathBuf::from(&path);
+    let staging = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let mut staged =
+        install_mod_from_archive(&archive_path, staging.path()).map_err(|e| e.to_string())?;
+    let mut installed = scan_mods(&mods_path);
+    if let Some(ref disabled_path) = disabled_path {
+        installed.extend(scan_disabled_mods(disabled_path));
+    }
+    crate::mod_sources::enrich_mods_with_sources(&mut installed, &config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut installed, &config_path);
+    if let Some(existing) = installed
+        .iter()
+        .find(|existing| crate::mod_versions::mod_infos_share_family(existing, &staged))
+    {
+        attach_pending_nexus_source_for_file(&staged, &archive_path, &config_path, state.inner());
+        if staged.source.is_none() {
+            staged.source = crate::mod_versions::source_hint_for_mod(existing, &config_path)
+                .or_else(|| crate::mod_versions::source_hint_for_mod(&staged, &config_path));
+        }
+        let source_version = crate::mods::bundle::nexus_file_version(&archive_path).or_else(|| {
+            crate::downloads_watcher::fetch_nexus_version_blocking(
+                &staged.name,
+                staged.folder_name.as_deref(),
+                staged.mod_id.as_deref(),
+                &config_path,
+                state.inner(),
+            )
+        });
+        crate::mod_versions::cache_mod_version_by_id_with_source_version(
+            &mut staged,
+            staging.path(),
+            &cache_path,
+            &config_path,
+            source_version.as_deref(),
+        )
+        .ok_or_else(|| format!("Failed to cache '{}' v{}", staged.name, staged.version))?;
+        if let Some(id) = staged.mod_version_id.clone() {
+            if let Some(version) = source_version.as_deref() {
+                let _ = crate::mod_versions::set_record_source_version(
+                    &config_path,
+                    &id,
+                    Some(version),
+                );
+            }
+            let profiles = crate::profiles::list_profiles(&profiles_path);
+            let anchor_ids: Vec<String> = [existing.mod_version_id.clone(), Some(id.clone())]
+                .into_iter()
+                .flatten()
+                .collect();
+            let _ = crate::mod_versions::prune_cached_versions_around(
+                &config_path,
+                &cache_path,
+                &installed,
+                &profiles,
+                &anchor_ids,
+                &[id],
+            );
+        }
+        return Ok(staged);
+    }
+
     let result = install_mod_from_archive(&archive_path, &mods_path).map_err(|e| e.to_string())?;
     // First-time install: snapshot configs so the next update preserves
     // any edits the user makes in the meantime. No preservation pass

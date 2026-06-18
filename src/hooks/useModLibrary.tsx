@@ -31,7 +31,7 @@ import { SourceEditor } from '../components/SourceEditor';
 import { AutoDetectModal } from '../components/AutoDetectModal';
 import { nexusFilesUrl } from '../lib/nexusUrl';
 import { loadAutoAddInstallsToModpack } from '../lib/installPolicy';
-import { auditEntryKey, auditTargetForMod } from '../lib/auditState';
+import { auditEntryKeys, auditTargetForMod } from '../lib/auditState';
 import type { ModAuditEntry, ModInfo } from '../types';
 import {
   deleteMod,
@@ -156,9 +156,9 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     const m = new Map<string, NonNullable<typeof auditResults>[number]>();
     if (auditResults) {
       for (const a of auditResults) {
-        m.set(auditEntryKey(a), a);
-        if (a.folder_name) m.set(a.folder_name, a);
-        m.set(a.mod_name, a);
+        for (const key of auditEntryKeys(a)) {
+          m.set(key, a);
+        }
       }
     }
     return m;
@@ -299,7 +299,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       // Nexus-only update: open the mod's Nexus page so the user can download
       // the new version. The downloads-watcher will match the downloaded zip to
       // this existing mod (via nexus_mod_id in the filename or name/folder
-      // matching) and update it in place — no duplicate is created.
+      // matching) and save it into Versions — no duplicate row is created.
       if (mod.nexus_url && !hasGithub) {
         await openExternalUrl(mod.nexus_url);
         notifyNexusOpen(mod.display_name?.trim() || mod.name);
@@ -324,7 +324,6 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
         );
       }
       const info = await updateMod(mod.name, mod.folder_name, targetPack ?? null);
-      await syncTargetPackUpdatedMods([info]);
       toast.success(t('mods.toast.updated', { name: mod.name, version: info.version }));
       await refreshAll();
       await refreshAuditEntries(
@@ -353,15 +352,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function updateAllGithubForSurface(githubUpdateNames: string[]) {
-    return updateAllGithub(
-      githubUpdateNames,
-      targetPack
-        ? {
-            profileId: targetPack,
-            afterUpdate: (updated) => syncTargetPackUpdatedMods(updated, githubUpdateNames),
-          }
-        : undefined,
-    );
+    return updateAllGithub(githubUpdateNames, targetPack ? { profileId: targetPack } : undefined);
   }
 
   async function handleTogglePin(mod: ModInfo) {

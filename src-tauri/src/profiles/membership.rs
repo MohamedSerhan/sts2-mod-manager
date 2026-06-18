@@ -44,6 +44,7 @@ pub(crate) fn profile_membership_matrix(
     disabled_path: &Path,
     profiles_path: &Path,
     config_path: &Path,
+    cache_path: &Path,
 ) -> Result<ProfileMembershipGrid> {
     let profiles = list_profiles(profiles_path);
 
@@ -67,7 +68,7 @@ pub(crate) fn profile_membership_matrix(
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
     crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
     let mods = installed_mods
-        .into_iter()
+        .iter()
         .map(|installed| {
             let states = profiles
                 .iter()
@@ -88,13 +89,22 @@ pub(crate) fn profile_membership_matrix(
                 .collect();
 
             ProfileMembershipMod {
-                mod_version_id: installed.mod_version_id,
-                name: installed.name,
-                version: installed.version,
-                folder_name: installed.folder_name,
-                mod_id: installed.mod_id,
-                display_name: installed.display_name,
+                mod_version_id: installed.mod_version_id.clone(),
+                name: installed.name.clone(),
+                version: installed.version.clone(),
+                folder_name: installed.folder_name.clone(),
+                mod_id: installed.mod_id.clone(),
+                display_name: installed.display_name.clone(),
                 installed_enabled: installed.enabled,
+                version_options: crate::mod_versions::local_version_options_for_target(
+                    &installed_mods,
+                    &profiles,
+                    config_path,
+                    cache_path,
+                    &installed.name,
+                    installed.mod_version_id.as_deref(),
+                    installed.mod_id.as_deref(),
+                ),
                 profiles: states,
             }
         })
@@ -223,6 +233,8 @@ pub(crate) fn select_profile_mod_version_from_paths(
     disabled_path: &Path,
     profiles_path: &Path,
     config_path: &Path,
+    cache_path: &Path,
+    apply_to_disk: bool,
 ) -> Result<super::Profile> {
     if profile_is_edit_locked(profile_name, profiles_path, config_path) {
         return Err(AppError::Other(format!(
@@ -236,24 +248,6 @@ pub(crate) fn select_profile_mod_version_from_paths(
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
     crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
-
-    let selected = installed_mods
-        .iter()
-        .find(|m| {
-            installed_mod_matches_target(
-                m,
-                selected_name,
-                selected_mod_version_id,
-                selected_folder_name,
-                selected_mod_id,
-            )
-        })
-        .ok_or_else(|| {
-            AppError::ModNotFound(format!(
-                "Installed mod '{}' was not found; refresh the mod list and try again.",
-                selected_name
-            ))
-        })?;
 
     let index = profile
         .mods
@@ -275,12 +269,310 @@ pub(crate) fn select_profile_mod_version_from_paths(
         })?;
 
     let enabled = profile.mods[index].enabled;
-    let mut next_entry = profile_mod_from_installed(selected);
+    let selected_installed = installed_mods.iter().find(|m| {
+        installed_mod_matches_target(
+            m,
+            selected_name,
+            selected_mod_version_id,
+            selected_folder_name,
+            selected_mod_id,
+        )
+    });
+    let selected_for_profile = if apply_to_disk {
+        select_local_mod_version_on_disk(
+            &installed_mods,
+            current_name,
+            current_mod_id.or(selected_mod_id),
+            selected_installed,
+            selected_mod_version_id,
+            enabled,
+            mods_path,
+            disabled_path,
+            config_path,
+            cache_path,
+        )?
+    } else if let Some(installed) = selected_installed {
+        installed.clone()
+    } else if let Some(id) = selected_mod_version_id {
+        let mut entry = crate::mod_versions::profile_mod_from_record(id, cache_path, config_path)?;
+        entry.enabled = enabled;
+        profile.mods[index] = entry;
+        profile.updated_at = chrono::Utc::now();
+        save_profile(&profile, profiles_path)?;
+        prune_after_version_selection(
+            mods_path,
+            disabled_path,
+            profiles_path,
+            config_path,
+            cache_path,
+            &[
+                current_mod_version_id.map(str::to_string),
+                Some(id.to_string()),
+            ],
+            &[id.to_string()],
+        );
+        return Ok(hide_app_created_by(profile));
+    } else {
+        return Err(AppError::ModNotFound(format!(
+            "Installed mod '{}' was not found; refresh the mod list and try again.",
+            selected_name
+        )));
+    };
+
+    let mut next_entry = profile_mod_from_installed(&selected_for_profile);
     next_entry.enabled = enabled;
     profile.mods[index] = next_entry;
     profile.updated_at = chrono::Utc::now();
     save_profile(&profile, profiles_path)?;
+    prune_after_version_selection(
+        mods_path,
+        disabled_path,
+        profiles_path,
+        config_path,
+        cache_path,
+        &[
+            current_mod_version_id.map(str::to_string),
+            selected_for_profile.mod_version_id.clone(),
+        ],
+        &selected_for_profile
+            .mod_version_id
+            .clone()
+            .into_iter()
+            .collect::<Vec<_>>(),
+    );
     Ok(hide_app_created_by(profile))
+}
+
+pub(crate) fn select_library_mod_version_from_paths(
+    current_name: &str,
+    current_mod_version_id: Option<&str>,
+    current_folder_name: Option<&str>,
+    current_mod_id: Option<&str>,
+    selected_name: &str,
+    selected_mod_version_id: Option<&str>,
+    selected_folder_name: Option<&str>,
+    selected_mod_id: Option<&str>,
+    mods_path: &Path,
+    disabled_path: &Path,
+    profiles_path: &Path,
+    config_path: &Path,
+    cache_path: &Path,
+) -> Result<ModInfo> {
+    let mut installed_mods =
+        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
+
+    let current = installed_mods
+        .iter()
+        .find(|m| {
+            installed_mod_matches_target(
+                m,
+                current_name,
+                current_mod_version_id,
+                current_folder_name,
+                current_mod_id,
+            )
+        })
+        .ok_or_else(|| {
+            AppError::ModNotFound(format!(
+                "Installed mod '{}' was not found; refresh the mod list and try again.",
+                current_name
+            ))
+        })?;
+    let target_enabled = current.enabled;
+    let selected_installed = installed_mods.iter().find(|m| {
+        installed_mod_matches_target(
+            m,
+            selected_name,
+            selected_mod_version_id,
+            selected_folder_name,
+            selected_mod_id,
+        )
+    });
+
+    let selected = select_local_mod_version_on_disk(
+        &installed_mods,
+        current_name,
+        current_mod_id.or(selected_mod_id),
+        selected_installed,
+        selected_mod_version_id,
+        target_enabled,
+        mods_path,
+        disabled_path,
+        config_path,
+        cache_path,
+    )?;
+    prune_after_version_selection(
+        mods_path,
+        disabled_path,
+        profiles_path,
+        config_path,
+        cache_path,
+        &[
+            current_mod_version_id.map(str::to_string),
+            selected.mod_version_id.clone(),
+        ],
+        &selected
+            .mod_version_id
+            .clone()
+            .into_iter()
+            .collect::<Vec<_>>(),
+    );
+    Ok(selected)
+}
+
+fn prune_after_version_selection(
+    mods_path: &Path,
+    disabled_path: &Path,
+    profiles_path: &Path,
+    config_path: &Path,
+    cache_path: &Path,
+    anchor_ids: &[Option<String>],
+    keep_ids: &[String],
+) {
+    let anchor_ids: Vec<String> = anchor_ids.iter().flatten().cloned().collect();
+    if anchor_ids.is_empty() {
+        return;
+    }
+    let mut installed =
+        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    crate::mod_sources::enrich_mods_with_sources(&mut installed, config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut installed, config_path);
+    let profiles = if profiles_path.as_os_str().is_empty() {
+        Vec::new()
+    } else {
+        list_profiles(profiles_path)
+    };
+    let _ = crate::mod_versions::prune_cached_versions_around(
+        config_path,
+        cache_path,
+        &installed,
+        &profiles,
+        &anchor_ids,
+        keep_ids,
+    );
+}
+
+fn select_local_mod_version_on_disk(
+    installed_mods: &[ModInfo],
+    family_name: &str,
+    family_mod_id: Option<&str>,
+    selected_installed: Option<&ModInfo>,
+    selected_mod_version_id: Option<&str>,
+    target_enabled: bool,
+    mods_path: &Path,
+    disabled_path: &Path,
+    config_path: &Path,
+    cache_path: &Path,
+) -> Result<ModInfo> {
+    let selected_id = selected_installed
+        .and_then(|m| m.mod_version_id.as_deref())
+        .or(selected_mod_version_id)
+        .map(str::to_string);
+    let same_family = |m: &ModInfo| {
+        if let Some(id) = family_mod_id.map(str::trim).filter(|id| !id.is_empty()) {
+            return m
+                .mod_id
+                .as_deref()
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(id));
+        }
+        m.name.eq_ignore_ascii_case(family_name)
+    };
+
+    for installed in installed_mods.iter().filter(|m| same_family(m)) {
+        let is_selected = selected_id.as_deref().is_some_and(|id| {
+            installed
+                .mod_version_id
+                .as_deref()
+                .is_some_and(|candidate| candidate == id)
+        });
+        let base = if installed.enabled {
+            mods_path
+        } else {
+            disabled_path
+        };
+        let mut cache_candidate = installed.clone();
+        crate::mod_versions::cache_mod_version_by_id(
+            &mut cache_candidate,
+            base,
+            cache_path,
+            config_path,
+        );
+        if !is_selected {
+            crate::mods::delete_mod_files_by_info(installed, base);
+        }
+    }
+
+    if let Some(selected) = selected_installed {
+        let mut selected = selected.clone();
+        if selected.enabled != target_enabled {
+            let (src, dest) = if selected.enabled {
+                (mods_path, disabled_path)
+            } else {
+                (disabled_path, mods_path)
+            };
+            move_mod_by_info(&selected, src, dest)?;
+            selected.enabled = target_enabled;
+        }
+        apply_record_source_version(&selected, selected.mod_version_id.as_deref(), config_path);
+        return Ok(selected);
+    }
+
+    let selected_id = selected_mod_version_id.ok_or_else(|| {
+        AppError::ModNotFound(format!(
+            "No local version was selected for '{}'. Refresh the mod list and try again.",
+            family_name
+        ))
+    })?;
+    let dest = if target_enabled {
+        mods_path
+    } else {
+        disabled_path
+    };
+    let mut restored = crate::mod_versions::install_cached_record_to_base(
+        selected_id,
+        cache_path,
+        config_path,
+        dest,
+    )?;
+    restored.enabled = target_enabled;
+    apply_record_source_version(&restored, Some(selected_id), config_path);
+    Ok(restored)
+}
+
+fn apply_record_source_version(info: &ModInfo, record_id: Option<&str>, config_path: &Path) {
+    let Some(record_id) = record_id else { return };
+    let Some(record) = crate::mod_versions::record_by_id(config_path, record_id) else {
+        return;
+    };
+    let Some(version) = record
+        .source_version
+        .as_deref()
+        .or(Some(record.version.as_str()))
+    else {
+        return;
+    };
+    let source_type = record
+        .source
+        .as_deref()
+        .map(|source| {
+            if source.starts_with("github:") || source.contains("github.com") {
+                "github"
+            } else if source.contains("nexusmods.com") {
+                "nexus"
+            } else {
+                "unknown"
+            }
+        })
+        .unwrap_or("unknown");
+    let key = info.folder_name.as_deref().unwrap_or(info.name.as_str());
+    crate::mod_sources::update_installed_version_from_source(
+        key,
+        version,
+        source_type,
+        config_path,
+    );
 }
 
 /// Result of bulk enable/disable of a profile's mods.
@@ -952,6 +1244,7 @@ mod profile_membership_tests {
     fn membership_matrix_lists_installed_mods_against_profiles_by_folder() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
         let mods_path = game_tmp.path().join("mods");
         let disabled_path = game_tmp.path().join("mods_disabled");
         let profiles_path = config_tmp.path().join("profiles");
@@ -985,6 +1278,7 @@ mod profile_membership_tests {
             &disabled_path,
             &profiles_path,
             config_tmp.path(),
+            cache_tmp.path(),
         )
         .unwrap();
 
@@ -1176,6 +1470,7 @@ mod profile_membership_tests {
     fn membership_matrix_keeps_same_named_different_versions_as_separate_rows() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
         let mods_path = game_tmp.path().join("mods");
         let disabled_path = game_tmp.path().join("mods_disabled");
         let profiles_path = config_tmp.path().join("profiles");
@@ -1212,6 +1507,7 @@ mod profile_membership_tests {
             &disabled_path,
             &profiles_path,
             config_tmp.path(),
+            cache_tmp.path(),
         )
         .unwrap();
 
@@ -1838,6 +2134,7 @@ mod profile_membership_tests {
     fn membership_matrix_applies_display_name_override_from_sources() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
         let mods_path = game_tmp.path().join("mods");
         let disabled_path = game_tmp.path().join("mods_disabled");
         let profiles_path = config_tmp.path().join("profiles");
@@ -1869,6 +2166,7 @@ mod profile_membership_tests {
             &disabled_path,
             &profiles_path,
             config_tmp.path(),
+            cache_tmp.path(),
         )
         .unwrap();
 
@@ -1895,6 +2193,7 @@ mod profile_membership_tests {
     fn membership_matrix_lists_bundle_as_one_row() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
         let mods_path = game_tmp.path().join("mods");
         let disabled_path = game_tmp.path().join("mods_disabled");
         let profiles_path = config_tmp.path().join("profiles");
@@ -1929,6 +2228,7 @@ mod profile_membership_tests {
             &disabled_path,
             &profiles_path,
             config_tmp.path(),
+            cache_tmp.path(),
         )
         .unwrap();
 

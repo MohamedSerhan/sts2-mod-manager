@@ -129,7 +129,22 @@ export interface ProfileMembershipMod {
   mod_id: string | null;
   display_name?: string | null;
   installed_enabled: boolean;
+  version_options?: LocalModVersionOption[];
   profiles: ProfileMembershipState[];
+}
+
+export interface LocalModVersionOption {
+  mod_version_id: string;
+  name: string;
+  version: string;
+  folder_name?: string | null;
+  mod_id?: string | null;
+  display_name?: string | null;
+  installed: boolean;
+  installed_enabled: boolean;
+  cached: boolean;
+  pinned: boolean;
+  used_by_profiles?: string[];
 }
 
 export interface ProfileMembershipState {

@@ -1022,6 +1022,70 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(screen.queryByRole('option', { name: /In this modpack first/i })).toBeNull();
   });
 
+  it('Updates first falls back to name order when rows have the same update state', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({ name: 'Zed', folder_name: 'Zed', mod_id: 'Zed' }),
+      mkModInfo({ name: 'Alpha', folder_name: 'Alpha', mod_id: 'Alpha' }),
+    ]);
+    const user = userEvent.setup();
+    const { container } = render(<Wrap modpackName={null} />);
+    await screen.findByText('Alpha');
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'updatesFirst');
+
+    const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
+    expect(rows[0]).toContain('Alpha');
+    expect(rows[1]).toContain('Zed');
+  });
+
+  it('selects a saved version from the Library without changing a modpack', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'watcher-143',
+        name: 'Watcher',
+        version: '1.4.3',
+        folder_name: 'Watcher',
+        mod_id: 'Watcher',
+        enabled: true,
+      }),
+      mkModInfo({
+        mod_version_id: 'watcher-130',
+        name: 'Watcher',
+        version: '1.3.0',
+        folder_name: 'Watcher-old',
+        mod_id: 'Watcher',
+        enabled: false,
+      }),
+    ]);
+    registerInvokeHandler('select_library_mod_version', () => mkModInfo({
+      mod_version_id: 'watcher-130',
+      name: 'Watcher',
+      version: '1.3.0',
+      folder_name: 'Watcher-old',
+      mod_id: 'Watcher',
+      enabled: true,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap modpackName={null} />);
+    await screen.findAllByText('Watcher');
+
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /Choose version/i }),
+      'watcher-130',
+    );
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+        cmd: 'select_library_mod_version',
+        args: expect.objectContaining({
+          currentModVersionId: 'watcher-143',
+          selectedModVersionId: 'watcher-130',
+        }),
+      }));
+    });
+    expect(getInvokeCalls().some((call) => call.cmd === 'select_profile_mod_version')).toBe(false);
+  });
+
   it('renders rows without the storage chip or per-row Store button', async () => {
     seedInstalledMods();
     const { container } = render(<Wrap modpackName={null} />);
@@ -1145,7 +1209,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       });
     });
 
-    it('keeps pack rows in load order even when one has an update available', async () => {
+    it('keeps pack rows in load order even when one has a download update', async () => {
       registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
       registerInvokeHandler('get_profile_memberships', () => ({
         profiles: [{ name: 'Stable', editable: true }],
@@ -1232,6 +1296,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           },
         ],
       }));
+      registerInvokeHandler('select_profile_mod_version', () => ({}));
       const modInfoByKey = new Map([
         ['Alpha', mkModInfo({ name: 'Alpha', folder_name: 'Alpha', mod_id: 'Alpha', tags: ['utility'] })],
         ['Beta', mkModInfo({ name: 'Beta', folder_name: 'Beta', mod_id: 'Beta', tags: ['combat'] })],
@@ -1376,16 +1441,80 @@ describe('<LibraryTable modpackName={null}>', () => {
       expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
       const user = userEvent.setup();
       await user.selectOptions(
-        screen.getByRole('combobox', { name: /Choose installed version/i }),
+        screen.getByRole('combobox', { name: /Choose version/i }),
         'watcher-130',
       );
       await waitFor(() => {
-        expect(getInvokeCalls()).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ cmd: 'toggle_mod', args: expect.objectContaining({ name: 'Watcher', folderName: 'Watcher-old', enable: true }) }),
-            expect.objectContaining({ cmd: 'toggle_mod', args: expect.objectContaining({ name: 'Watcher', folderName: 'Watcher', enable: false }) }),
-          ]),
-        );
+        expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+          cmd: 'select_profile_mod_version',
+          args: expect.objectContaining({
+            profileId: 'Stable',
+            currentModVersionId: 'watcher-143',
+            selectedModVersionId: 'watcher-130',
+            applyToDisk: false,
+          }),
+        }));
+    });
+  });
+
+    it('uses backend version options so cached downloads are selectable', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            version_options: [
+              {
+                mod_version_id: 'watcher-150',
+                name: 'Watcher',
+                version: '1.5.0',
+                folder_name: 'Watcher',
+                mod_id: 'Watcher',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: [],
+              },
+              {
+                mod_version_id: 'watcher-143',
+                name: 'Watcher',
+                version: '1.4.3',
+                folder_name: 'Watcher',
+                mod_id: 'Watcher',
+                installed: true,
+                installed_enabled: true,
+                cached: true,
+                pinned: false,
+                used_by_profiles: ['Stable'],
+              },
+            ],
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      registerInvokeHandler('select_profile_mod_version', () => ({}));
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+
+      const picker = await screen.findByRole('combobox', { name: /Choose version/i });
+      await user.selectOptions(picker, 'watcher-150');
+
+      await waitFor(() => {
+        expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+          cmd: 'select_profile_mod_version',
+          args: expect.objectContaining({
+            profileId: 'Stable',
+            currentModVersionId: 'watcher-143',
+            selectedModVersionId: 'watcher-150',
+          }),
+        }));
       });
     });
 
@@ -1425,7 +1554,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       const { container } = render(<Wrap modpackName="Stable" />);
       await screen.findAllByText('Watcher');
       expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(3);
-      expect(screen.queryByRole('combobox', { name: /Choose installed version/i })).toBeNull();
+      expect(screen.queryByRole('combobox', { name: /Choose version/i })).toBeNull();
     });
 
     it('uses version ordering when collapsed library versions have the same storage state', async () => {
@@ -1527,16 +1656,14 @@ describe('<LibraryTable modpackName={null}>', () => {
           onSelectProfileVersion={onSelectProfileVersion}
         />,
       );
-      const picker = await screen.findByRole('combobox', { name: /Choose installed version/i });
+      const picker = await screen.findByRole('combobox', { name: /Choose version/i });
       await waitFor(() => expect(picker).toHaveValue('watcher-143'));
       await user.selectOptions(picker, 'watcher-130');
       await waitFor(() => {
-        expect(onSelectProfileVersion).toHaveBeenCalled();
-        expect(getInvokeCalls()).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ cmd: 'toggle_mod', args: expect.objectContaining({ name: 'Watcher', folderName: 'Watcher-old', enable: true }) }),
-            expect.objectContaining({ cmd: 'toggle_mod', args: expect.objectContaining({ name: 'Watcher', folderName: 'Watcher', enable: false }) }),
-          ]),
+        expect(onSelectProfileVersion).toHaveBeenCalledWith(
+          expect.objectContaining({ mod_version_id: 'watcher-143' }),
+          expect.objectContaining({ mod_version_id: 'watcher-130' }),
+          true,
         );
       });
     });
@@ -1579,10 +1706,14 @@ describe('<LibraryTable modpackName={null}>', () => {
         />,
       );
       await user.selectOptions(
-        await screen.findByRole('combobox', { name: /Choose installed version/i }),
+        await screen.findByRole('combobox', { name: /Choose version/i }),
         'watcher-130',
       );
-      await waitFor(() => expect(onSelectProfileVersion).toHaveBeenCalled());
+      await waitFor(() => expect(onSelectProfileVersion).toHaveBeenCalledWith(
+        expect.objectContaining({ mod_version_id: 'watcher-143' }),
+        expect.objectContaining({ mod_version_id: 'watcher-130' }),
+        false,
+      ));
       expect(getInvokeCalls().some((call) => call.cmd === 'toggle_mod')).toBe(false);
     });
 
@@ -1624,10 +1755,14 @@ describe('<LibraryTable modpackName={null}>', () => {
         />,
       );
       await user.selectOptions(
-        await screen.findByRole('combobox', { name: /Choose installed version/i }),
+        await screen.findByRole('combobox', { name: /Choose version/i }),
         'watcher-143',
       );
-      await waitFor(() => expect(onSelectProfileVersion).toHaveBeenCalled());
+      await waitFor(() => expect(onSelectProfileVersion).toHaveBeenCalledWith(
+        expect.objectContaining({ mod_version_id: 'watcher-130' }),
+        expect.objectContaining({ mod_version_id: 'watcher-143' }),
+        true,
+      ));
       expect(getInvokeCalls().some((call) => call.cmd === 'toggle_mod')).toBe(false);
     });
 
@@ -1656,16 +1791,16 @@ describe('<LibraryTable modpackName={null}>', () => {
           },
         ],
       }));
-      registerInvokeHandler('toggle_mod', () => {
+      registerInvokeHandler('select_profile_mod_version', () => {
         throw new Error('disk switch failed');
       });
       const user = userEvent.setup();
       render(<Wrap modpackName="Stable" />);
       await user.selectOptions(
-        await screen.findByRole('combobox', { name: /Choose installed version/i }),
+        await screen.findByRole('combobox', { name: /Choose version/i }),
         'watcher-130',
       );
-      expect(await screen.findByText(/Could not select that installed version: disk switch failed/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Could not select that version: disk switch failed/i)).toBeInTheDocument();
       expect(screen.getByText('Watcher')).toBeInTheDocument();
     });
 
@@ -1694,16 +1829,16 @@ describe('<LibraryTable modpackName={null}>', () => {
           },
         ],
       }));
-      registerInvokeHandler('toggle_mod', () => {
+      registerInvokeHandler('select_profile_mod_version', () => {
         throw 'string failure';
       });
       const user = userEvent.setup();
       render(<Wrap modpackName="Stable" />);
       await user.selectOptions(
-        await screen.findByRole('combobox', { name: /Choose installed version/i }),
+        await screen.findByRole('combobox', { name: /Choose version/i }),
         'watcher-130',
       );
-      expect(await screen.findByText(/Could not select that installed version: string failure/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Could not select that version: string failure/i)).toBeInTheDocument();
     });
 
     it('the visible Remove button removes the mod from the pack', async () => {

@@ -344,7 +344,7 @@ describe('<ModsView>', () => {
     expect(document.querySelectorAll('.gf-modal-back').length).toBeGreaterThan(0);
   });
 
-  it('Audit mods button transitions to "Update 1 mod" when audit returns one pending GitHub update', async () => {
+  it('Audit mods button transitions to "Download 1 update" when audit returns one pending GitHub update', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', github_url: 'https://github.com/foo/bar' })]);
     registerInvokeHandler('audit_mod_versions', () => [
       {
@@ -370,7 +370,7 @@ describe('<ModsView>', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^Update 1 mod$/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Download 1 update$/ })).toBeInTheDocument();
     });
   });
 
@@ -770,7 +770,7 @@ describe('<ModsView>', () => {
     await screen.findAllByText('AutoPath');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
-      expect(screen.getByText(/Update available → v3\.2\.0/)).toBeInTheDocument();
+      expect(screen.getByText(/Download update → v3\.2\.0/)).toBeInTheDocument();
     });
   });
 
@@ -795,7 +795,7 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await screen.findAllByText('AutoPath');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const updateBtn = await screen.findByRole('button', { name: /Update available → v3\.2\.0/ });
+    const updateBtn = await screen.findByRole('button', { name: /Download update → v3\.2\.0/ });
     await user.click(updateBtn);
     await waitFor(() => {
       expect(getInvokeCalls().some(
@@ -1172,7 +1172,7 @@ describe('<ModsView>', () => {
     expect(link).toBeTruthy();
   });
 
-  it('Nexus update available pill shows from audit (toolbar shows "Up to date" — Nexus not bulk-updatable)', async () => {
+  it('Nexus Download update pill shows from audit (toolbar shows "Up to date" — Nexus not bulk-updatable)', async () => {
     seedMods([baseMod({ name: 'NexMod', folder_name: 'NexMod', nexus_url: 'https://www.nexusmods.com/sts2/mods/103' })]);
     registerInvokeHandler('audit_mod_versions', () => [{
       mod_name: 'NexMod',
@@ -1629,7 +1629,7 @@ describe('<ModsView>', () => {
     });
   });
 
-  it('clicking "Update N mods" triggers update_all_mods, not a re-audit', async () => {
+  it('clicking "Download N updates" triggers update_all_mods, not a re-audit', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', github_url: 'https://github.com/foo/bar' })]);
     registerInvokeHandler('audit_mod_versions', () => [
       {
@@ -1655,12 +1655,12 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const updateBtn = await screen.findByRole('button', { name: /^Update 1 mod$/ });
+    const updateBtn = await screen.findByRole('button', { name: /^Download 1 update$/ });
     await user.click(updateBtn);
-    // Confirm dialog appears with the title "Update 1 mod?". Scope the
+    // Confirm dialog appears with the title "Download 1 update?". Scope the
     // button query to the modal so we don't race the toolbar button.
-    const modal = (await screen.findByText(/Update 1 mod\?/)).closest('.gf-modal') as HTMLElement;
-    await user.click(within(modal).getByRole('button', { name: /^Update 1 mod$/ }));
+    const modal = (await screen.findByText(/Download 1 update\?/)).closest('.gf-modal') as HTMLElement;
+    await user.click(within(modal).getByRole('button', { name: /^Download 1 update$/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some(c => c.cmd === 'update_all_mods')).toBe(true);
     });
@@ -1735,7 +1735,7 @@ describe('<ModsView>', () => {
       expect(getInvokeCalls().some((c) => c.cmd === 'audit_mod_versions')).toBe(true);
     });
     // Post-1.7.0 T18: Latest pill renders inline on the row. OldMod
-    // (still needs update) shows "Update available" instead, so only
+    // (still needs update) shows "Download update" instead, so only
     // one Latest pill on the page.
     await waitFor(() => {
       expect(screen.getAllByText('Latest')).toHaveLength(1);
@@ -2365,7 +2365,7 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await screen.findAllByText('UpdFail');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const btn = await screen.findByRole('button', { name: /Update available → v2\.0\.0/ });
+    const btn = await screen.findByRole('button', { name: /Download update → v2\.0\.0/ });
     await user.click(btn);
     await waitFor(() => {
       expect(screen.getByText(/Update failed for 'UpdFail'.*release deleted/)).toBeInTheDocument();
@@ -2394,10 +2394,10 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await screen.findAllByText('RenameMe');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const btn = await screen.findByRole('button', { name: /Update available → v2\.0\.0/ });
+    const btn = await screen.findByRole('button', { name: /Download update → v2\.0\.0/ });
     await user.click(btn);
     await waitFor(() => {
-      expect(screen.getByText(/Updated 'RenameMe' to v2\.0\.0/)).toBeInTheDocument();
+      expect(screen.getByText(/Downloaded 'RenameMe' v2\.0\.0 into Versions/)).toBeInTheDocument();
     });
   });
 
@@ -2653,7 +2653,7 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await screen.findAllByText('UN');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const btn = await screen.findByRole('button', { name: /Update available → v2\.0\.0/ });
+    const btn = await screen.findByRole('button', { name: /Download update → v2\.0\.0/ });
     await user.click(btn);
     await waitFor(() => {
       expect(screen.getByText(/Update failed for 'UN'.*bare-upd/)).toBeInTheDocument();
@@ -2786,7 +2786,7 @@ describe('<ModsView>', () => {
     await screen.findAllByText('LegacyMod');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
-      expect(screen.getByText(/Update available → v1\.5\.0/)).toBeInTheDocument();
+      expect(screen.getByText(/Download update → v1\.5\.0/)).toBeInTheDocument();
     });
   });
 
@@ -2812,10 +2812,10 @@ describe('<ModsView>', () => {
     render(<Wrap />);
     await screen.findAllByText('NF');
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const btn = await screen.findByRole('button', { name: /Update available → v2\.0\.0/ });
+    const btn = await screen.findByRole('button', { name: /Download update → v2\.0\.0/ });
     await user.click(btn);
     await waitFor(() => {
-      expect(screen.getByText(/Updated 'NF' to v2\.0\.0/)).toBeInTheDocument();
+      expect(screen.getByText(/Downloaded 'NF' v2\.0\.0 into Versions/)).toBeInTheDocument();
     });
   });
 
@@ -2933,12 +2933,12 @@ describe('<ModsView>', () => {
     await waitFor(() => { expect(screen.getByText('GameOld')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     // Even with needs_update=true, game_version_too_old blocks both the inline
-    // "Update available" pill and the toolbar bulk-update button.
+    // "Download update" pill and the toolbar bulk-update button.
     await waitFor(() => {
       expect(screen.getByText('Up to date')).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: /^Update 1 mod$/ })).toBeNull();
-    expect(screen.queryByText(/Update available →/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Download 1 update$/ })).toBeNull();
+    expect(screen.queryByText(/Download update →/)).toBeNull();
   });
 
   // ── Update-blocked badge `?? '?'` fallback path ──────────────────

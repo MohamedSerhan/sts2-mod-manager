@@ -516,7 +516,7 @@ async function specModsNavReachable(driver) {
   await waitForElement(
     driver,
     By.xpath(
-      "//button[contains(., 'Audit mods') or contains(., 'Update ') or contains(., 'Up to date')]",
+      "//button[contains(., 'Audit mods') or contains(., 'Download ') or contains(., 'Update ') or contains(., 'Up to date')]",
     ),
     'Mods toolbar audit button',
   );
@@ -854,10 +854,10 @@ async function specFreezeSuppressesPendingUpdate(driver) {
   //
   // Target the ghost ↻ re-audit button by aria-label, NOT the generic
   // "audit button" xpath. After specAuditShows1Update the toolbar is in
-  // the "Update 1 mod" state, which renders TWO buttons: the primary
-  // "Update 1 mod" action button AND a separate ghost re-audit icon.
+  // the "Download 1 update" state, which renders TWO buttons: the primary
+  // "Download 1 update" action button AND a separate ghost re-audit icon.
   // Picking the first by text content used to hit the action button
-  // and open the "Update 1 mod?" confirm modal — the test would then
+  // and open the "Download 1 update?" confirm modal — the test would then
   // wait 30s for "Up to date" while the dialog blocked everything.
   const auditBtn = await waitForElement(
     driver,
@@ -871,7 +871,7 @@ async function specFreezeSuppressesPendingUpdate(driver) {
     async () => {
       const btns = await driver.findElements(
         By.xpath(
-          "//button[contains(., 'Audit mods') or contains(., 'Update ') or contains(., 'Up to date')]",
+          "//button[contains(., 'Audit mods') or contains(., 'Download ') or contains(., 'Update ') or contains(., 'Up to date')]",
         ),
       );
       for (const b of btns) {
@@ -1561,44 +1561,38 @@ async function specAuditAgainstCassettesShowsOnePending(driver) {
   );
   await auditBtn.click();
 
-  // After audit completes the toolbar button reads "Update 1 mod".
+  // After audit completes the toolbar button reads "Download 1 update".
   // We re-query each tick because React replaces the Button when the
   // toolbar state machine flips variants (secondary → primary). Holding
   // the pre-click element ref returns a stale node after the swap and
   // .getText() throws StaleElementReference. Two variants of the
   // pre-audit copy now: "Audit mods" (initial) or "Update N mod(s)"
   // (after the v1.3.4 toolbar refactor); both are diagnostic — anything
-  // OTHER than "Update 1 mod" means the cassette / fixture wiring is off.
+  // OTHER than "Download 1 update" means the cassette / fixture wiring is off.
   await driver.wait(
     async () => {
-      const btns = await driver.findElements(
-        By.xpath(
-          "//button[contains(., 'Audit mods') or contains(., 'Update ') or contains(., 'Up to date')]",
-        ),
+      const matches = await driver.findElements(
+        By.xpath("//*[contains(normalize-space(.), 'Download 1 update')]"),
       );
-      for (const b of btns) {
-        const txt = (await b.getText().catch(() => '')).trim();
-        if (/Update 1 mod$/i.test(txt)) return true;
-      }
-      return false;
+      return matches.length > 0;
     },
     30_000,
-    'audit button never settled to "Update 1 mod" — cassette/fixture wiring is off',
+    'audit button never settled to "Download 1 update" — cassette/fixture wiring is off',
   );
 
-  // Also assert the green "Update available" pill rendered on the
+  // Also assert the green "Download update" pill rendered on the
   // QaTestMod row. Catches the case where the audit count comes back
   // right but the per-row UI didn't update.
   //
-  // Inner predicate uses `contains(.,'Update available')` rather than
+  // Inner predicate uses `contains(.,'Download update')` rather than
   // `contains(text(),...)`: the pill button is `<Download/> {t(...)}`,
   // which React emits as two adjacent text nodes — XPath 1.0's
   // node-set-to-string conversion would only see the first (whitespace)
   // text node. See specModpackSwitchPreservesFreeze for the longer note.
   await waitForElement(
     driver,
-    By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//*[contains(.,'Update available')]"),
-    'Update-available pill on QaTestMod row',
+    By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//*[contains(.,'Download update')]"),
+    'Download-update pill on QaTestMod row',
     5_000,
   );
 }

@@ -9,6 +9,7 @@ import {
   type LanguagePreference,
 } from '../i18n/language';
 import { resolveLanguagePreference } from '../i18n';
+import { Select } from './Select';
 
 interface LanguageSelectProps {
   compact?: boolean;
@@ -36,18 +37,12 @@ export function LanguageSelect({ compact = false }: LanguageSelectProps) {
       <label htmlFor={id} className="gf-field-label">
         {t('settings.language.label')}
       </label>
-      <select
+      <Select
         id={id}
-        className="gf-set-input"
         value={preference}
-        onChange={(event) => void handleChange(event.target.value)}
-      >
-        {OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {t(option.labelKey)}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => void handleChange(v)}
+        options={OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+      />
     </div>
   );
 }

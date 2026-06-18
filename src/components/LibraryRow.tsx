@@ -54,6 +54,7 @@ import {
   KebabSection,
 } from './KebabMenu';
 import { Toggle } from './Toggle';
+import { Select } from './Select';
 import { useRowMenu } from '../contexts/RowMenuContext';
 import { isUpToDate } from '../lib/auditState';
 import {
@@ -570,18 +571,16 @@ export function LibraryRow({
                 title={t('mods.versionSelectorTitle')}
               >
                 <span>{t('mods.versionSelectorLabel')}</span>
-                <select
+                <Select
                   value={membershipRowKey(row)}
-                  onChange={(event) => onSelectVersion(event.target.value)}
+                  onChange={onSelectVersion}
                   aria-label={t('mods.versionSelectorTitle')}
                   onClick={(event) => event.stopPropagation()}
-                >
-                  {versionOptions.map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  options={versionOptions.map((option) => ({
+                    value: option.key,
+                    label: option.label,
+                  }))}
+                />
               </label>
             )}
             {row.folder_name

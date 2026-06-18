@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ModInfo } from '../types';
+import { Select } from './Select';
 
 // Cap the initial render so a 100+ mod library doesn't paint hundreds of
 // checkbox rows at once; a "Show more" footer pages in the rest on demand.
@@ -129,15 +130,16 @@ export function ModMultiSelect({ mods, selected, onChange, labels }: ModMultiSel
         />
         <label className="gf-create-wizard-sort">
           <span className="gf-field-label">{labels.sortLabel}</span>
-          <select
-            className="gf-set-input"
+          <Select
+            aria-label={labels.sortLabel}
             value={sort}
-            onChange={(e) => setSort(e.target.value as ModMultiSelectSort)}
-          >
-            <option value="name">{labels.sortByName}</option>
-            <option value="size">{labels.sortBySize}</option>
-            <option value="enabled">{labels.sortByActive}</option>
-          </select>
+            onChange={(v) => setSort(v as ModMultiSelectSort)}
+            options={[
+              { value: 'name', label: labels.sortByName },
+              { value: 'size', label: labels.sortBySize },
+              { value: 'enabled', label: labels.sortByActive },
+            ]}
+          />
         </label>
       </div>
       <div className="gf-create-wizard-choose-actions">

@@ -40,6 +40,7 @@ import {
 import { withTimeout } from '../lib/withTimeout';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { ModMultiSelect } from './ModMultiSelect';
+import { Select } from './Select';
 import type { ModAuditEntry, Profile } from '../types';
 
 /** Ceiling for the step-3 health audit. The audit is informational and
@@ -506,17 +507,15 @@ function StepStart({
               >
                 {t('createModpack.step1CloneSelectLabel')}
               </label>
-              <select
+              <Select
                 id="gf-create-wizard-clone-pick"
-                className="gf-set-input"
                 value={cloneFrom ?? ''}
-                onChange={(e) => setCloneFrom(e.target.value || null)}
-              >
-                <option value="">—</option>
-                {existingProfiles.map((p) => (
-                  <option key={p.name} value={p.name}>{p.name}</option>
-                ))}
-              </select>
+                onChange={(v) => setCloneFrom(v || null)}
+                options={[
+                  { value: '', label: '—' },
+                  ...existingProfiles.map((p) => ({ value: p.name, label: p.name })),
+                ]}
+              />
               <button
                 type="button"
                 className="gf-btn"

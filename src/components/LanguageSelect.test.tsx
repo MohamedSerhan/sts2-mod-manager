@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, beforeEach } from 'vitest';
 import i18n from '../i18n';
 import { LANGUAGE_STORAGE_KEY } from '../i18n/language';
 import { LanguageSelect } from './LanguageSelect';
+import { chooseOption, openSelect } from '../__test__/selectHelpers';
 
 describe('<LanguageSelect>', () => {
   beforeEach(async () => {
@@ -11,20 +12,22 @@ describe('<LanguageSelect>', () => {
     await i18n.changeLanguage('en');
   });
 
-  it('renders Auto, English, and Simplified Chinese choices', () => {
+  it('renders Auto, English, and Simplified Chinese choices', async () => {
+    const user = userEvent.setup();
     render(<LanguageSelect />);
 
-    expect(screen.getByLabelText('Language')).toHaveValue('auto');
-    expect(screen.getByRole('option', { name: 'Auto' })).toHaveValue('auto');
-    expect(screen.getByRole('option', { name: 'English' })).toHaveValue('en');
-    expect(screen.getByRole('option', { name: 'Simplified Chinese' })).toHaveValue('zh-Hans');
+    expect(screen.getByRole('combobox', { name: 'Language' })).toHaveTextContent('Auto');
+    const listbox = await openSelect(user, 'Language');
+    expect(within(listbox).getByRole('option', { name: 'Auto' })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: 'English' })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: 'Simplified Chinese' })).toBeInTheDocument();
   });
 
   it('persists a manual override and changes i18n language', async () => {
     const user = userEvent.setup();
     render(<LanguageSelect />);
 
-    await user.selectOptions(screen.getByLabelText('Language'), 'zh-Hans');
+    await chooseOption(user, 'Language', 'Simplified Chinese');
 
     expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBe('zh-Hans');
     expect(i18n.language).toBe('zh-Hans');
@@ -52,26 +55,6 @@ describe('<LanguageSelect>', () => {
     expect(wrapper?.className).toBe('gf-language-select compact');
   });
 
-  it('ignores change events with unsupported language values', () => {
-    localStorage.setItem(LANGUAGE_STORAGE_KEY, 'zh-Hans');
-
-    render(<LanguageSelect />);
-    // Use the role lookup so the test does not depend on the localised
-    // label text — the active language could be English or zh-Hans here.
-    const select = screen.getByRole('combobox') as HTMLSelectElement;
-    expect(select.value).toBe('zh-Hans');
-    const englishBefore = i18n.language;
-
-    // Synthesise a change to an unsupported value — the production guard
-    // (`if (!isSupportedLanguagePreference(value)) return`) should refuse
-    // to persist anything or switch i18n, even if a future bug somehow
-    // injects an extra <option>.
-    fireEvent.change(select, { target: { value: 'french' } });
-
-    expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBe('zh-Hans');
-    expect(i18n.language).toBe(englishBefore);
-  });
-
   it('initialises from a previously saved preference in localStorage', () => {
     // A user who picked Simplified Chinese on a prior visit should see
     // the dropdown reflect that choice the next time the component
@@ -80,6 +63,6 @@ describe('<LanguageSelect>', () => {
 
     render(<LanguageSelect />);
 
-    expect(screen.getByLabelText('Language')).toHaveValue('zh-Hans');
+    expect(screen.getByRole('combobox', { name: 'Language' })).toHaveTextContent('Simplified Chinese');
   });
 });

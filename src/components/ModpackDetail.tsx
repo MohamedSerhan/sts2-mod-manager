@@ -64,6 +64,7 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { useModLibrary } from '../hooks/useModLibrary';
+import { Select } from './Select';
 import { usePinScroll } from '../hooks/usePinScroll';
 import { deleteMod, selectProfileModVersion, setProfileModMembership, setProfileModsEnabled, toggleMod } from '../hooks/useTauri';
 import { identitiesMatch } from '../lib/modIdentity';
@@ -500,19 +501,16 @@ export function ModpackDetail({
       {profile.mods.length > 0 && (
         <label className="gf-sort-control">
           <span>{t('mods.tags.label')}</span>
-          <select
+          <Select
             aria-label={t('mods.tags.label')}
             value={tagFilter}
-            onChange={(e) => setTagFilter(e.target.value)}
-          >
-            <option value="">{t('mods.tags.all')}</option>
-            <option value={NO_TAGS_FILTER_VALUE}>{t('mods.tags.noTags')}</option>
-            {packTagOptions.map((tag) => (
-              <option key={tag} value={tag}>
-                {tag}
-              </option>
-            ))}
-          </select>
+            onChange={setTagFilter}
+            options={[
+              { value: '', label: t('mods.tags.all') },
+              { value: NO_TAGS_FILTER_VALUE, label: t('mods.tags.noTags') },
+              ...packTagOptions.map((tag) => ({ value: tag, label: tag })),
+            ]}
+          />
         </label>
       )}
       <AddModsMenu lib={lib} />

@@ -22,6 +22,7 @@ import { downloadDir } from '@tauri-apps/api/path';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { Card } from '../components/Card';
+import { Select } from '../components/Select';
 import { Button } from '../components/Button';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
@@ -848,20 +849,17 @@ export function SettingsView({
                 <label htmlFor="backup-retention-select" className="gf-set-label" style={{ fontSize: 13 }}>
                   {t('settings.backups.retentionLabel')}
                 </label>
-                <select
+                <Select
                   id="backup-retention-select"
-                  className="gf-set-input"
-                  value={backupRetention}
+                  value={String(backupRetention)}
                   disabled={savingRetention}
-                  onChange={(e) => handleChangeBackupRetention(Number(e.target.value))}
+                  onChange={(v) => handleChangeBackupRetention(Number(v))}
                   style={{ width: 'auto', minWidth: 140 }}
-                >
-                  {Array.from({ length: 11 }, (_, n) => n).map((n) => (
-                    <option key={n} value={n}>
-                      {n === 0 ? t('settings.backups.retentionOff') : String(n)}
-                    </option>
-                  ))}
-                </select>
+                  options={Array.from({ length: 11 }, (_, n) => ({
+                    value: String(n),
+                    label: n === 0 ? t('settings.backups.retentionOff') : String(n),
+                  }))}
+                />
               </div>
               {backupRetention === 0 && (
                 <div className="gf-help muted">

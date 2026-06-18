@@ -37,6 +37,31 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.8.0] - 2026-06-18
+
+### Added
+
+- Settings now has a Customize tab for appearance and menu preferences, including the choice between the default top navigation bar and a left sidebar.
+
+### Changed
+
+- Mod updates now download into Versions so active installs and modpacks keep their chosen versions until you switch them.
+
+### Fixed
+
+- Fixed modpacks so same-page Nexus mods stay separate, untagged pack mods can be filtered, and library updates do not quietly change pack membership.
+- The Mod Library version selector now shows newly downloaded stored versions immediately after an update.
+- Fixed Mod Library and modpack views so large libraries load faster after multiple local mod versions are installed.
+- Mod Library version choices are clearer and downloads that need a newer STS2 build now warn instead of showing a successful install.
+- Updating a library mod used by a modpack now keeps that modpack pinned to its saved copy until you update it from inside the pack.
+- Adding mods from a modpack's Library section no longer leaves a false unsaved-changes banner.
+- Updating mods from the Library now keeps saved modpack versions unchanged unless you update from inside that modpack.
+- Fixed library update buttons so Nexus-only update badges no longer run the GitHub updater or leave an updated mod showing as pending.
+- Nexus downloads with readable filenames now save the downloaded version correctly so update pills clear after the file is saved in Versions.
+- Fixed Nexus-downloaded updates so they clear stale badges and appear in Versions even when the mod's internal version did not change.
+- Fixed update badges and modpack mod lists so updated library mods stay current and modpacks stay in saved load order.
+- Added an Updates first sort and version picker so library updates no longer disturb fixed modpack versions.
+
 ## [1.7.11] - 2026-06-16
 
 ### Fixed

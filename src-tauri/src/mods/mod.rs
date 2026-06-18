@@ -808,19 +808,29 @@ pub fn install_mod_from_file(
             staged.source = crate::mod_versions::source_hint_for_mod(existing, &config_path)
                 .or_else(|| crate::mod_versions::source_hint_for_mod(&staged, &config_path));
         }
-        crate::mod_versions::cache_mod_version_by_id(
+        let source_version = crate::mods::bundle::nexus_file_version(&archive_path).or_else(|| {
+            crate::downloads_watcher::fetch_nexus_version_blocking(
+                &staged.name,
+                staged.folder_name.as_deref(),
+                staged.mod_id.as_deref(),
+                &config_path,
+                state.inner(),
+            )
+        });
+        crate::mod_versions::cache_mod_version_by_id_with_source_version(
             &mut staged,
             staging.path(),
             &cache_path,
             &config_path,
+            source_version.as_deref(),
         )
         .ok_or_else(|| format!("Failed to cache '{}' v{}", staged.name, staged.version))?;
         if let Some(id) = staged.mod_version_id.clone() {
-            if let Some(version) = crate::mods::bundle::nexus_file_version(&archive_path) {
+            if let Some(version) = source_version.as_deref() {
                 let _ = crate::mod_versions::set_record_source_version(
                     &config_path,
                     &id,
-                    Some(&version),
+                    Some(version),
                 );
             }
             let profiles = crate::profiles::list_profiles(&profiles_path);

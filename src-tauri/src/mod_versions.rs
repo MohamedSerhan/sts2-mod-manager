@@ -103,17 +103,22 @@ pub fn artifact_identity_key(
     format!("{identity}|version:{version}|content:{content}")
 }
 
-fn key_for_mod(info: &ModInfo) -> String {
+fn source_for_mod(info: &ModInfo) -> Option<String> {
+    info.source
+        .clone()
+        .or_else(|| info.github_url.clone())
+        .or_else(|| info.nexus_url.clone())
+}
+
+fn key_for_mod_with_version(info: &ModInfo, version: &str) -> String {
+    let source = source_for_mod(info);
     artifact_identity_key(
         &info.name,
         info.folder_name.as_deref(),
         info.mod_id.as_deref(),
-        &info.version,
+        version,
         info.hash.as_deref(),
-        info.source
-            .as_deref()
-            .or(info.github_url.as_deref())
-            .or(info.nexus_url.as_deref()),
+        source.as_deref(),
     )
 }
 
@@ -260,7 +265,24 @@ fn upsert_record_for_mod(
     info: &ModInfo,
     requested_id: Option<&str>,
 ) -> (String, bool) {
-    let identity_key = key_for_mod(info);
+    upsert_record_for_mod_with_source_version(db, info, requested_id, None)
+}
+
+fn upsert_record_for_mod_with_source_version(
+    db: &mut ModVersionsDb,
+    info: &ModInfo,
+    requested_id: Option<&str>,
+    source_version: Option<&str>,
+) -> (String, bool) {
+    let source_version = source_version
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let identity_key = key_for_mod_with_version(
+        info,
+        source_version.as_deref().unwrap_or(info.version.as_str()),
+    );
+    let source = source_for_mod(info);
     let requested_existing_id = requested_id
         .map(|id| resolve_alias(db, id).to_string())
         .filter(|id| db.records.contains_key(id))
@@ -288,14 +310,10 @@ fn upsert_record_for_mod(
             aliases: Vec::new(),
             name: info.name.clone(),
             version: info.version.clone(),
-            source_version: None,
+            source_version: source_version.clone(),
             folder_name: info.folder_name.clone(),
             mod_id: info.mod_id.clone(),
-            source: info
-                .source
-                .clone()
-                .or_else(|| info.github_url.clone())
-                .or_else(|| info.nexus_url.clone()),
+            source: source.clone(),
             content_hash: info.hash.clone(),
             archive_sha256: None,
             cache_relpath: Some(cache_relpath_for_id(&id)),
@@ -320,6 +338,14 @@ fn upsert_record_for_mod(
     }
     if record.mod_id != info.mod_id {
         record.mod_id = info.mod_id.clone();
+        changed = true;
+    }
+    if source_version.is_some() && record.source_version != source_version {
+        record.source_version = source_version;
+        changed = true;
+    }
+    if record.source.is_none() && source.is_some() {
+        record.source = source;
         changed = true;
     }
     if record.content_hash.is_none() && info.hash.is_some() {
@@ -358,9 +384,22 @@ pub fn ensure_mod_info_id(info: &mut ModInfo, config_path: &Path) -> Option<Stri
 
 pub fn enrich_mods_with_versions(mods: &mut [ModInfo], config_path: &Path) {
     let mut db = load(config_path);
+    let sources = crate::mod_sources::load_sources(config_path);
     let mut changed = false;
     for info in mods.iter_mut() {
-        let (id, did_change) = upsert_record_for_mod(&mut db, info, info.mod_version_id.as_deref());
+        let installed_source_version = crate::mod_sources::lookup_entry(
+            &sources.mods,
+            info.folder_name.as_deref(),
+            &info.name,
+            info.mod_id.as_deref(),
+        )
+        .and_then(|entry| entry.installed_version.as_deref());
+        let (id, did_change) = upsert_record_for_mod_with_source_version(
+            &mut db,
+            info,
+            info.mod_version_id.as_deref(),
+            installed_source_version,
+        );
         info.mod_version_id = Some(id);
         changed |= did_change;
     }
@@ -510,8 +549,17 @@ pub fn install_cached_record_to_base(
     })?;
     let mut info = crate::mods::install_mod_from_zip(&zip_path, dest_base)
         .map_err(|e| AppError::Other(format!("Failed to restore cached version: {e}")))?;
-    info.mod_version_id = Some(record.id.clone());
-    ensure_mod_info_id(&mut info, config_path);
+    let mut db = load(config_path);
+    let (id, changed) = upsert_record_for_mod_with_source_version(
+        &mut db,
+        &info,
+        Some(&record.id),
+        record.source_version.as_deref(),
+    );
+    info.mod_version_id = Some(id);
+    if changed {
+        save(&db, config_path)?;
+    }
     Ok(info)
 }
 
@@ -704,14 +752,35 @@ pub fn cache_archive_as_mod_version(
     cache_path: &Path,
     config_path: &Path,
 ) -> Result<ModInfo> {
+    cache_archive_as_mod_version_with_source_version(
+        archive_path,
+        source_hint,
+        cache_path,
+        config_path,
+        None,
+    )
+}
+
+pub fn cache_archive_as_mod_version_with_source_version(
+    archive_path: &Path,
+    source_hint: Option<String>,
+    cache_path: &Path,
+    config_path: &Path,
+    source_version: Option<&str>,
+) -> Result<ModInfo> {
     let staging = tempfile::tempdir()?;
     let mut info = crate::mods::install_mod_from_archive(archive_path, staging.path())?;
     if info.source.is_none() {
         info.source = source_hint;
     }
-    cache_mod_version_by_id(&mut info, staging.path(), cache_path, config_path).ok_or_else(
-        || AppError::Other(format!("Failed to cache '{}' v{}", info.name, info.version)),
-    )?;
+    cache_mod_version_by_id_with_source_version(
+        &mut info,
+        staging.path(),
+        cache_path,
+        config_path,
+        source_version,
+    )
+    .ok_or_else(|| AppError::Other(format!("Failed to cache '{}' v{}", info.name, info.version)))?;
     Ok(info)
 }
 
@@ -832,7 +901,29 @@ pub fn cache_mod_version_by_id(
     cache_path: &Path,
     config_path: &Path,
 ) -> Option<PathBuf> {
-    let id = ensure_mod_info_id(mod_info, config_path)?;
+    cache_mod_version_by_id_with_source_version(mod_info, base_path, cache_path, config_path, None)
+}
+
+pub fn cache_mod_version_by_id_with_source_version(
+    mod_info: &mut ModInfo,
+    base_path: &Path,
+    cache_path: &Path,
+    config_path: &Path,
+    source_version: Option<&str>,
+) -> Option<PathBuf> {
+    let mut db = load(config_path);
+    let (id, changed) = upsert_record_for_mod_with_source_version(
+        &mut db,
+        mod_info,
+        mod_info.mod_version_id.as_deref(),
+        source_version,
+    );
+    mod_info.mod_version_id = Some(id.clone());
+    if changed {
+        if let Err(e) = save(&db, config_path) {
+            log::warn!("Failed to save mod version registry: {}", e);
+        }
+    }
     let dest = cache_path_for_id(cache_path, &id);
     if dest.exists() {
         return Some(dest);
@@ -1165,6 +1256,69 @@ mod tests {
         assert!(
             has_local_version_for_mod(config.path(), cache.path(), &installed, "29"),
             "a cached Nexus V29 archive should suppress another update pill for latest 29"
+        );
+    }
+
+    #[test]
+    fn source_version_cache_keeps_same_manifest_nexus_update_selectable() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+
+        write_manifest(base.path(), "0.16.2");
+        let mut installed = mod_info("Test", "0.16.2", Some("same-content"));
+        let installed_id = ensure_mod_info_id(&mut installed, config.path()).unwrap();
+
+        write_manifest(base.path(), "0.16.2");
+        let mut cached = mod_info("Test", "0.16.2", Some("same-content"));
+        let cached_path = cache_mod_version_by_id_with_source_version(
+            &mut cached,
+            base.path(),
+            cache.path(),
+            config.path(),
+            Some("V1"),
+        )
+        .expect("Nexus source-version cache should be written");
+        let cached_id = cached
+            .mod_version_id
+            .clone()
+            .expect("cached artifact should have a source-version id");
+
+        assert_ne!(
+            installed_id, cached_id,
+            "Nexus file versions must not collapse into the active manifest-version record"
+        );
+        assert!(cached_path.exists());
+
+        let options = local_version_options_for_target(
+            &[installed.clone()],
+            &[],
+            config.path(),
+            cache.path(),
+            &installed.name,
+            installed.mod_version_id.as_deref(),
+            installed.mod_id.as_deref(),
+        );
+        assert!(
+            options
+                .iter()
+                .any(|option| option.mod_version_id == installed_id
+                    && option.version == "0.16.2"
+                    && option.installed),
+            "active manifest version should remain selectable"
+        );
+        assert!(
+            options
+                .iter()
+                .any(|option| option.mod_version_id == cached_id
+                    && option.version == "V1"
+                    && option.cached
+                    && !option.installed),
+            "same-manifest Nexus update should surface as a cached V1 option"
+        );
+        assert!(
+            has_local_version_for_mod(config.path(), cache.path(), &installed, "1"),
+            "cached Nexus V1 should suppress the update pill for latest 1"
         );
     }
 

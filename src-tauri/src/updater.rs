@@ -966,11 +966,12 @@ pub async fn update_mod(
         chosen_tag,
         name,
     );
-    let info = crate::mod_versions::cache_archive_as_mod_version(
+    let info = crate::mod_versions::cache_archive_as_mod_version_with_source_version(
         &chosen_zip,
         Some(format!("github:{}/{}", owner, repo)),
         &cache_path,
         &config_path,
+        Some(&chosen_tag),
     )
     .map_err(|e| e.to_string())?;
 
@@ -1751,11 +1752,12 @@ pub async fn update_all_mods(
         } else {
             installed.iter().find(|m| m.name == update.mod_name)
         };
-        match crate::mod_versions::cache_archive_as_mod_version(
+        match crate::mod_versions::cache_archive_as_mod_version_with_source_version(
             &chosen_zip,
             Some(format!("github:{}/{}", owner, repo)),
             &cache_path,
             &config_path,
+            Some(&chosen_tag),
         ) {
             Ok(info) => {
                 if let Some(old_info) = old_info_opt {

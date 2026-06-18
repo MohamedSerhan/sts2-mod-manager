@@ -274,23 +274,32 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                         )
                                     });
                                 }
-                                crate::mod_versions::cache_mod_version_by_id(
+                                let source_version = crate::mods::bundle::nexus_file_version(path)
+                                    .or_else(|| {
+                                        fetch_nexus_version_blocking(
+                                            &staged.name,
+                                            staged.folder_name.as_deref(),
+                                            staged.mod_id.as_deref(),
+                                            &config_path,
+                                            &state,
+                                        )
+                                    });
+                                crate::mod_versions::cache_mod_version_by_id_with_source_version(
                                     &mut staged,
                                     staging.path(),
                                     &cache_path,
                                     &config_path,
+                                    source_version.as_deref(),
                                 )
                                 .ok_or_else(|| {
                                     format!("Failed to cache '{}' v{}", staged.name, staged.version)
                                 })?;
                                 if let Some(id) = staged.mod_version_id.clone() {
-                                    if let Some(version) =
-                                        crate::mods::bundle::nexus_file_version(path)
-                                    {
+                                    if let Some(version) = source_version.as_deref() {
                                         let _ = crate::mod_versions::set_record_source_version(
                                             &config_path,
                                             &id,
-                                            Some(&version),
+                                            Some(version),
                                         );
                                     }
                                     let mut installed = scan_mods(&mods_path);
@@ -1177,7 +1186,7 @@ pub(crate) fn stash_existing_mod_files(
 /// a single page-level `version` that's whichever file the author uploaded
 /// last. To stay accurate we also pull the files list and pick the one that
 /// matches the local mod's flavor (currently: "lite" detection).
-fn fetch_nexus_version_blocking(
+pub(crate) fn fetch_nexus_version_blocking(
     mod_name: &str,
     folder_name: Option<&str>,
     mod_id_key: Option<&str>,

@@ -137,6 +137,7 @@ export interface ProfileMembershipState {
   included: boolean;
   enabled: boolean;
   editable: boolean;
+  order_index?: number | null;
 }
 
 export interface SwitchProfileResult {

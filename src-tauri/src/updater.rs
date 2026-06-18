@@ -53,6 +53,35 @@ fn is_newer_version(current: &str, latest: &str) -> bool {
     }
 }
 
+fn apply_last_installed_source_authority(
+    mod_name: &str,
+    installed_source: Option<&str>,
+    github_needs_update: &mut bool,
+    nexus_update_available: &mut bool,
+) {
+    match installed_source {
+        Some("nexus") => {
+            if *github_needs_update {
+                log::info!(
+                    "audit: suppressing GitHub update for '{}' because Nexus was the last installed source",
+                    mod_name
+                );
+            }
+            *github_needs_update = false;
+        }
+        Some("github") => {
+            if *nexus_update_available {
+                log::info!(
+                    "audit: suppressing Nexus update for '{}' because GitHub was the last installed source",
+                    mod_name
+                );
+            }
+            *nexus_update_available = false;
+        }
+        _ => {}
+    }
+}
+
 /// Lenient version parse for GAME build strings. Steam beta branches
 /// suffix the build number ("0.106.1b", "0.106.1-beta.4257"), which the
 /// strict semver parse rejects — and a None game version silently
@@ -761,26 +790,21 @@ fn profile_references_installed_mod(
         })
 }
 
-fn cache_update_zip_artifact(
-    chosen_zip: &Path,
+fn preserve_referenced_modpack_version(
+    mod_info: &ModInfo,
+    mods_path: &Path,
     cache_path: &Path,
     config_path: &Path,
-) -> Result<ModInfo> {
-    let staging = tempfile::tempdir()?;
-    let mut info = crate::mods::install_mod_from_zip(chosen_zip, staging.path())?;
-    crate::mod_versions::cache_mod_version_by_id(
-        &mut info,
-        staging.path(),
-        cache_path,
-        config_path,
-    )
-    .ok_or_else(|| {
-        crate::error::AppError::Other(format!(
-            "Failed to cache '{}' v{} without changing installed files",
-            info.name, info.version
-        ))
-    })?;
-    Ok(info)
+) -> Result<()> {
+    let mut info = mod_info.clone();
+    crate::mod_versions::cache_mod_version_by_id(&mut info, mods_path, cache_path, config_path)
+        .ok_or_else(|| {
+            crate::error::AppError::Other(format!(
+                "Failed to preserve '{}' v{} before updating the library copy",
+                mod_info.name, mod_info.version
+            ))
+        })?;
+    Ok(())
 }
 
 /// Download and install the newest version of a specific mod from its
@@ -916,16 +940,14 @@ pub async fn update_mod(
         && profile_references_installed_mod(mod_info, &profiles_path, &config_path)
     {
         log::info!(
-            "update_mod: '{}' is referenced by a saved modpack; caching {}/{}@{} without changing installed files",
+            "update_mod: '{}' is referenced by a saved modpack; preserving current artifact before installing {}/{}@{} in the library",
             name,
             owner,
             repo,
             chosen_tag,
         );
-        let cached = cache_update_zip_artifact(&chosen_zip, &cache_path, &config_path)
+        preserve_referenced_modpack_version(mod_info, &mods_path, &cache_path, &config_path)
             .map_err(|e| e.to_string())?;
-        validate_update_install_result(&old_info_for_validation, &cached, game_version.as_deref())?;
-        return Ok(cached);
     }
 
     // Read user-edited configs BEFORE the destructive delete pass. Empty
@@ -1815,37 +1837,25 @@ pub async fn update_all_mods(
                 && profile_references_installed_mod(old_info, &profiles_path, &config_path)
             {
                 log::info!(
-                    "update_all_mods: '{}' is referenced by a saved modpack; caching {}/{}@{} without changing installed files",
+                    "update_all_mods: '{}' is referenced by a saved modpack; preserving current artifact before installing {}/{}@{} in the library",
                     update.mod_name,
                     owner,
                     repo,
                     chosen_tag,
                 );
-                match cache_update_zip_artifact(&chosen_zip, &cache_path, &config_path) {
-                    Ok(cached) => {
-                        if let Err(e) = validate_update_install_result(
-                            old_info,
-                            &cached,
-                            game_version.as_deref(),
-                        ) {
-                            log::error!(
-                                "update_all_mods: cached update for '{}' failed validation: {}",
-                                update.mod_name,
-                                e,
-                            );
-                            continue;
-                        }
-                        results.push(cached);
-                    }
-                    Err(e) => {
-                        log::error!(
-                            "update_all_mods: failed to cache update for '{}': {}",
-                            update.mod_name,
-                            e,
-                        );
-                    }
+                if let Err(e) = preserve_referenced_modpack_version(
+                    old_info,
+                    &mods_path,
+                    &cache_path,
+                    &config_path,
+                ) {
+                    log::error!(
+                        "update_all_mods: failed to preserve current artifact for '{}': {}",
+                        update.mod_name,
+                        e,
+                    );
+                    continue;
                 }
-                continue;
             }
 
             let mut parent_dirs = std::collections::HashSet::new();
@@ -1912,6 +1922,7 @@ pub async fn update_all_mods(
                 let entry = db.mods.entry(key).or_default();
                 entry.github_repo = Some(format!("{}/{}", owner, repo));
                 entry.installed_version = Some(chosen_tag.clone());
+                entry.installed_version_source = Some("github".into());
                 let _ = save_sources(&db, &config_path);
 
                 // Overlay user-edited configs + refresh snapshot. Emits
@@ -2459,6 +2470,89 @@ mod version_helper_tests {
             "1.1.3",
         );
         assert_eq!(info.version, "1.0.0");
+    }
+
+    #[test]
+    fn last_installed_source_suppresses_alternate_update_channel() {
+        let mut github_needs_update = true;
+        let mut nexus_update_available = false;
+        apply_last_installed_source_authority(
+            "Watcher",
+            Some("nexus"),
+            &mut github_needs_update,
+            &mut nexus_update_available,
+        );
+        assert!(
+            !github_needs_update,
+            "Nexus-installed rows should not keep a stale GitHub update pill"
+        );
+
+        github_needs_update = false;
+        nexus_update_available = true;
+        apply_last_installed_source_authority(
+            "Watcher",
+            Some("github"),
+            &mut github_needs_update,
+            &mut nexus_update_available,
+        );
+        assert!(
+            !nexus_update_available,
+            "GitHub-installed rows should not keep a stale Nexus update pill"
+        );
+    }
+
+    #[test]
+    fn preserving_referenced_modpack_version_caches_current_library_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let cache_path = tmp.path().join("cache");
+        let config_path = tmp.path().join("config");
+        std::fs::create_dir_all(mods_path.join("Watcher")).unwrap();
+        std::fs::create_dir_all(&cache_path).unwrap();
+        std::fs::create_dir_all(&config_path).unwrap();
+        std::fs::write(
+            mods_path.join("Watcher").join("manifest.json"),
+            r#"{"name":"Watcher","version":"1.4.2"}"#,
+        )
+        .unwrap();
+        std::fs::write(mods_path.join("Watcher").join("Watcher.dll"), "old-bytes").unwrap();
+
+        let info = mod_info(|m| {
+            m.name = "Watcher".into();
+            m.version = "1.4.2".into();
+            m.folder_name = Some("Watcher".into());
+            m.mod_id = Some("Watcher".into());
+            m.files = vec!["Watcher/manifest.json".into(), "Watcher/Watcher.dll".into()];
+        });
+
+        preserve_referenced_modpack_version(&info, &mods_path, &cache_path, &config_path).unwrap();
+
+        let profile_mod = crate::profiles::ProfileMod {
+            mod_version_id: None,
+            name: "Watcher".into(),
+            version: "1.4.2".into(),
+            source: None,
+            hash: None,
+            files: info.files.clone(),
+            folder_name: Some("Watcher".into()),
+            mod_id: Some("Watcher".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        };
+        let cached = crate::mod_versions::get_cached_mod_path_for_profile_mod(
+            &cache_path,
+            &config_path,
+            &profile_mod,
+        )
+        .expect("current library copy should be cached for the saved profile mod");
+        let file = std::fs::File::open(cached).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut dll = archive.by_name("Watcher/Watcher.dll").unwrap();
+        let mut contents = String::new();
+        std::io::Read::read_to_string(&mut dll, &mut contents).unwrap();
+        assert_eq!(contents, "old-bytes");
     }
 
     #[test]
@@ -3466,27 +3560,12 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         (Some(gv), Some(req)) if !game_version_satisfies(gv, req)
     );
 
-    match source_entry.and_then(|e| e.installed_version_source.as_deref()) {
-        Some("nexus") if nexus_version.is_some() => {
-            if github_needs_update {
-                log::info!(
-                    "audit: suppressing GitHub update for '{}' because Nexus was the last installed source",
-                    m.name
-                );
-            }
-            github_needs_update = false;
-        }
-        Some("github") if latest_release_with_assets_tag.is_some() || final_error.is_none() => {
-            if nexus_update_available {
-                log::info!(
-                    "audit: suppressing Nexus update for '{}' because GitHub was the last installed source",
-                    m.name
-                );
-            }
-            nexus_update_available = false;
-        }
-        _ => {}
-    }
+    apply_last_installed_source_authority(
+        &m.name,
+        source_entry.and_then(|e| e.installed_version_source.as_deref()),
+        &mut github_needs_update,
+        &mut nexus_update_available,
+    );
 
     // Compute needs_update + update_source AFTER the walk-back has had
     // a chance to drop github_needs_update (it does so when the only

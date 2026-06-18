@@ -292,6 +292,68 @@ describe('<LibraryTable>', () => {
     expect(titles()[0]).toContain('Zeta');
   });
 
+  it('sort drop-down moves actionable updates first in the library view', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'Alpha',
+          version: '1.0',
+          folder_name: 'Alpha',
+          mod_id: 'Alpha',
+          installed_enabled: true,
+          profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+        },
+        {
+          name: 'Beta',
+          version: '1.0',
+          folder_name: 'Beta',
+          mod_id: 'Beta',
+          installed_enabled: true,
+          profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+        },
+      ],
+    }));
+    const auditByKey = new Map([
+      ['Beta', {
+        mod_name: 'Beta',
+        folder_name: 'Beta',
+        github_repo: 'owner/beta',
+        installed_version: '1.0.0',
+        latest_release_tag: 'v2.0.0',
+        latest_release_with_assets_tag: 'v2.0.0',
+        latest_has_assets: true,
+        needs_update: true,
+        asset_names: ['Beta.zip'],
+        releases_scanned: 1,
+        error: null,
+        nexus_url: null,
+        nexus_version: null,
+        nexus_update_available: false,
+        update_source: 'github',
+        github_auto_detected: false,
+        pinned: false,
+        latest_compatible_tag: 'v2.0.0',
+      }],
+    ]);
+
+    const user = userEvent.setup();
+    const modInfoByKey = new Map([
+      ['Alpha', mkModInfo({ name: 'Alpha', folder_name: 'Alpha', mod_id: 'Alpha' })],
+      ['Beta', mkModInfo({ name: 'Beta', folder_name: 'Beta', mod_id: 'Beta' })],
+    ]);
+    const { container } = render(<Wrap modpackName="Stable" auditByKey={auditByKey} modInfoByKey={modInfoByKey} />);
+    await screen.findAllByText('Alpha');
+    const titles = () =>
+      Array.from(container.querySelectorAll('.gf-profile-library-title')).map(
+        (el) => el.textContent ?? '',
+      );
+    expect(titles()[0]).toContain('Alpha');
+    await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'updatesFirst');
+    expect(titles()[0]).toContain('Beta');
+  });
+
   it('pagination footer reveals more rows on click for large libraries', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
     registerInvokeHandler('get_profile_memberships', () => ({
@@ -1036,17 +1098,14 @@ describe('<LibraryTable modpackName={null}>', () => {
       ]);
     }
 
-    it('shows pack sort modes, hides explainer and In-Modpack badge', async () => {
+    it('hides pack sort controls, explainer, and In-Modpack badge', async () => {
       const modInfoByKey = seedInPack();
       const { container } = render(<Wrap modpackName="Stable" packScoped modInfoByKey={modInfoByKey} />);
       await screen.findByText('PackMod');
       // Search placeholder is just "Search mods…" (not "N library mods").
       expect(screen.getByPlaceholderText(/^Search mods/i)).toBeInTheDocument();
       expect(screen.queryByPlaceholderText(/library mods/i)).toBeNull();
-      const sort = screen.getByRole('combobox', { name: /Sort/i });
-      expect(sort).toHaveValue('loadOrder');
-      expect(within(sort).getByRole('option', { name: /Load order/i })).toBeInTheDocument();
-      expect(within(sort).getByRole('option', { name: /Updates first/i })).toBeInTheDocument();
+      expect(screen.queryByRole('combobox', { name: /Sort/i })).toBeNull();
       expect(container.querySelector('.gf-profile-library-help')).toBeNull();
       expect(container.querySelector('.gf-row-inpack')).toBeNull();
       // The visible row action is "Remove from pack", not the disk trash.
@@ -1055,6 +1114,139 @@ describe('<LibraryTable modpackName={null}>', () => {
     });
 
     it('defaults pack-scoped rows to the saved load order', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'SecondAlphabetically',
+            version: '1.0.0',
+            folder_name: 'SecondAlphabetically',
+            mod_id: 'SecondAlphabetically',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 0 }],
+          },
+          {
+            name: 'Alpha',
+            version: '1.0.0',
+            folder_name: 'Alpha',
+            mod_id: 'Alpha',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 1 }],
+          },
+        ],
+      }));
+      const { container } = render(<Wrap modpackName="Stable" packScoped />);
+      await screen.findByText('SecondAlphabetically');
+      await waitFor(() => {
+        const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
+        expect(rows[0]).toContain('SecondAlphabetically');
+        expect(rows[1]).toContain('Alpha');
+      });
+    });
+
+    it('keeps pack rows in load order even when one has an update available', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'Alpha',
+            version: '1.0.0',
+            folder_name: 'Alpha',
+            mod_id: 'Alpha',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 0 }],
+          },
+          {
+            name: 'Beta',
+            version: '1.0.0',
+            folder_name: 'Beta',
+            mod_id: 'Beta',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 1 }],
+          },
+        ],
+      }));
+      const auditByKey = new Map([
+        ['Beta', {
+          mod_name: 'Beta',
+          folder_name: 'Beta',
+          github_repo: 'owner/beta',
+          installed_version: '1.0.0',
+          latest_release_tag: 'v2.0.0',
+          latest_release_with_assets_tag: 'v2.0.0',
+          latest_has_assets: true,
+          needs_update: true,
+          asset_names: ['Beta.zip'],
+          releases_scanned: 1,
+          error: null,
+          nexus_url: null,
+          nexus_version: null,
+          nexus_update_available: false,
+          update_source: 'github',
+          github_auto_detected: false,
+          pinned: false,
+          latest_compatible_tag: 'v2.0.0',
+        }],
+      ]);
+      const modInfoByKey = new Map([
+        ['Alpha', mkModInfo({ name: 'Alpha', folder_name: 'Alpha', mod_id: 'Alpha' })],
+        ['Beta', mkModInfo({ name: 'Beta', folder_name: 'Beta', mod_id: 'Beta' })],
+      ]);
+      const { container } = render(<Wrap modpackName="Stable" packScoped auditByKey={auditByKey} modInfoByKey={modInfoByKey} />);
+      await screen.findByText('Alpha');
+      const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
+      expect(rows[0]).toContain('Alpha');
+      expect(rows[1]).toContain('Beta');
+    });
+
+    it('filters pack rows by tag without changing saved load order', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'Alpha',
+            version: '1.0.0',
+            folder_name: 'Alpha',
+            mod_id: 'Alpha',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 0 }],
+          },
+          {
+            name: 'Beta',
+            version: '1.0.0',
+            folder_name: 'Beta',
+            mod_id: 'Beta',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 1 }],
+          },
+          {
+            name: 'Gamma',
+            version: '1.0.0',
+            folder_name: 'Gamma',
+            mod_id: 'Gamma',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 2 }],
+          },
+        ],
+      }));
+      const modInfoByKey = new Map([
+        ['Alpha', mkModInfo({ name: 'Alpha', folder_name: 'Alpha', mod_id: 'Alpha', tags: ['utility'] })],
+        ['Beta', mkModInfo({ name: 'Beta', folder_name: 'Beta', mod_id: 'Beta', tags: ['combat'] })],
+        ['Gamma', mkModInfo({ name: 'Gamma', folder_name: 'Gamma', mod_id: 'Gamma', tags: ['utility'] })],
+      ]);
+      const { container } = render(<Wrap modpackName="Stable" packScoped priorityTag="utility" modInfoByKey={modInfoByKey} />);
+      await screen.findByText('Alpha');
+      const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toContain('Alpha');
+      expect(rows[1]).toContain('Gamma');
+      expect(screen.queryByText('Beta')).toBeNull();
+    });
+
+    it('falls back to grid order for legacy pack rows without order indexes', async () => {
       registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
       registerInvokeHandler('get_profile_memberships', () => ({
         profiles: [{ name: 'Stable', editable: true }],
@@ -1086,64 +1278,6 @@ describe('<LibraryTable modpackName={null}>', () => {
       });
     });
 
-    it('moves actionable updates first without hiding non-updating pack rows', async () => {
-      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
-      registerInvokeHandler('get_profile_memberships', () => ({
-        profiles: [{ name: 'Stable', editable: true }],
-        mods: [
-          {
-            name: 'Alpha',
-            version: '1.0.0',
-            folder_name: 'Alpha',
-            mod_id: 'Alpha',
-            installed_enabled: true,
-            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
-          },
-          {
-            name: 'Beta',
-            version: '1.0.0',
-            folder_name: 'Beta',
-            mod_id: 'Beta',
-            installed_enabled: true,
-            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
-          },
-        ],
-      }));
-      const auditByKey = new Map([
-        ['Beta', {
-          mod_name: 'Beta',
-          folder_name: 'Beta',
-          github_repo: 'owner/beta',
-          installed_version: '1.0.0',
-          latest_release_tag: 'v2.0.0',
-          latest_release_with_assets_tag: 'v2.0.0',
-          latest_has_assets: true,
-          needs_update: true,
-          asset_names: ['Beta.zip'],
-          releases_scanned: 1,
-          error: null,
-          nexus_url: null,
-          nexus_version: null,
-          nexus_update_available: false,
-          update_source: 'github',
-          github_auto_detected: false,
-          pinned: false,
-          latest_compatible_tag: 'v2.0.0',
-        }],
-      ]);
-      const user = userEvent.setup();
-      const modInfoByKey = new Map([
-        ['Alpha', mkModInfo({ name: 'Alpha', folder_name: 'Alpha', mod_id: 'Alpha' })],
-        ['Beta', mkModInfo({ name: 'Beta', folder_name: 'Beta', mod_id: 'Beta' })],
-      ]);
-      const { container } = render(<Wrap modpackName="Stable" packScoped auditByKey={auditByKey} modInfoByKey={modInfoByKey} />);
-      await screen.findByText('Alpha');
-      await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'updatesFirst');
-      const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
-      expect(rows[0]).toContain('Beta');
-      expect(rows[1]).toContain('Alpha');
-    });
-
     it('keeps load order as the tie-breaker when every pack row needs an update', async () => {
       registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
       registerInvokeHandler('get_profile_memberships', () => ({
@@ -1155,7 +1289,7 @@ describe('<LibraryTable modpackName={null}>', () => {
             folder_name: 'Beta',
             mod_id: 'Beta',
             installed_enabled: true,
-            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 0 }],
           },
           {
             name: 'Alpha',
@@ -1163,7 +1297,7 @@ describe('<LibraryTable modpackName={null}>', () => {
             folder_name: 'Alpha',
             mod_id: 'Alpha',
             installed_enabled: true,
-            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 1 }],
           },
         ],
       }));
@@ -1187,7 +1321,6 @@ describe('<LibraryTable modpackName={null}>', () => {
         pinned: false,
         latest_compatible_tag: 'v2.0.0',
       });
-      const user = userEvent.setup();
       const { container } = render(
         <Wrap
           modpackName="Stable"
@@ -1203,7 +1336,6 @@ describe('<LibraryTable modpackName={null}>', () => {
         />,
       );
       await screen.findByText('Beta');
-      await user.selectOptions(screen.getByRole('combobox', { name: /Sort/i }), 'updatesFirst');
       const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
       expect(rows[0]).toContain('Beta');
       expect(rows[1]).toContain('Alpha');

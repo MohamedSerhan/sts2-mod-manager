@@ -414,23 +414,29 @@ export function LibraryTable({
   }, [effectiveGrid, modpackName]);
 
   // Build the load-order draft from the grid + modpackName whenever
-  // the grid updates. The draft is what the drag handles reorder; on
-  // commit we send it to setProfileLoadOrder. Skipped when there's no
-  // focused modpack (no-focus library mode has no drag-reorder).
+  // the grid updates. The backend sends each profile row's saved manifest
+  // index so pack-scoped views follow the real modpack order even when the
+  // installed library scan returns rows alphabetically.
   useEffect(() => {
     if (!effectiveGrid || modpackName == null) {
       setLoadOrderDraft([]);
       return;
     }
-    // Use the order from the matching profile (the membership grid
-    // backend already orders mods consistently). Falls back to grid
-    // order if for some reason we can't find the profile in the user
-    // grid.
-    const inPack = effectiveGrid.mods.filter((row) =>
-      row.profiles.find((p) =>
-        p.profile_id === modpackName || p.profile_name === modpackName
-      )?.included,
-    );
+    const inPack = effectiveGrid.mods
+      .map((row, gridIndex) => ({
+        row,
+        gridIndex,
+        state: row.profiles.find((p) =>
+          p.profile_id === modpackName || p.profile_name === modpackName
+        ),
+      }))
+      .filter(({ state }) => state?.included)
+      .sort((a, b) => {
+        const ai = typeof a.state?.order_index === 'number' ? a.state.order_index : Number.MAX_SAFE_INTEGER;
+        const bi = typeof b.state?.order_index === 'number' ? b.state.order_index : Number.MAX_SAFE_INTEGER;
+        return ai - bi || a.gridIndex - b.gridIndex;
+      })
+      .map(({ row }) => row);
     setLoadOrderDraft(
       inPack.map((row) => ({
         name: row.name,
@@ -457,7 +463,9 @@ export function LibraryTable({
     const externallyFiltered = filterRow ? effectiveGrid.mods.filter(filterRow) : effectiveGrid.mods;
     const preFiltered = priorityTag === NO_TAGS_FILTER_VALUE
       ? externallyFiltered.filter((row) => !rowHasAnyTags(row, modInfoByKey))
-      : externallyFiltered;
+      : packScoped && priorityTag
+        ? externallyFiltered.filter((row) => rowHasTag(row, priorityTag.toLocaleLowerCase(), modInfoByKey))
+        : externallyFiltered;
     const loadOrderIndex = (row: ProfileMembershipMod) => {
       const rowKey = membershipRowKey(row);
       const idx = loadOrderDraft.findIndex((pm) =>
@@ -467,7 +475,9 @@ export function LibraryTable({
         || (!!row.mod_id && pm.mod_id === row.mod_id)
         || pm.name === row.name
       );
-      return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+      if (idx !== -1) return idx;
+      const savedIndex = focusedState(row)?.order_index;
+      return typeof savedIndex === 'number' ? savedIndex : Number.MAX_SAFE_INTEGER;
     };
     const compareLoadOrder = (a: ProfileMembershipMod, b: ProfileMembershipMod) =>
       loadOrderIndex(a) - loadOrderIndex(b) || compareMembershipDisplayName(a, b);
@@ -522,6 +532,7 @@ export function LibraryTable({
     sorted.sort((a, b) => {
       const aIn = inPackRowKeys.has(membershipRowKey(a));
       const bIn = inPackRowKeys.has(membershipRowKey(b));
+      if (packScoped) return compareLoadOrder(a, b);
       // Tag-priority ordering (the page Tag picker) OVERRIDES the sort mode
       // while a tag is chosen: that tag's mods first, then the rest by first
       // tag A–Z (untagged last); ties by display name. Nothing is hidden.
@@ -540,13 +551,13 @@ export function LibraryTable({
           if (byTag !== 0) return byTag;
           /* v8 ignore stop */
         }
-        return packScoped ? compareLoadOrder(a, b) : compareMembershipDisplayName(a, b);
+        return compareMembershipDisplayName(a, b);
       }
       if (sort === 'updatesFirst') {
         const au = isActionableUpdate(auditForRow(a));
         const bu = isActionableUpdate(auditForRow(b));
         if (au !== bu) return au ? -1 : 1;
-        return packScoped ? compareLoadOrder(a, b) : compareMembershipDisplayName(a, b);
+        return compareMembershipDisplayName(a, b);
       }
       if (sort === 'loadOrder') return compareLoadOrder(a, b);
       if (sort === 'nameDesc') return compareMembershipDisplayName(b, a);
@@ -923,19 +934,6 @@ export function LibraryTable({
         {packScoped && (
           <div className="gf-profile-library-toolbar-actions">
             <ModViewToggle density={density} onChange={setDensity} />
-            <label className="gf-sort-control gf-profile-library-sort">
-              <span>{t('profiles.library.sort.label')}</span>
-              <select
-                value={sort}
-                onChange={(event) =>
-                  setSort(event.target.value as LibrarySortMode)
-                }
-                aria-label={t('profiles.library.sort.label')}
-              >
-                <option value="loadOrder">{t('profiles.library.sort.loadOrder')}</option>
-                <option value="updatesFirst">{t('profiles.library.sort.updatesFirst')}</option>
-              </select>
-            </label>
             {toolbarActions}
           </div>
         )}

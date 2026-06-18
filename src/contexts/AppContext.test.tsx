@@ -580,11 +580,13 @@ describe('<AppProvider>', () => {
     let updateAllCalls = 0;
     registerInvokeHandler('update_all_mods', () => {
       updateAllCalls += 1;
-      return [{ name: 'A', version: '2.0.0', enabled: true, files: [] }];
+      return [{ mod_version_id: 'artifact-a-2', name: 'A', folder_name: 'AFolder', mod_id: 'a', version: '2.0.0', enabled: true, files: [] }];
     });
     let auditCallsBulk = 0;
-    registerInvokeHandler('audit_mod_versions', () => {
+    let lastAuditArgs: Record<string, unknown> | undefined;
+    registerInvokeHandler('audit_mod_versions', (args) => {
       auditCallsBulk += 1;
+      lastAuditArgs = args;
       return [];
     });
 
@@ -608,9 +610,13 @@ describe('<AppProvider>', () => {
     const updated = await bulkPromise!;
 
     expect(updateAllCalls).toBe(1);
-    expect(updated).toEqual([{ name: 'A', version: '2.0.0', enabled: true, files: [] }]);
+    expect(updated).toEqual([{ mod_version_id: 'artifact-a-2', name: 'A', folder_name: 'AFolder', mod_id: 'a', version: '2.0.0', enabled: true, files: [] }]);
     // Targeted re-audit happens after the bulk update completes.
     expect(auditCallsBulk).toBe(1);
+    expect(lastAuditArgs?.only).toEqual([
+      'A',
+      { mod_version_id: 'artifact-a-2', folder_name: 'AFolder', mod_id: 'a', name: 'A' },
+    ]);
   });
 
   it('scoped runAudit(only) with a prior full audit merges instead of clobbering', async () => {

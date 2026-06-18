@@ -1394,6 +1394,65 @@ mod tests {
     }
 
     #[test]
+    fn readable_nexus_filename_version_suppresses_update_pill() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let source_version = crate::mods::bundle::nexus_file_version(Path::new(
+            "EndRunGraph v0.3.2 Release STS2 V0.103.2 (1).zip",
+        ))
+        .expect("readable Nexus filename should expose the mod file version");
+
+        write_manifest(base.path(), "0.3.1");
+        let mut installed = mod_info("End Run Graph", "0.3.1", Some("active-031"));
+        let installed_id = ensure_mod_info_id(&mut installed, config.path()).unwrap();
+
+        write_manifest(base.path(), "0.3.1");
+        let mut cached = mod_info("End Run Graph", "0.3.1", Some("downloaded-032"));
+        let cached_path = cache_mod_version_by_id_with_source_version(
+            &mut cached,
+            base.path(),
+            cache.path(),
+            config.path(),
+            Some(&source_version),
+        )
+        .expect("readable Nexus source-version cache should be written");
+        let cached_id = cached
+            .mod_version_id
+            .clone()
+            .expect("cached artifact should have a source-version id");
+
+        assert_ne!(
+            installed_id, cached_id,
+            "filename v0.3.2 must not collapse into the active manifest v0.3.1 record"
+        );
+        assert!(cached_path.exists());
+
+        let options = local_version_options_for_target(
+            &[installed.clone()],
+            &[],
+            config.path(),
+            cache.path(),
+            &installed.name,
+            installed.mod_version_id.as_deref(),
+            installed.mod_id.as_deref(),
+        );
+        assert!(
+            options
+                .iter()
+                .any(|option| option.mod_version_id == cached_id
+                    && option.version == "0.3.2"
+                    && option.cached
+                    && !option.installed),
+            "readable Nexus filename version should surface as a cached 0.3.2 option"
+        );
+        assert!(
+            has_local_version_for_mod(config.path(), cache.path(), &installed, "0.3.2"),
+            "cached readable Nexus v0.3.2 should suppress another update pill for latest 0.3.2"
+        );
+    }
+
+    #[test]
     fn batched_local_version_options_match_per_target_for_large_library() {
         let base = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();

@@ -87,8 +87,8 @@ pub fn bundle_container_name(archive_path: &Path) -> String {
 /// pack version is NOT inside the archive — member manifests only carry per-mod
 /// versions, which is why a pack used to display a sub-mod's number.
 ///
-/// Returns `None` for manually-renamed downloads with no Nexus suffix, or a
-/// suffix with no version segment between the mod id and the file id.
+/// Returns `None` for filenames with no usable Nexus/file version, or a suffix
+/// with no version segment between the mod id and the file id.
 pub fn nexus_file_version(archive_path: &Path) -> Option<String> {
     let stem = archive_path
         .file_stem()
@@ -130,7 +130,7 @@ pub fn nexus_file_version(archive_path: &Path) -> Option<String> {
     }
     let name = strip_nexus_suffix(&stem);
     if name.len() >= stem.len() {
-        return None; // nothing stripped → no Nexus suffix present
+        return human_readable_archive_version(&stem);
     }
     // The stripped tail is the numeric suffix "-{modId}-{v..}-{fileId}".
     let segs: Vec<&str> = stem[name.len()..]
@@ -143,6 +143,38 @@ pub fn nexus_file_version(archive_path: &Path) -> Option<String> {
     }
     let version = segs[1..segs.len() - 1].join(".");
     (!version.is_empty()).then_some(version)
+}
+
+fn human_readable_archive_version(stem: &str) -> Option<String> {
+    let lower = stem.to_ascii_lowercase();
+    let stop = [" release", " sts2", " slay the spire"]
+        .iter()
+        .filter_map(|needle| lower.find(needle))
+        .min()
+        .unwrap_or(stem.len());
+    let candidate_region = &stem[..stop];
+    candidate_region
+        .split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '{' | '}'))
+        .find_map(|token| {
+            let token = token.trim_matches(|c: char| {
+                matches!(c, '"' | '\'' | ',' | ';' | ':' | '!' | '?' | '+' | '=')
+            });
+            let without_v = token.trim_start_matches(|c| c == 'v' || c == 'V');
+            let had_v_prefix = without_v.len() != token.len();
+            if !had_v_prefix || without_v.is_empty() {
+                return None;
+            }
+            let normalized = without_v
+                .trim_matches(|c| matches!(c, '.' | '-' | '_'))
+                .replace(['-', '_'], ".");
+            if normalized.is_empty()
+                || !normalized.chars().all(|c| c.is_ascii_digit() || c == '.')
+                || !normalized.chars().any(|c| c.is_ascii_digit())
+            {
+                return None;
+            }
+            Some(normalized)
+        })
 }
 
 /// Extract a trailing version token from a bundle display/container name.
@@ -319,6 +351,23 @@ mod tests {
                 "SlayTheStats v1.1.0-349-v1-1-0-1780935880.zip"
             )),
             Some("1.1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn nexus_file_version_handles_readable_release_name_before_game_version() {
+        assert_eq!(
+            nexus_file_version(std::path::Path::new(
+                "EndRunGraph v0.3.2 Release STS2 V0.103.2 (1).zip"
+            )),
+            Some("0.3.2".to_string())
+        );
+        assert_eq!(
+            nexus_file_version(std::path::Path::new(
+                "EndRunGraph Release STS2 V0.103.2.zip"
+            )),
+            None,
+            "game compatibility versions must not be mistaken for the mod file version"
         );
     }
 

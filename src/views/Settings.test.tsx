@@ -158,6 +158,25 @@ describe('<SettingsView>', () => {
     });
   });
 
+  it('retention save errors keep the previous value visible', async () => {
+    registerInvokeHandler('list_backups_cmd', () => []);
+    registerInvokeHandler('get_backup_retention', () => 10);
+    registerInvokeHandler('set_backup_retention', () => { throw new Error('retention blocked'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
+    await user.click(screen.getByRole('button', { name: /Backups/ }));
+    const select = await screen.findByRole('combobox', { name: /Backups to keep/i });
+    expect(select).toHaveTextContent('10');
+
+    await chooseOption(user, /Backups to keep/i, 'Off');
+
+    await waitFor(() => {
+      expect(screen.queryByText(/retention blocked/)).toBeInTheDocument();
+    });
+    expect(select).toHaveTextContent('10');
+  });
+
   it('Advanced tab shows a Check-for-updates button', async () => {
     const user = userEvent.setup();
     render(<Wrap />);
@@ -1364,6 +1383,24 @@ describe('<SettingsView>', () => {
         (c) => c.cmd === 'set_nexus_download_dir' && c.args?.path === '',
       )).toBe(true);
     });
+  });
+
+  it('Nexus Download Dir Reset errors leave the custom folder visible', async () => {
+    registerInvokeHandler('get_nexus_download_dir', () => '/custom/downloads');
+    registerInvokeHandler('set_nexus_download_dir', () => { throw new Error('reset blocked'); });
+    const user = userEvent.setup();
+    render(<Wrap />);
+    const nexusCard = await screen.findByTestId('nexus-download-dir-card');
+    await waitFor(() => {
+      expect(within(nexusCard).getByDisplayValue('/custom/downloads')).toBeInTheDocument();
+    });
+
+    await user.click(within(nexusCard).getByRole('button', { name: /Reset to default/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/reset blocked/)).toBeInTheDocument();
+    });
+    expect(within(nexusCard).getByDisplayValue('/custom/downloads')).toBeInTheDocument();
   });
 
   it('Nexus Download Dir Browse error surfaces an error toast', async () => {

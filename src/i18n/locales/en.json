@@ -1231,6 +1231,7 @@
     "subtitle": "Configure game paths, accounts, and preferences",
     "tabs": {
       "general": "General",
+      "customize": "Customize",
       "accounts": "Accounts",
       "backups": "Backups",
       "advanced": "Advanced"

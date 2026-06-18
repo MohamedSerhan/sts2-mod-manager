@@ -26,11 +26,11 @@ function Wrap() {
 
 /**
  * Settings is the second-most-trafficked view. Tests cover the tab
- * strip, the General-tab game-path field, the API key forms in
- * Accounts, and the Audit-tab empty + populated states.
+ * strip, the General-tab game-path field, the Customize preferences,
+ * and account/backup/advanced actions.
  */
 describe('<SettingsView>', () => {
-  it('renders the tab strip with the four canonical Settings tabs', async () => {
+  it('renders the tab strip with Customize immediately after General', async () => {
     // 1.7.0 cleanup: the redundant Help tab was removed — Help is now
     // reachable from the topbar `?` drawer (the canonical surface).
     // Later cleanup: the Audit tab was removed too — the Library view
@@ -41,11 +41,16 @@ describe('<SettingsView>', () => {
       expect(screen.getByText('Settings')).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: /General/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Customize/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Accounts/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Backups/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Advanced/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Help$/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Audit$/ })).toBeNull();
+    const labels = screen.getAllByRole('button')
+      .filter((button) => button.className.includes('gf-tab'))
+      .map((button) => button.textContent?.replace(/\d+$/, '').trim());
+    expect(labels).toEqual(['General', 'Customize', 'Accounts', 'Backups', 'Advanced']);
   });
 
   it('starts on the General tab and shows the Game Path field', async () => {
@@ -55,18 +60,21 @@ describe('<SettingsView>', () => {
     });
   });
 
-  it('shows the language override on the General tab', async () => {
+  it('shows the language override on the Customize tab', async () => {
+    const user = userEvent.setup();
     render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Customize/ }));
 
     expect(await screen.findByRole('combobox', { name: 'Language' })).toHaveTextContent('Auto');
   });
 
-  it('saves the navigation layout preference from the General display controls', async () => {
+  it('saves the navigation layout preference from the Customize display controls', async () => {
     const user = userEvent.setup();
     const onLayoutChange = vi.fn();
     window.addEventListener(NAVIGATION_LAYOUT_CHANGE_EVENT, onLayoutChange);
 
     render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Customize/ }));
 
     const select = await screen.findByRole('combobox', { name: /Navigation layout/i });
     expect(select).toHaveTextContent('Top bar');
@@ -1423,11 +1431,14 @@ describe('<SettingsView>', () => {
     await waitFor(() => {
       expect(scrollSpy).toHaveBeenCalled();
     });
+    expect(screen.getByRole('button', { name: /Customize/ })).toHaveClass('active');
     expect(screen.getByTestId('row-menu-card')).toHaveClass('gf-row-menu-card-flash');
   });
 
-  it('shows the Display size slider on the General tab', async () => {
+  it('shows the Display size slider on the Customize tab', async () => {
+    const user = userEvent.setup();
     render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Customize/ }));
     const interfaceSlider = (await screen.findByLabelText('Interface scale')) as HTMLInputElement;
     const fontSlider = screen.getByLabelText('Text size') as HTMLInputElement;
     expect(interfaceSlider.value).toBe('100');

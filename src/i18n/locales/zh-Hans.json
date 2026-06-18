@@ -1232,6 +1232,7 @@
     "subtitle": "配置游戏路径、账号和偏好",
     "tabs": {
       "general": "常规",
+      "customize": "自定义",
       "accounts": "账号",
       "backups": "备份",
       "advanced": "高级"

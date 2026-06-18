@@ -70,7 +70,7 @@ import {
 import type { LaunchMode } from '../hooks/useTauri';
 import type { BackupInfo } from '../types';
 
-type Tab = 'general' | 'accounts' | 'backups' | 'advanced';
+type Tab = 'general' | 'customize' | 'accounts' | 'backups' | 'advanced';
 
 // v5 — tabbed Settings shell. Tabs are stateful; tab content is rendered
 // inline beneath the tab strip. All existing handlers preserved.
@@ -133,11 +133,11 @@ export function SettingsView({
   }, []);
 
   // ── Deep-link from "Customize menu…" kebab item ──────
-  // When the signal bumps, switch to the General tab and scroll/highlight the customizer card.
+  // When the signal bumps, switch to Customize and scroll/highlight the customizer card.
   useEffect(() => {
     if (openRowMenuSettingsSignal === 0) return;
-    setTab('general');
-    // Defer one frame so the general tab content is mounted before we scroll.
+    setTab('customize');
+    // Defer one frame so the Customize tab content is mounted before we scroll.
     const id = setTimeout(() => {
       rowMenuCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setRowMenuFlash(true);
@@ -445,6 +445,7 @@ export function SettingsView({
 
   const TABS: { id: Tab; label: string; count?: number }[] = [
     { id: 'general',  label: t('settings.tabs.general') },
+    { id: 'customize', label: t('settings.tabs.customize') },
     { id: 'accounts', label: t('settings.tabs.accounts') },
     { id: 'backups',  label: t('settings.tabs.backups'),  count: backups.length || undefined },
     { id: 'advanced', label: t('settings.tabs.advanced') },
@@ -682,7 +683,17 @@ export function SettingsView({
               </div>
             </Card>
 
-            <Card className="space-y-4" style={{ marginTop: 8 }}>
+            {/* 1.7.0 v7 — About card relocated from the Home page footer.
+                Home is now the single-block launcher; reference info +
+                support links live in Settings → General where they're
+                discoverable but out of the way. */}
+            <AboutCard />
+          </>
+        )}
+
+        {tab === 'customize' && (
+          <>
+            <Card className="space-y-4">
               <h3 className="text-base font-semibold text-text flex items-center gap-2">
                 <Key size={16} />
                 {t('settings.language.label')}
@@ -738,11 +749,6 @@ export function SettingsView({
                 <RowMenuCustomizer />
               </Card>
             </div>
-            {/* 1.7.0 v7 — About card relocated from the Home page footer.
-                Home is now the single-block launcher; reference info +
-                support links live in Settings → General where they're
-                discoverable but out of the way. */}
-            <AboutCard />
           </>
         )}
 

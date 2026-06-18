@@ -356,7 +356,7 @@ describe('useModLibrary', () => {
     expect(updateModCalls()).toHaveLength(1);
   });
 
-  it('handleInlineUpdate on a GitHub-linked mod calls update_mod and not openUrl', async () => {
+  it('handleInlineUpdate on a GitHub-linked mod calls update_mod, refreshes version options, and skips openUrl', async () => {
     const githubMod = makeMod({
       name: 'RelicsReminder',
       folder_name: 'RelicsReminder',
@@ -380,6 +380,7 @@ describe('useModLibrary', () => {
       nexus_url: null,
     }));
     const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+    const beforeReloadToken = result.current.versionOptionsReloadToken;
 
     await act(async () => {
       await result.current.tableActionProps.onUpdate(githubMod);
@@ -387,6 +388,9 @@ describe('useModLibrary', () => {
 
     await waitFor(() => expect(updateModCalls()).toHaveLength(1));
     expect(updateModCalls()[0].args?.name).toBe('RelicsReminder');
+    await waitFor(() => {
+      expect(result.current.versionOptionsReloadToken).not.toBe(beforeReloadToken);
+    });
     // Must NOT have opened any URL in the browser for the GitHub path.
     expect(openUrl).not.toHaveBeenCalled();
   });
@@ -497,7 +501,7 @@ describe('useModLibrary', () => {
     expect(onTargetPackChanged).not.toHaveBeenCalled();
   });
 
-  it('bulk GitHub updates download versions without changing the target pack manifest', async () => {
+  it('bulk GitHub updates download versions, refresh version options, and leave the target pack manifest alone', async () => {
     registerInvokeHandler('update_all_mods', () => [
       makeMod({
         name: 'PackMod',
@@ -522,6 +526,7 @@ describe('useModLibrary', () => {
       onTargetPackChanged,
     }), { wrapper: AllProviders });
     const user = userEvent.setup();
+    const beforeReloadToken = result.current.versionOptionsReloadToken;
 
     let updatePromise: Promise<unknown> | null = null;
     act(() => {
@@ -532,6 +537,9 @@ describe('useModLibrary', () => {
 
     expect(membershipCalls()).toHaveLength(0);
     expect(onTargetPackChanged).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(result.current.versionOptionsReloadToken).not.toBe(beforeReloadToken);
+    });
   });
 
   it('does not sync updated mods into a followed target pack', async () => {

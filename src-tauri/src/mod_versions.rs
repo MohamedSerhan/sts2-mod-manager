@@ -498,11 +498,20 @@ pub(crate) fn record_for_profile_mod_in_db(
     db: &ModVersionsDb,
 ) -> Option<ModVersionRecord> {
     let identity_key = key_for_profile_mod(pm);
-    pm.mod_version_id
+    if let Some(id) = pm
+        .mod_version_id
         .as_deref()
-        .and_then(|id| db.records.get(resolve_alias(&db, id)).cloned())
-        .filter(|record| record.identity_key == identity_key)
-        .or_else(|| record_by_identity(&db, &identity_key).cloned())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        let ambiguous_alias = db.conflicts.contains_key(id);
+        if let Some(record) = db.records.get(resolve_alias(&db, id)) {
+            if !ambiguous_alias || record.identity_key == identity_key {
+                return Some(record.clone());
+            }
+        }
+    }
+    record_by_identity(&db, &identity_key).cloned()
 }
 
 pub fn record_by_id(config_path: &Path, id: &str) -> Option<ModVersionRecord> {
@@ -1225,6 +1234,37 @@ mod tests {
         assert_eq!(
             record_for_profile_mod(&pm, dir.path()).map(|record| record.id),
             Some(second_id)
+        );
+    }
+
+    #[test]
+    fn concrete_profile_artifact_id_wins_when_saved_fields_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut old = mod_info("Test", "1.0.0", Some("abc"));
+        let old_id = ensure_mod_info_id(&mut old, dir.path()).unwrap();
+        let mut latest = mod_info("Test", "2.0.0", Some("def"));
+        let latest_id = ensure_mod_info_id(&mut latest, dir.path()).unwrap();
+        assert_ne!(old_id, latest_id);
+
+        let pm = ProfileMod {
+            mod_version_id: Some(old_id.clone()),
+            name: "Test".into(),
+            version: "2.0.0".into(),
+            source: Some("github:owner/repo".into()),
+            hash: Some("def".into()),
+            files: vec!["Mod/manifest.json".into()],
+            folder_name: Some("Mod".into()),
+            mod_id: Some("mod-id".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        };
+
+        assert_eq!(
+            record_for_profile_mod(&pm, dir.path()).map(|record| record.id),
+            Some(old_id),
+            "a saved concrete version id must stay pinned even if cached display fields drift"
         );
     }
 

@@ -310,6 +310,7 @@ describe('useModLibrary', () => {
     });
 
     expect(updateModCalls()).toHaveLength(0);
+    expect(openUrl).not.toHaveBeenCalled();
     expect(await screen.findByText(/Update failed for 'Local Only'.*has no GitHub source linked/i)).toBeInTheDocument();
   });
 
@@ -741,6 +742,24 @@ describe('useModLibrary — handleAutoDetectSource', () => {
 
     // Must never have triggered the scan.
     expect(autoDetectCalls()).toHaveLength(0);
+  });
+});
+
+describe('useModLibrary - handleOpenExternalUrl', () => {
+  it('opens row external links through the browser helper', async () => {
+    const nexusMod = makeModInfo({
+      name: 'Nexus Helper',
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/88',
+    });
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      result.current.tableActionProps.onOpenExternalUrl(nexusMod.nexus_url!, nexusMod);
+    });
+
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith('https://www.nexusmods.com/slaythespire2/mods/88');
+    });
   });
 });
 

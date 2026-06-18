@@ -212,15 +212,11 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     return mod.source ?? mod.github_url ?? mod.nexus_url ?? null;
   }
 
-  async function syncTargetPackUpdatedMods(updated: ModInfo[], scopedNames?: string[]) {
+  async function syncTargetPackUpdatedMods(updated: ModInfo[]) {
     if (!targetPack || updated.length === 0) return;
     if (await targetPackIsFollowed()) return;
-    const scoped = scopedNames
-      ? new Set(scopedNames.map((name) => name.toLocaleLowerCase()))
-      : null;
     let synced = false;
     for (const mod of updated) {
-      if (scoped && !scoped.has(mod.name.toLocaleLowerCase())) continue;
       await setProfileModMembership(
         targetPack,
         mod.name,

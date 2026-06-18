@@ -1542,6 +1542,86 @@ mod profile_membership_tests {
     }
 
     #[test]
+    fn membership_matrix_does_not_move_pinned_profile_to_newer_installed_artifact() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut old_info = ModInfo {
+            mod_version_id: None,
+            name: "Library Only".into(),
+            version: "1.2.3".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec!["LibraryOnly/LibraryOnly.dll".into()],
+            source: None,
+            hash: Some("old-hash".into()),
+            dependencies: Vec::new(),
+            size_bytes: 0,
+            github_url: None,
+            github_auto_detected: false,
+            nexus_url: None,
+            folder_name: Some("LibraryOnly".into()),
+            mod_id: Some("LibraryOnly".into()),
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            custom_url: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            bundle_members: vec![],
+        };
+        let old_id = crate::mod_versions::ensure_mod_info_id(&mut old_info, config_tmp.path())
+            .expect("old version should get an artifact id");
+
+        write_mod(&mods_path, "LibraryOnly", "Library Only", "2.0.0");
+        let mut profile = empty_profile("Stable");
+        profile.mods.push(ProfileMod {
+            mod_version_id: Some(old_id),
+            name: "Library Only".into(),
+            version: "1.2.3".into(),
+            source: None,
+            hash: Some("old-hash".into()),
+            files: vec!["LibraryOnly/LibraryOnly.dll".into()],
+            folder_name: Some("LibraryOnly".into()),
+            mod_id: Some("LibraryOnly".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+        });
+        save_profile(&profile, &profiles_path).unwrap();
+
+        let grid = profile_membership_matrix(
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .unwrap();
+
+        let row = grid
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("LibraryOnly"))
+            .unwrap();
+        assert_eq!(row.version, "2.0.0");
+        assert!(row
+            .profiles
+            .iter()
+            .any(|p| p.profile_name == "Stable" && !p.included));
+    }
+
+    #[test]
     fn set_profile_mod_membership_removes_matching_folder_only() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();

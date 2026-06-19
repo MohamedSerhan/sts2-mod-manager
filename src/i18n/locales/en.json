@@ -881,7 +881,19 @@
     "noMatch": "No lines match this filter.",
     "summary": "{{total}} lines (last 500) · {{shown}} shown",
     "supportIssueTitle": "Bug report",
-    "couldntOpenSupport": "Couldn't open support issue: {{error}}"
+    "couldntOpenSupport": "Couldn't open support issue: {{error}}",
+    "hardFailuresTitle_one": "Last STS2 launch reported 1 mod load error",
+    "hardFailuresTitle_other": "Last STS2 launch reported {{count}} mod load errors",
+    "hardFailuresBody": "These are usually outdated DLLs after a game update. Store them to stop the next launch from loading the failed copies.",
+    "hardFailuresList": "Detected: {{list}}{{more}}",
+    "hardFailuresMore": " +{{count}} more",
+    "storeFailedMods": "Store failed mods",
+    "storingFailedMods": "Storing…",
+    "storedFailedMods_one": "Stored 1 failed mod.",
+    "storedFailedMods_other": "Stored {{count}} failed mods.",
+    "storeFailedModsNone": "No failed active mods needed to be stored.",
+    "storeFailedModsPartial": "Some failed mods could not be stored: {{list}}",
+    "storeFailedModsFailed": "Couldn't store failed mods: {{error}}"
   },
   "sourceEditor": {
     "title": "Sources for {{name}}",

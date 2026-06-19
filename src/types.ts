@@ -189,6 +189,49 @@ export interface SetProfileModsEnabledResult {
   failed: string[];
 }
 
+export type LaunchFailureReason =
+  | 'reflection_type_load'
+  | 'missing_method'
+  | 'missing_dependency'
+  | 'assembly_init'
+  | 'critical_patch'
+  | 'load_failed';
+
+export interface LaunchFailureMod {
+  name: string;
+  display_name?: string | null;
+  version: string;
+  folder_name?: string | null;
+  mod_id?: string | null;
+  reasons: LaunchFailureReason[];
+}
+
+export interface LaunchDiagnostics {
+  log_path?: string | null;
+  game_version?: string | null;
+  failed_mods: LaunchFailureMod[];
+}
+
+export interface LaunchQuarantinedMod {
+  name: string;
+  folder_name?: string | null;
+  mod_id?: string | null;
+  destination?: string | null;
+}
+
+export interface LaunchQuarantineFailure {
+  name: string;
+  folder_name?: string | null;
+  error: string;
+}
+
+export interface LaunchQuarantineResult {
+  active_profile_id?: string | null;
+  moved: LaunchQuarantinedMod[];
+  disabled_profile_entries: LaunchQuarantinedMod[];
+  failed: LaunchQuarantineFailure[];
+}
+
 export interface RepairProfileResult extends SwitchProfileResult {
   /** Active mods that were not in the profile manifest and were moved to
    *  mods_disabled as part of repair. */

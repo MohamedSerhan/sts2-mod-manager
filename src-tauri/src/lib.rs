@@ -9,6 +9,7 @@ mod external_open;
 mod fs_safety;
 mod game;
 mod http;
+mod launch_diagnostics;
 // `mod_sources` and `mods` are pub so `tests/qa_scenarios.rs` can call
 // scan_mods / install_mod_from_zip / load_sources / lookup_entry the
 // same way Tauri commands do. Everything exposed here was already
@@ -342,6 +343,8 @@ pub fn run() {
             game::get_log_path,
             game::open_log_file,
             game::read_log_tail,
+            launch_diagnostics::get_launch_diagnostics,
+            launch_diagnostics::quarantine_launch_failures,
             game::is_game_running_cmd,
             external_open::open_external_url,
             // Mod management

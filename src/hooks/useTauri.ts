@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption } from '../types';
+import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption, LaunchDiagnostics, LaunchQuarantineResult } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -659,6 +659,16 @@ export async function openLogFile(): Promise<boolean> {
 /** Return the last N lines of the in-app log (newest at end). */
 export async function readLogTail(lines: number = 500): Promise<string> {
   return invoke('read_log_tail', { lines });
+}
+
+/** Parse the latest STS2 game log for hard mod-load failures. */
+export async function getLaunchDiagnostics(): Promise<LaunchDiagnostics> {
+  return invoke('get_launch_diagnostics');
+}
+
+/** Move hard-failing mods from the latest STS2 launch into storage. */
+export async function quarantineLaunchFailures(): Promise<LaunchQuarantineResult> {
+  return invoke('quarantine_launch_failures');
 }
 
 // ── Dev builds (dev-build-only Settings panel) ───────────────────────────────

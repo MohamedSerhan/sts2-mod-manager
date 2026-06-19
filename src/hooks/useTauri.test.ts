@@ -27,6 +27,7 @@ import {
   getApiKeyStatus,
   getGameInfo,
   getInstalledMods,
+  getLaunchDiagnostics,
   getLaunchMode,
   getLibraryVersionOptions,
   getLogPath,
@@ -51,6 +52,7 @@ import {
   openModsFolder,
   pinMod,
   quickAddMod,
+  quarantineLaunchFailures,
   readLogTail,
   removeModSource,
   repairMod,
@@ -559,6 +561,10 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     expect(lastCall()).toEqual({ cmd: 'read_log_tail', args: { lines: 500 } });
     await readLogTail(200);
     expect(lastCall()).toEqual({ cmd: 'read_log_tail', args: { lines: 200 } });
+    await getLaunchDiagnostics();
+    expect(lastCall()).toEqual({ cmd: 'get_launch_diagnostics', args: undefined });
+    await quarantineLaunchFailures();
+    expect(lastCall()).toEqual({ cmd: 'quarantine_launch_failures', args: undefined });
   });
 
   it('returns whatever the backend handler returns (passthrough)', async () => {

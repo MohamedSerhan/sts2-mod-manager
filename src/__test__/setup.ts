@@ -197,6 +197,11 @@ function registerSafeDefaults(): void {
   invokeHandlers.set('nexus_get_latest_added', () => []);
   invokeHandlers.set('get_log_path', () => '');
   invokeHandlers.set('read_log_tail', () => '');
+  invokeHandlers.set('get_launch_diagnostics', () => ({
+    log_path: null,
+    game_version: null,
+    failed_mods: [],
+  }));
   invokeHandlers.set('open_external_url', async (args) => {
     const { openUrl } = await import('@tauri-apps/plugin-opener');
     await openUrl(String(args?.url ?? ''));

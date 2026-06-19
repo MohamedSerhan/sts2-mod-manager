@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Copy, Folder, Upload, RefreshCw } from 'lucide-react';
-import { readLogTail, openLogFile, openExternalUrl } from '../hooks/useTauri';
+import { Copy, Folder, Upload, RefreshCw, ShieldAlert } from 'lucide-react';
+import { readLogTail, openLogFile, openExternalUrl, getLaunchDiagnostics, quarantineLaunchFailures } from '../hooks/useTauri';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '../contexts/ToastContext';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
 import { useOpenFeedback } from '../hooks/useOpenFeedback';
+import type { LaunchDiagnostics } from '../types';
 
 // v5 batch 4 — in-app logs viewer (Settings → Advanced).
 // Tails the last 500 lines of sts2mm.log, parses common levels, and
@@ -54,15 +55,24 @@ export function LogsViewer({ onClose }: Props) {
   const toast = useToast();
   const openFeedback = useOpenFeedback();
   const [raw, setRaw] = useState<string>('');
+  const [launchDiagnostics, setLaunchDiagnostics] = useState<LaunchDiagnostics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [storingFailed, setStoringFailed] = useState(false);
   const [filter, setFilter] = useState<'all' | Level>('all');
   const [query, setQuery] = useState('');
 
   async function reload() {
     setLoading(true);
     try {
-      const text = await readLogTail(500);
+      const [text, diagnostics] = await Promise.all([
+        readLogTail(500),
+        getLaunchDiagnostics().catch((e) => {
+          console.warn('Failed to read STS2 launch diagnostics', e);
+          return null;
+        }),
+      ]);
       setRaw(text);
+      setLaunchDiagnostics(diagnostics);
     } catch (e) {
       toast.error(t('logsViewer.failedToRead', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
@@ -124,6 +134,27 @@ export function LogsViewer({ onClose }: Props) {
     }
   }
 
+  async function storeFailedMods() {
+    setStoringFailed(true);
+    try {
+      const result = await quarantineLaunchFailures();
+      if (result.moved.length > 0) {
+        toast.success(t('logsViewer.storedFailedMods', { count: result.moved.length }));
+      } else {
+        toast.info(t('logsViewer.storeFailedModsNone'));
+      }
+      if (result.failed.length > 0) {
+        const list = result.failed.map((item) => item.name).slice(0, 5).join(', ');
+        toast.error(t('logsViewer.storeFailedModsPartial', { list }));
+      }
+      await reload();
+    } catch (e) {
+      toast.error(t('logsViewer.storeFailedModsFailed', { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setStoringFailed(false);
+    }
+  }
+
   const Chip = ({ id, label }: { id: 'all' | Level; label: string }) => (
     <button
       className={`gf-chip-filter ${filter === id ? 'on' : ''}`}
@@ -134,6 +165,15 @@ export function LogsViewer({ onClose }: Props) {
       {id === 'all' && <span style={{ opacity: 0.8 }}>{counts.all}</span>}
     </button>
   );
+
+  const failedLaunchMods = launchDiagnostics?.failed_mods ?? [];
+  const failedPreview = failedLaunchMods
+    .slice(0, 6)
+    .map((mod) => mod.display_name || mod.name)
+    .join(', ');
+  const failedMore = failedLaunchMods.length > 6
+    ? t('logsViewer.hardFailuresMore', { count: failedLaunchMods.length - 6 })
+    : '';
 
   return (
     <div className="gf-logs" style={{ height: 540 }}>
@@ -170,6 +210,25 @@ export function LogsViewer({ onClose }: Props) {
           <button className="gf-btn-3 gf-btn-2-sm" onClick={onClose}>{t('common.close')}</button>
         )}
       </div>
+      {failedLaunchMods.length > 0 && (
+        <div className="gf-launch-diagnostics" role="status">
+          <ShieldAlert size={18} />
+          <div className="gf-launch-diagnostics-main">
+            <div className="gf-launch-diagnostics-title">
+              {t('logsViewer.hardFailuresTitle', { count: failedLaunchMods.length })}
+            </div>
+            <div className="gf-launch-diagnostics-copy">
+              {t('logsViewer.hardFailuresBody')}
+            </div>
+            <div className="gf-launch-diagnostics-list">
+              {t('logsViewer.hardFailuresList', { list: failedPreview, more: failedMore })}
+            </div>
+          </div>
+          <button className="gf-btn-2 gf-btn-2-sm" onClick={storeFailedMods} disabled={storingFailed}>
+            {storingFailed ? t('logsViewer.storingFailedMods') : t('logsViewer.storeFailedMods')}
+          </button>
+        </div>
+      )}
       <div className="gf-logs-body">
         {loading ? (
           <div style={{ color: 'var(--ink-mute)' }}>{t('common.loading')}</div>

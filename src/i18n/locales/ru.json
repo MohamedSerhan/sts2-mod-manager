@@ -882,7 +882,19 @@
     "noMatch": "Нет строк, подходящих под этот фильтр.",
     "summary": "{{total}} строк (последние 500) · показано {{shown}}",
     "supportIssueTitle": "Отчёт об ошибке",
-    "couldntOpenSupport": "Не удалось открыть обращение в поддержку: {{error}}"
+    "couldntOpenSupport": "Не удалось открыть обращение в поддержку: {{error}}",
+    "hardFailuresTitle_one": "Последний запуск STS2 сообщил об 1 ошибке загрузки мода",
+    "hardFailuresTitle_other": "Последний запуск STS2 сообщил о {{count}} ошибках загрузки модов",
+    "hardFailuresBody": "Обычно это устаревшие DLL после обновления игры. Сохраните их в хранилище, чтобы следующий запуск не загружал сломанные копии.",
+    "hardFailuresList": "Обнаружено: {{list}}{{more}}",
+    "hardFailuresMore": ", ещё {{count}}",
+    "storeFailedMods": "Сохранить сломанные моды",
+    "storingFailedMods": "Сохранение…",
+    "storedFailedMods_one": "Сохранён 1 сломанный мод.",
+    "storedFailedMods_other": "Сохранено {{count}} сломанных модов.",
+    "storeFailedModsNone": "Нет активных сломанных модов, которые нужно сохранить.",
+    "storeFailedModsPartial": "Некоторые сломанные моды не удалось сохранить: {{list}}",
+    "storeFailedModsFailed": "Не удалось сохранить сломанные моды: {{error}}"
   },
   "sourceEditor": {
     "title": "Источники для {{name}}",

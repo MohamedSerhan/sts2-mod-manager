@@ -882,7 +882,19 @@
     "noMatch": "لا توجد أسطر تطابق هذه التصفية.",
     "summary": "{{total}} سطر (آخر 500) · {{shown}} معروضة",
     "supportIssueTitle": "تقرير خطأ",
-    "couldntOpenSupport": "تعذّر فتح طلب الدعم: {{error}}"
+    "couldntOpenSupport": "تعذّر فتح طلب الدعم: {{error}}",
+    "hardFailuresTitle_one": "أبلغ آخر تشغيل لـ STS2 عن خطأ واحد في تحميل التعديلات",
+    "hardFailuresTitle_other": "أبلغ آخر تشغيل لـ STS2 عن {{count}} أخطاء في تحميل التعديلات",
+    "hardFailuresBody": "يحدث هذا عادة بسبب ملفات DLL قديمة بعد تحديث اللعبة. احفظها في التخزين حتى لا يحمّل التشغيل التالي النسخ المعطلة.",
+    "hardFailuresList": "تم اكتشاف: {{list}}{{more}}",
+    "hardFailuresMore": "، و{{count}} إضافية",
+    "storeFailedMods": "حفظ التعديلات المعطلة",
+    "storingFailedMods": "جارٍ الحفظ…",
+    "storedFailedMods_one": "تم حفظ تعديل معطل واحد.",
+    "storedFailedMods_other": "تم حفظ {{count}} تعديلات معطلة.",
+    "storeFailedModsNone": "لا توجد تعديلات نشطة معطلة تحتاج إلى الحفظ.",
+    "storeFailedModsPartial": "تعذّر حفظ بعض التعديلات المعطلة: {{list}}",
+    "storeFailedModsFailed": "تعذّر حفظ التعديلات المعطلة: {{error}}"
   },
   "sourceEditor": {
     "title": "مصادر {{name}}",

@@ -32,8 +32,8 @@ use super::apply::disk_mod_matches_pin;
 use super::crud::{
     hide_app_created_by, installed_mod_matches_target, list_profiles, load_profile, mod_key,
     profile_has_json, profile_is_edit_locked, profile_mod_from_installed,
-    profile_mod_matches_installed_with_registry, profile_mod_matches_installed_with_version_db,
-    profile_mod_matches_target, save_profile,
+    profile_mod_matches_installed, profile_mod_matches_installed_with_registry,
+    profile_mod_matches_installed_with_version_db, profile_mod_matches_target, save_profile,
 };
 use super::{
     LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod,
@@ -255,24 +255,20 @@ pub(crate) fn select_profile_mod_version_from_paths(
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
     crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
 
-    let index = profile
-        .mods
-        .iter()
-        .position(|pm| {
-            profile_mod_matches_target(
-                pm,
-                current_name,
-                current_mod_version_id,
-                current_folder_name,
-                current_mod_id,
-            )
-        })
-        .ok_or_else(|| {
-            AppError::ModNotFound(format!(
-                "Profile '{}' does not contain '{}'. Refresh the modpack and try again.",
-                profile_name, current_name
-            ))
-        })?;
+    let index = find_profile_mod_for_version_switch(
+        &profile,
+        &installed_mods,
+        current_name,
+        current_mod_version_id,
+        current_folder_name,
+        current_mod_id,
+    )
+    .ok_or_else(|| {
+        AppError::ModNotFound(format!(
+            "Profile '{}' does not contain '{}'. Refresh the modpack and try again.",
+            profile_name, current_name
+        ))
+    })?;
 
     let enabled = profile.mods[index].enabled;
     let selected_installed = installed_mods.iter().find(|m| {
@@ -347,6 +343,140 @@ pub(crate) fn select_profile_mod_version_from_paths(
             .collect::<Vec<_>>(),
     );
     Ok(hide_app_created_by(profile))
+}
+
+fn find_profile_mod_for_version_switch(
+    profile: &Profile,
+    installed_mods: &[ModInfo],
+    current_name: &str,
+    current_mod_version_id: Option<&str>,
+    current_folder_name: Option<&str>,
+    current_mod_id: Option<&str>,
+) -> Option<usize> {
+    if let Some(index) = profile.mods.iter().position(|pm| {
+        profile_mod_matches_target(
+            pm,
+            current_name,
+            current_mod_version_id,
+            current_folder_name,
+            current_mod_id,
+        )
+    }) {
+        return Some(index);
+    }
+
+    unique_profile_mod_index(profile.mods.iter().enumerate().filter_map(|(index, pm)| {
+        if profile_mod_matches_stable_target(pm, current_name, current_folder_name, current_mod_id)
+        {
+            Some(index)
+        } else {
+            None
+        }
+    }))
+    .or_else(|| {
+        let current_installed = installed_mods
+            .iter()
+            .find(|m| {
+                installed_mod_matches_target(
+                    m,
+                    current_name,
+                    current_mod_version_id,
+                    current_folder_name,
+                    current_mod_id,
+                )
+            })
+            .or_else(|| {
+                installed_mods.iter().find(|m| {
+                    installed_mod_matches_stable_target(
+                        m,
+                        current_name,
+                        current_folder_name,
+                        current_mod_id,
+                    )
+                })
+            })?;
+
+        unique_profile_mod_index(profile.mods.iter().enumerate().filter_map(|(index, pm)| {
+            if profile_mod_matches_installed(pm, current_installed) {
+                Some(index)
+            } else {
+                None
+            }
+        }))
+    })
+}
+
+fn profile_mod_matches_stable_target(
+    pm: &ProfileMod,
+    name: &str,
+    folder_name: Option<&str>,
+    mod_id: Option<&str>,
+) -> bool {
+    let folder_matches = folder_name
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_some_and(|folder| {
+            pm.folder_name
+                .as_deref()
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(folder))
+        });
+    let id_matches = mod_id
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_some_and(|id| {
+            pm.mod_id
+                .as_deref()
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(id))
+        });
+    if folder_name.is_some() || mod_id.is_some() {
+        folder_matches || id_matches
+    } else {
+        pm.name.eq_ignore_ascii_case(name)
+    }
+}
+
+fn installed_mod_matches_stable_target(
+    installed: &ModInfo,
+    name: &str,
+    folder_name: Option<&str>,
+    mod_id: Option<&str>,
+) -> bool {
+    let folder_matches = folder_name
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_some_and(|folder| {
+            installed
+                .folder_name
+                .as_deref()
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(folder))
+        });
+    let id_matches = mod_id
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_some_and(|id| {
+            installed
+                .mod_id
+                .as_deref()
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(id))
+        });
+    if folder_name.is_some() || mod_id.is_some() {
+        folder_matches || id_matches
+    } else {
+        installed.name.eq_ignore_ascii_case(name)
+    }
+}
+
+fn unique_profile_mod_index<I>(indexes: I) -> Option<usize>
+where
+    I: IntoIterator<Item = usize>,
+{
+    let mut indexes = indexes.into_iter();
+    let first = indexes.next()?;
+    if indexes.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
 }
 
 pub(crate) fn select_library_mod_version_from_paths(
@@ -1108,13 +1238,15 @@ mod profile_membership_tests {
     use super::*;
 
     fn write_mod(root: &Path, folder: &str, display: &str, version: &str) {
+        write_mod_with_id(root, folder, folder, display, version);
+    }
+
+    fn write_mod_with_id(root: &Path, folder: &str, id: &str, display: &str, version: &str) {
         let dir = root.join(folder);
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join(format!("{folder}.json")),
-            format!(
-                r#"{{"id":"{folder}","name":"{display}","version":"{version}","author":"QA"}}"#
-            ),
+            format!(r#"{{"id":"{id}","name":"{display}","version":"{version}","author":"QA"}}"#),
         )
         .unwrap();
         fs::write(dir.join(format!("{folder}.dll")), b"dll").unwrap();
@@ -1600,6 +1732,94 @@ mod profile_membership_tests {
         assert_eq!(updated.mods[0].version, "2.0.0");
         let saved = load_profile("Stable", &profiles_path).unwrap();
         assert_eq!(saved.mods[0].version, "2.0.0");
+    }
+
+    #[test]
+    fn select_profile_mod_version_recovers_stale_profile_artifact_id_by_runtime_id() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod_with_id(
+            &mods_path,
+            "STS2-RitsuLib",
+            "STS2-RitsuLib",
+            "RitsuLib (STS2 0.103.2 compat)",
+            "dev-build",
+        );
+        write_mod_with_id(
+            &disabled_path,
+            "STS2-RitsuLib-v0.4.24",
+            "STS2-RitsuLib",
+            "RitsuLib",
+            "0.4.24",
+        );
+
+        let mut installed =
+            merge_active_disabled_mods(scan_mods(&mods_path), scan_disabled_mods(&disabled_path));
+        crate::mod_versions::enrich_mods_with_versions(&mut installed, config_tmp.path());
+        let current = installed
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("STS2-RitsuLib"))
+            .expect("active RitsuLib row should scan")
+            .clone();
+        let selected = installed
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("STS2-RitsuLib-v0.4.24"))
+            .expect("stored RitsuLib row should scan")
+            .clone();
+
+        let mut profile = empty_profile("TesterW");
+        profile.mods.push(ProfileMod {
+            mod_version_id: Some("stale-ritsulib-artifact-id".into()),
+            name: "RitsuLib".into(),
+            version: "0.4.23".into(),
+            source: None,
+            hash: None,
+            files: vec!["20260618-210749/STS2-RitsuLib.dll".into()],
+            folder_name: Some("20260618-210749".into()),
+            mod_id: Some("STS2-RitsuLib".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        });
+        save_profile(&profile, &profiles_path).unwrap();
+
+        let updated = select_profile_mod_version_from_paths(
+            "TesterW",
+            &current.name,
+            current.mod_version_id.as_deref(),
+            current.folder_name.as_deref(),
+            current.mod_id.as_deref(),
+            &selected.name,
+            selected.mod_version_id.as_deref(),
+            selected.folder_name.as_deref(),
+            selected.mod_id.as_deref(),
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(updated.mods.len(), 1);
+        assert_eq!(updated.mods[0].name, "RitsuLib");
+        assert_eq!(updated.mods[0].version, "0.4.24");
+        assert_eq!(
+            updated.mods[0].folder_name.as_deref(),
+            Some("STS2-RitsuLib-v0.4.24")
+        );
+        assert!(updated.mods[0].enabled);
     }
 
     #[test]

@@ -593,7 +593,7 @@ pub fn restore_mod_from_cache(
 pub fn get_installed_mods(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModInfo>, String> {
-    let (mods_path, disabled_mods_path, config_path, profiles_path, active_profile) = {
+    let (mods_path, disabled_mods_path, config_path, profiles_path, active_profile, game_version) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         (
             s.mods_path.clone(),
@@ -601,6 +601,7 @@ pub fn get_installed_mods(
             s.config_path.clone(),
             s.profiles_path.clone(),
             s.active_profile.clone(),
+            s.game_version.clone(),
         )
     };
 
@@ -625,6 +626,48 @@ pub fn get_installed_mods(
                 Ok(_) => {}
                 Err(err) => log::warn!(
                     "Library refresh could not repair active runtime-ID duplicates: {}",
+                    err
+                ),
+            }
+            match crate::launch_diagnostics::auto_quarantine_launch_failures(
+                mods_path,
+                disabled_path,
+                &profiles_path,
+                &config_path,
+                active_profile.clone(),
+                game_version.clone(),
+            ) {
+                Ok(result) => {
+                    if !result.moved.is_empty() || !result.disabled_profile_entries.is_empty() {
+                        let moved = result
+                            .moved
+                            .iter()
+                            .map(|item| item.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        log::warn!(
+                            "Library refresh stored {} launch-failed active mod(s) and disabled {} active-profile entries: {}",
+                            result.moved.len(),
+                            result.disabled_profile_entries.len(),
+                            moved
+                        );
+                    }
+                    if !result.failed.is_empty() {
+                        let failed = result
+                            .failed
+                            .iter()
+                            .map(|item| format!("{} ({})", item.name, item.error))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        log::warn!(
+                            "Library refresh could not store {} launch-failed active mod(s): {}",
+                            result.failed.len(),
+                            failed
+                        );
+                    }
+                }
+                Err(err) => log::warn!(
+                    "Library refresh could not auto-store launch-failed mods: {}",
                     err
                 ),
             }

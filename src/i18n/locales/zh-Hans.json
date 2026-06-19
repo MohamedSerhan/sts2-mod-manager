@@ -882,7 +882,19 @@
     "noMatch": "没有匹配此过滤条件的行。",
     "summary": "{{total}} 行（最近 500 行） · 显示 {{shown}} 行",
     "supportIssueTitle": "错误报告",
-    "couldntOpenSupport": "无法打开支持 issue：{{error}}"
+    "couldntOpenSupport": "无法打开支持 issue：{{error}}",
+    "hardFailuresTitle_one": "上次 STS2 启动报告了 1 个 Mod 加载错误",
+    "hardFailuresTitle_other": "上次 STS2 启动报告了 {{count}} 个 Mod 加载错误",
+    "hardFailuresBody": "这通常是游戏更新后旧 DLL 失效导致的。存放这些 Mod，避免下次启动继续加载失败的副本。",
+    "hardFailuresList": "检测到：{{list}}{{more}}",
+    "hardFailuresMore": "，另有 {{count}} 个",
+    "storeFailedMods": "存放加载失败的 Mod",
+    "storingFailedMods": "存放中…",
+    "storedFailedMods_one": "已存放 1 个失败 Mod。",
+    "storedFailedMods_other": "已存放 {{count}} 个失败 Mod。",
+    "storeFailedModsNone": "没有需要存放的活动失败 Mod。",
+    "storeFailedModsPartial": "部分失败 Mod 无法存放：{{list}}",
+    "storeFailedModsFailed": "无法存放失败 Mod：{{error}}"
   },
   "sourceEditor": {
     "title": "{{name}} 的来源",

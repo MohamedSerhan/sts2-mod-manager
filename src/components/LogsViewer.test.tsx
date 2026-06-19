@@ -89,6 +89,49 @@ describe('<LogsViewer>', () => {
     expect(screen.getByText(/Cache hit qa-fixture/)).toBeInTheDocument();
   });
 
+  it('shows game-launch failures from the STS2 log and stores them on request', async () => {
+    registerInvokeHandler('read_log_tail', () => SAMPLE_LOG);
+    registerInvokeHandler('get_launch_diagnostics', () => ({
+      log_path: 'C:/Users/me/AppData/Roaming/SlayTheSpire2/logs/godot.log',
+      game_version: '0.107.1',
+      failed_mods: [{
+        name: 'Miyu_character',
+        version: '1.0.0',
+        folder_name: 'Miyu_character',
+        mod_id: 'Miyu_character',
+        reasons: ['reflection_type_load'],
+      }],
+    }));
+    registerInvokeHandler('quarantine_launch_failures', () => ({
+      active_profile_id: 'pack-1',
+      moved: [{
+        name: 'Miyu_character',
+        folder_name: 'Miyu_character',
+        mod_id: 'Miyu_character',
+        destination: 'C:/Games/STS2/mods_disabled/Miyu_character',
+      }],
+      disabled_profile_entries: [{
+        name: 'Miyu_character',
+        folder_name: 'Miyu_character',
+        mod_id: 'Miyu_character',
+        destination: null,
+      }],
+      failed: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    expect(await screen.findByText(/Last STS2 launch reported 1 mod load error/i)).toBeInTheDocument();
+    expect(screen.getByText(/Detected: Miyu_character/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Store failed mods/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'quarantine_launch_failures')).toBe(true);
+    });
+    expect(await screen.findByText(/Stored 1 failed mod/i)).toBeInTheDocument();
+  });
+
   it('Error filter chip narrows visible lines to ERROR only', async () => {
     registerInvokeHandler('read_log_tail', () => SAMPLE_LOG);
     const user = userEvent.setup();

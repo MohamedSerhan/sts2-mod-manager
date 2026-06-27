@@ -252,3 +252,48 @@ describe('snooze', () => {
     expect(countGithubUpdates([row])).toBe(1);
   });
 });
+
+describe('key fallbacks and source-specific actionability', () => {
+  it('falls back to the bare mod name when an entry exposes no identity keys', () => {
+    expect(auditEntryKey(entry({ mod_version_id: null, folder_name: null, mod_name: '' }))).toBe('');
+  });
+
+  it('falls back to an empty key when a refresh target exposes no identity', () => {
+    expect(auditTargetKey({ mod_version_id: null, folder_name: null, mod_id: null, name: '' })).toBe('');
+  });
+
+  it('actions a GitHub mod off its compatible tag before the assets tag', () => {
+    expect(
+      isActionableUpdate(entry({
+        needs_update: true,
+        update_source: 'github',
+        latest_compatible_tag: 'v9',
+        latest_release_with_assets_tag: null,
+      })),
+    ).toBe(true);
+  });
+
+  it('actions a default-source mod off its release-with-assets tag alone', () => {
+    expect(
+      isActionableUpdate(entry({
+        needs_update: true,
+        update_source: null,
+        nexus_update_available: false,
+        latest_compatible_tag: null,
+        latest_release_with_assets_tag: 'v9',
+      })),
+    ).toBe(true);
+  });
+
+  it('does not action a default-source mod with no usable target', () => {
+    expect(
+      isActionableUpdate(entry({
+        needs_update: true,
+        update_source: null,
+        nexus_update_available: false,
+        latest_compatible_tag: null,
+        latest_release_with_assets_tag: null,
+      })),
+    ).toBe(false);
+  });
+});

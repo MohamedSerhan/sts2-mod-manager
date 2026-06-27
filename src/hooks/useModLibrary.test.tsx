@@ -651,6 +651,49 @@ describe('useModLibrary', () => {
     expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
   });
 
+  it('repair sync carries the version and source identity hints when the refreshed mod has them', async () => {
+    const githubMod = makeMod({
+      name: 'PackMod',
+      folder_name: 'PackMod',
+      github_url: 'https://github.com/some/pack-mod',
+      nexus_url: null,
+    });
+    // The refreshed mod exposes every identity field, so the `?? null`
+    // hint chains take their left (present) arms rather than the fallback.
+    registerInvokeHandler('repair_mod', () => makeMod({
+      name: 'PackMod',
+      version: '2.0.0',
+      folder_name: 'PackMod',
+      mod_id: 'pack-mod',
+      mod_version_id: 'pack-mod@2.0.0',
+      source: 'github:some/pack-mod',
+      github_url: 'https://github.com/some/pack-mod',
+    }));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const onTargetPackChanged = vi.fn();
+    const { result } = renderHook(() => useModLibrary({
+      targetPack: 'profile-123',
+      onTargetPackChanged,
+    }), { wrapper: AllProviders });
+    const user = userEvent.setup();
+
+    let repairPromise: Promise<void> | null = null;
+    act(() => {
+      repairPromise = result.current.tableActionProps.onRepair(githubMod);
+    });
+    await user.click(await screen.findByRole('button', { name: /^Repair now$/i }));
+    await repairPromise;
+
+    expect(membershipCalls()).toHaveLength(1);
+    expect(membershipCalls()[0].args).toMatchObject({
+      profileId: 'profile-123',
+      modName: 'PackMod',
+      modId: 'pack-mod',
+      included: true,
+    });
+    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+  });
+
   it('delete removes the mod from a targeted modpack manifest after deleting from disk', async () => {
     const githubMod = makeMod({
       name: 'PackMod',
@@ -679,6 +722,41 @@ describe('useModLibrary', () => {
       profileId: 'profile-123',
       modName: 'PackMod',
       folderName: 'PackMod',
+      included: false,
+    });
+    expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('delete sync carries the version and source identity hints when the removed mod has them', async () => {
+    const richMod = makeMod({
+      name: 'PackMod',
+      folder_name: 'PackMod',
+      mod_id: 'pack-mod',
+      mod_version_id: 'pack-mod@1.0.0',
+      source: 'github:some/pack-mod',
+      github_url: 'https://github.com/some/pack-mod',
+    });
+    registerInvokeHandler('delete_mod_cmd', () => ({}));
+    registerInvokeHandler('set_profile_mod_membership', () => ({}));
+    const onTargetPackChanged = vi.fn();
+    const { result } = renderHook(() => useModLibrary({
+      targetPack: 'profile-123',
+      onTargetPackChanged,
+    }), { wrapper: AllProviders });
+    const user = userEvent.setup();
+
+    let deletePromise: Promise<void> | null = null;
+    act(() => {
+      deletePromise = result.current.tableActionProps.onDelete(richMod);
+    });
+    await user.click(await screen.findByRole('button', { name: /^Delete$/i }));
+    await deletePromise;
+
+    expect(membershipCalls()).toHaveLength(1);
+    expect(membershipCalls()[0].args).toMatchObject({
+      profileId: 'profile-123',
+      modName: 'PackMod',
+      modId: 'pack-mod',
       included: false,
     });
     expect(onTargetPackChanged).toHaveBeenCalledTimes(1);

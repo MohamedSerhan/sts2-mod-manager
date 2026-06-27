@@ -33,6 +33,19 @@ describe('profileDisplay helpers', () => {
     expect(profileDisplayNameForIdentifier(profiles, UUID, 'Unknown')).toBe('TesterW');
   });
 
+  it('resolves a profile by case-insensitive name', () => {
+    const profiles = [
+      { id: UUID, name: 'TesterW', mods: [], created_at: '2026-01-01' },
+    ] as Profile[];
+
+    expect(findProfileForIdentifier(profiles, 'testerw')?.id).toBe(UUID);
+  });
+
+  it('falls back to the cleaned identifier when no profile matches', () => {
+    expect(profileDisplayNameForIdentifier([], 'Imported Pack', 'Unknown')).toBe('Imported Pack');
+    expect(profileDisplayNameForIdentifier([], UUID, 'Unknown')).toBe('Unknown');
+  });
+
   it('redacts UUIDs embedded in toast or error text', () => {
     expect(redactProfileUuids(`Repair failed for ${UUID}`, 'Unknown')).toBe('Repair failed for Unknown');
   });

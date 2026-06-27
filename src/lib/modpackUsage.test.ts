@@ -105,6 +105,15 @@ describe('modpackUsage', () => {
     expect(getModpackUsage()).toEqual({ Kept: 2 });
   });
 
+  it('ignores an object subject with no usable id or name', () => {
+    recordModpackLaunch({ id: null, name: '' });
+    expect(getModpackUsage()).toEqual({});
+  });
+
+  it('reads zero for an object subject with no usable keys', () => {
+    expect(getModpackLastLaunch({ id: '', name: '' })).toBe(0);
+  });
+
   it('corrupt storage degrades to empty history instead of throwing', () => {
     localStorage.setItem(STORAGE_KEY, 'not json {{{');
     expect(getModpackUsage()).toEqual({});

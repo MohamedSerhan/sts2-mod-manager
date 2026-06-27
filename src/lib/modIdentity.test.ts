@@ -57,4 +57,17 @@ describe('mod identity helpers', () => {
       ),
     ).toBe(true);
   });
+
+  it('ignores whitespace-only identity values', () => {
+    expect(identityKeys({ folder_name: '   ', mod_id: null, name: 'Display' })).toEqual(['display']);
+  });
+
+  it('matches immediately when both sides share a mod_version_id', () => {
+    expect(
+      identitiesMatch(
+        { mod_version_id: 'artifact-1', folder_name: 'folder-a', mod_id: null, name: 'A' },
+        { mod_version_id: 'artifact-1', folder_name: 'folder-b', mod_id: null, name: 'B' },
+      ),
+    ).toBe(true);
+  });
 });

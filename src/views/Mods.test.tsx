@@ -247,6 +247,33 @@ describe('<ModsView>', () => {
     expect(order[order.length - 1]).toBe('NoTag');
   });
 
+  it('the Tag picker de-dupes case-insensitively and ignores blank or absent tag lists', async () => {
+    seedMods([
+      // Duplicate ('Combat'/'combat') collapses to one option; blank entries
+      // are skipped entirely.
+      baseMod({ name: 'Fighter', folder_name: 'Fighter', tags: ['Combat', 'combat', '  ', ''] }),
+      baseMod({ name: 'Painter', folder_name: 'Painter', tags: ['Visual'] }),
+      // A mod with no tags array at all exercises the `?? []` fallback.
+      baseMod({ name: 'Legacy', folder_name: 'Legacy', tags: undefined }),
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await screen.findByText('Fighter');
+
+    // chooseOption would throw on an ambiguous (duplicated) option, so a clean
+    // selection proves the de-dupe collapsed 'Combat'/'combat' into one entry.
+    await chooseOption(user, /Tag/i, 'Combat');
+
+    expect(screen.getByText('Fighter')).toBeInTheDocument();
+    expect(screen.getByText('Painter')).toBeInTheDocument();
+    expect(screen.getByText('Legacy')).toBeInTheDocument();
+    const order = screen
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent)
+      .filter((tt) => ['Fighter', 'Painter', 'Legacy'].includes(tt ?? ''));
+    expect(order[0]).toBe('Fighter');
+  });
+
   it('Tag picker has a No tags option that shows only untagged mods', async () => {
     seedMods([
       baseMod({ name: 'BaseLib', folder_name: 'BaseLib', tags: ['utility'] }),

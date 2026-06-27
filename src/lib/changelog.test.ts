@@ -172,6 +172,11 @@ describe('getTranslatedBody', () => {
     expect(getTranslatedBody('9.9.9', 'zh-Hant', MAPS)).toBe('### 新增\n- 已翻译'); // zh-Hant falls back to zh-Hans bundle
   });
 
+  it('resolves Arabic locales (including region subtags) to the ar bundle', () => {
+    expect(getTranslatedBody('9.9.9', 'ar', MAPS)).toBe('### تمت الإضافة\n- مترجم');
+    expect(getTranslatedBody('9.9.9', 'ar-EG', MAPS)).toBe('### تمت الإضافة\n- مترجم');
+  });
+
   it('returns null for English, unknown locale, or missing version', () => {
     expect(getTranslatedBody('9.9.9', 'en', MAPS)).toBeNull();
     expect(getTranslatedBody('9.9.9', 'en-US', MAPS)).toBeNull();

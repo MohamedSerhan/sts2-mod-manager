@@ -37,6 +37,32 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.8.2] - 2026-06-27
+
+### Added
+
+- Modpacks now have an optional visual sort mode for inspecting their mods by name, updates, active/stored state, or tag without changing load order.
+
+### Fixed
+
+- Fixed an issue where mods that fail after a game update could keep breaking launch instead of being stored safely.
+- Launch now stores mods with missing active dependencies before starting, so broken packs can recover without another failed game load.
+- Launch health no longer stores framework mods that report internal patch failures after they still finish initializing.
+- Launch now warns when your active modpack may break after a Slay the Spire 2 update and lets you store failed mods before starting the game.
+- The Add from Mod Library drawer now shows one entry per installed mod instead of duplicate saved versions.
+- Modpack activation now stops and shows an error if an enabled mod is still missing instead of quietly marking the pack active.
+- Modpacks now show each missing saved mod once and keep missing saved mods searchable in the modpack list.
+- Saved published modpacks no longer reappear as empty ID-only entries after a startup hiccup.
+- Removing a mod from a modpack now keeps it out of that pack while leaving the installed copy available in the Mod Library.
+- Modpack Repair now restores missing mods from the pack's last published copy instead of leaving them as failed downloads.
+- Re-sharing modpacks now reports duplicate missing or upload failures for the same saved mod once so retry and repair choices stay accurate.
+- Re-sharing a modpack now keeps previously shared files for missing local mods when safe and shows repair choices when upload errors happen too.
+- Sharing a modpack now cleans duplicate entries for the same saved mod version so repeated shares do not fail on GitHub.
+- Modpack messages and labels now show the modpack name instead of an internal ID.
+- Fixed an issue where broken active or modpack-attached versions could stay stuck in the Versions menu.
+- Downloaded mod updates now switch the Library to the new version while saved modpacks keep their chosen versions.
+- Fixed an issue where the version menu could say a profile was missing a mod after an update, blocking stored versions from being selected.
+
 ## [1.8.1] - 2026-06-18
 
 ### Fixed

@@ -13,7 +13,13 @@
  * sections, and the wiring.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ModpackDetail } from './ModpackDetail';
@@ -32,44 +38,42 @@ function Wrap(props: React.ComponentProps<typeof ModpackDetail>) {
   );
 }
 
-const profileMod = (overrides: Partial<ProfileMod> = {}): ProfileMod =>
-  ({
-    name: 'PackMod',
-    version: '1.0',
-    source: null,
-    hash: null,
-    files: [],
-    enabled: true,
-    bundle_url: null,
-    folder_name: 'PackMod',
-    // Defaults to the (possibly overridden) name so two fixtures with
-    // different names don't accidentally collide on a literal shared
-    // mod_id default — that would make drift-tolerant identity matching
-    // (issue #174) see them as the same mod.
-    mod_id: overrides.name ?? 'PackMod',
-    ...overrides,
-  });
+const profileMod = (overrides: Partial<ProfileMod> = {}): ProfileMod => ({
+  name: 'PackMod',
+  version: '1.0',
+  source: null,
+  hash: null,
+  files: [],
+  enabled: true,
+  bundle_url: null,
+  folder_name: 'PackMod',
+  // Defaults to the (possibly overridden) name so two fixtures with
+  // different names don't accidentally collide on a literal shared
+  // mod_id default — that would make drift-tolerant identity matching
+  // (issue #174) see them as the same mod.
+  mod_id: overrides.name ?? 'PackMod',
+  ...overrides,
+});
 
-const modInfo = (overrides: Partial<ModInfo> = {}): ModInfo =>
-  ({
-    name: 'LibMod',
-    version: '2.0',
-    description: '',
-    enabled: false,
-    files: [],
-    source: null,
-    hash: null,
-    dependencies: [],
-    size_bytes: 0,
-    github_url: null,
-    nexus_url: null,
-    folder_name: 'LibMod',
-    // See profileMod() above — derive from name to avoid cross-fixture
-    // mod_id collisions under drift-tolerant identity matching.
-    mod_id: overrides.name ?? 'LibMod',
-    pinned: false,
-    ...overrides,
-  });
+const modInfo = (overrides: Partial<ModInfo> = {}): ModInfo => ({
+  name: 'LibMod',
+  version: '2.0',
+  description: '',
+  enabled: false,
+  files: [],
+  source: null,
+  hash: null,
+  dependencies: [],
+  size_bytes: 0,
+  github_url: null,
+  nexus_url: null,
+  folder_name: 'LibMod',
+  // See profileMod() above — derive from name to avoid cross-fixture
+  // mod_id collisions under drift-tolerant identity matching.
+  mod_id: overrides.name ?? 'LibMod',
+  pinned: false,
+  ...overrides,
+});
 
 const baseProfile = (overrides: Partial<Profile> = {}): Profile =>
   ({
@@ -79,7 +83,7 @@ const baseProfile = (overrides: Partial<Profile> = {}): Profile =>
     created_by: null,
     game_version: '0.105.0',
     ...overrides,
-  } as Profile);
+  }) as Profile;
 
 const baseProps = () => ({
   profile: baseProfile(),
@@ -108,22 +112,56 @@ function setupPack(opts: {
   registerInvokeHandler('get_profile_memberships', () => ({
     profiles: [{ name: packName, editable: true }],
     mods: [...inPack, ...available].map((m) => {
-      const included = inPack.some((p) => (p.folder_name ?? p.name) === (m.folder_name ?? m.name));
+      const included = inPack.some(
+        (p) => (p.folder_name ?? p.name) === (m.folder_name ?? m.name),
+      );
       return {
         name: m.name,
         version: m.version,
         folder_name: m.folder_name,
         mod_id: m.mod_id,
         installed_enabled: m.enabled,
-        profiles: [{ profile_name: packName, included, enabled: included, editable: true }],
+        profiles: [
+          {
+            profile_name: packName,
+            included,
+            enabled: included,
+            editable: true,
+          },
+        ],
       };
     }),
   }));
   return baseProfile({
     name: packName,
     mods: inPack.map((m) =>
-      profileMod({ name: m.name, folder_name: m.folder_name, mod_id: m.mod_id, version: m.version }),
+      profileMod({
+        name: m.name,
+        folder_name: m.folder_name,
+        mod_id: m.mod_id,
+        version: m.version,
+      }),
     ),
+  });
+}
+
+function setupMissingRitsuPack(): Profile {
+  installMods([]);
+  registerInvokeHandler('get_profile_memberships', () => ({
+    profiles: [{ id: 'testerw-id', name: 'TesterW', editable: true }],
+    mods: [],
+  }));
+  const ritsu = profileMod({
+    name: 'RitsuLib (STS2 0.103.2 compat)',
+    version: '0.4.24',
+    folder_name: 'STS2-RitsuLib',
+    mod_id: 'STS2-RitsuLib',
+    hash: '43e3f031142f174188c0032837944214a415f5af7e804f70f8618cd2f6c472a2',
+  });
+  return baseProfile({
+    id: 'testerw-id',
+    name: 'TesterW',
+    mods: [ritsu, { ...ritsu }],
   });
 }
 
@@ -161,7 +199,14 @@ describe('<ModpackDetail>', () => {
           folder_name: 'UnifiedSavePath',
           mod_id: 'UnifiedSavePath',
           installed_enabled: true,
-          profiles: [{ profile_name: 'Sample', included: true, enabled: true, editable: true }],
+          profiles: [
+            {
+              profile_name: 'Sample',
+              included: true,
+              enabled: true,
+              editable: true,
+            },
+          ],
         },
       ],
     }));
@@ -183,12 +228,153 @@ describe('<ModpackDetail>', () => {
     expect(screen.queryByText('v1.0.0')).not.toBeInTheDocument();
   });
 
+  it('shows a cached profile-pinned version after the Library copy is promoted', async () => {
+    installMods([
+      modInfo({
+        mod_version_id: 'baselib-331',
+        name: 'BaseLib',
+        version: '3.3.1',
+        folder_name: 'BaseLib',
+        mod_id: 'BaseLib',
+        enabled: true,
+      }),
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'TesterW', editable: true }],
+      mods: [
+        {
+          mod_version_id: 'baselib-331',
+          name: 'BaseLib',
+          version: '3.3.1',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed: true,
+          cached: true,
+          installed_enabled: true,
+          version_options: [
+            {
+              mod_version_id: 'baselib-331',
+              name: 'BaseLib',
+              version: '3.3.1',
+              folder_name: 'BaseLib',
+              mod_id: 'BaseLib',
+              installed: true,
+              installed_enabled: true,
+              cached: true,
+              pinned: false,
+              used_by_profiles: [],
+            },
+            {
+              mod_version_id: 'baselib-321',
+              name: 'BaseLib',
+              version: '3.2.1',
+              folder_name: 'BaseLib',
+              mod_id: 'BaseLib',
+              installed: false,
+              installed_enabled: false,
+              cached: true,
+              pinned: false,
+              used_by_profiles: ['TesterW'],
+            },
+          ],
+          profiles: [
+            {
+              profile_name: 'TesterW',
+              included: false,
+              enabled: false,
+              editable: true,
+            },
+          ],
+        },
+        {
+          mod_version_id: 'baselib-321',
+          name: 'BaseLib',
+          version: '3.2.1',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed: false,
+          cached: true,
+          installed_enabled: false,
+          version_options: [
+            {
+              mod_version_id: 'baselib-331',
+              name: 'BaseLib',
+              version: '3.3.1',
+              folder_name: 'BaseLib',
+              mod_id: 'BaseLib',
+              installed: true,
+              installed_enabled: true,
+              cached: true,
+              pinned: false,
+              used_by_profiles: [],
+            },
+            {
+              mod_version_id: 'baselib-321',
+              name: 'BaseLib',
+              version: '3.2.1',
+              folder_name: 'BaseLib',
+              mod_id: 'BaseLib',
+              installed: false,
+              installed_enabled: false,
+              cached: true,
+              pinned: false,
+              used_by_profiles: ['TesterW'],
+            },
+          ],
+          profiles: [
+            {
+              profile_name: 'TesterW',
+              included: true,
+              enabled: true,
+              editable: true,
+              order_index: 0,
+            },
+          ],
+        },
+      ],
+    }));
+    const profile = baseProfile({
+      name: 'TesterW',
+      mods: [
+        profileMod({
+          mod_version_id: 'baselib-321',
+          name: 'BaseLib',
+          version: '3.2.1',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+        }),
+      ],
+    });
+    const drift: ProfileDrift = {
+      added: [],
+      removed: [],
+      toggled: [],
+      version_changed: [
+        { name: 'BaseLib', profile_version: '3.2.1', disk_version: '3.3.1' },
+      ],
+      has_drift: true,
+    };
+
+    render(<Wrap profile={profile} onBack={vi.fn()} drift={drift} />);
+
+    expect(await screen.findByText('BaseLib')).toBeInTheDocument();
+    expect(screen.getByText('manifest v3.2.1')).toBeInTheDocument();
+    expect(screen.getByText('Saved in Versions')).toBeInTheDocument();
+    expect(screen.queryByText(/missing/i)).toBeNull();
+  });
+
   // ── Unified search (Solo FR, 2026-06-10) ──────────────────────────
   it('typing in the in-pack search auto-opens and filters Add-from-Library, matching tags', async () => {
     const profile = setupPack({
-      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod', enabled: true })],
+      inPack: [
+        modInfo({ name: 'PackMod', folder_name: 'PackMod', enabled: true }),
+      ],
       available: [
-        modInfo({ name: 'WaifuOverhaul', folder_name: 'WaifuOverhaul', tags: ['anime'] }),
+        modInfo({
+          name: 'WaifuOverhaul',
+          folder_name: 'WaifuOverhaul',
+          tags: ['anime'],
+        }),
         modInfo({ name: 'PlainUtility', folder_name: 'PlainUtility' }),
       ],
     });
@@ -228,9 +414,13 @@ describe('<ModpackDetail>', () => {
     expect(
       await screen.findByRole('heading', { level: 2, name: 'Sample' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Back to modpacks/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Back to modpacks/i }),
+    ).toBeInTheDocument();
     // Both the header CTA and the inactive-hint have a "Switch to" button for a non-active pack.
-    expect(screen.getAllByRole('button', { name: /Switch to/i })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /Switch to/i })).toHaveLength(
+      2,
+    );
   });
 
   it('omits the Switch button when the modpack is already active', async () => {
@@ -242,8 +432,9 @@ describe('<ModpackDetail>', () => {
         onSwitch={vi.fn()}
       />,
     );
-    const titleRow = (await screen.findByRole('heading', { level: 2, name: 'Sample' }))
-      .closest('.gf-modpack-detail-title-row') as HTMLElement;
+    const titleRow = (
+      await screen.findByRole('heading', { level: 2, name: 'Sample' })
+    ).closest('.gf-modpack-detail-title-row') as HTMLElement;
     // The ACTIVE badge sits next to the name (scoped so it doesn't match
     // the word "active" in the status line).
     expect(within(titleRow).getByText(/active/i)).toBeInTheDocument();
@@ -271,7 +462,9 @@ describe('<ModpackDetail>', () => {
     render(<Wrap {...baseProps()} shareInfo={shareInfo} onShare={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     expect(screen.getByText(/Shared/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Re-share/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Re-share/i }),
+    ).toBeInTheDocument();
   });
 
   it('shows an out-of-sync banner for shared packs with unpublished changes', async () => {
@@ -287,8 +480,17 @@ describe('<ModpackDetail>', () => {
       out_of_sync: true,
     };
     const profile = baseProfile({ name: 'Sample' });
-    render(<Wrap profile={profile} onBack={vi.fn()} shareInfo={shareInfo} onShare={onShare} />);
-    expect(await screen.findByRole('status', { name: /out of sync/i })).toBeInTheDocument();
+    render(
+      <Wrap
+        profile={profile}
+        onBack={vi.fn()}
+        shareInfo={shareInfo}
+        onShare={onShare}
+      />,
+    );
+    expect(
+      await screen.findByRole('status', { name: /out of sync/i }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Re-share to push/i }));
     expect(onShare).toHaveBeenCalledWith(profile);
   });
@@ -309,21 +511,33 @@ describe('<ModpackDetail>', () => {
   });
 
   it('consolidates the install actions into the "+ Add mods" dropdown', async () => {
-    const profile = setupPack({ inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })] });
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })],
+    });
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     // Hidden until the dropdown is opened.
-    expect(screen.queryByRole('menuitem', { name: /Quick add URL/i })).toBeNull();
+    expect(
+      screen.queryByRole('menuitem', { name: /Quick add URL/i }),
+    ).toBeNull();
     await openAddMods(user);
-    expect(screen.getByRole('menuitem', { name: /Quick add URL/i })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /Import mod/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('menuitem', { name: /Quick add URL/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('menuitem', { name: /Import mod/i }),
+    ).toBeInTheDocument();
     // FB3: "Open mods folder" was removed from this dropdown (it lives on the
     // bulk-action bar now), so it must NOT be here.
-    expect(screen.queryByRole('menuitem', { name: /Open mods folder/i })).toBeNull();
+    expect(
+      screen.queryByRole('menuitem', { name: /Open mods folder/i }),
+    ).toBeNull();
     // Auto-detect sources is NOT an install action — it lives in the header
     // "Advanced actions" kebab, not this dropdown.
-    expect(screen.queryByRole('menuitem', { name: /Auto-detect sources/i })).toBeNull();
+    expect(
+      screen.queryByRole('menuitem', { name: /Auto-detect sources/i }),
+    ).toBeNull();
   });
 
   it('status line counts active mods in THIS pack, not the whole library', async () => {
@@ -349,7 +563,9 @@ describe('<ModpackDetail>', () => {
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'MyPack' });
     // A, C, D are enabled AND in the pack → 3 active of 4; library size (5) ignored.
-    expect(screen.getByText(/3 active \/ 4 mods in this modpack/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/3 active \/ 4 mods in this modpack/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/in library/i)).toBeNull();
   });
 
@@ -369,21 +585,36 @@ describe('<ModpackDetail>', () => {
         mod_id: 'stable-mod-id',
         enabled: true,
       }),
-      modInfo({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod', enabled: true }),
+      modInfo({
+        name: 'Stable Mod',
+        folder_name: 'StableMod',
+        mod_id: 'StableMod',
+        enabled: true,
+      }),
     ]);
     const profile = baseProfile({
       name: 'DriftPack',
       mods: [
         // Stale: saved folder_name no longer exists on disk, but the
         // mod_id still matches "Reinstalled Mod" above.
-        profileMod({ name: 'Reinstalled Mod', folder_name: 'OldFolder', mod_id: 'stable-mod-id' }),
-        profileMod({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod' }),
+        profileMod({
+          name: 'Reinstalled Mod',
+          folder_name: 'OldFolder',
+          mod_id: 'stable-mod-id',
+        }),
+        profileMod({
+          name: 'Stable Mod',
+          folder_name: 'StableMod',
+          mod_id: 'StableMod',
+        }),
       ],
     });
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'DriftPack' });
     // Both entries resolve to an enabled installed mod → 2 active / 2.
-    expect(screen.getByText(/2 active \/ 2 mods in this modpack/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/2 active \/ 2 mods in this modpack/i),
+    ).toBeInTheDocument();
   });
 
   it('does not count a reinstalled mod as active when neither folder_name nor mod_id intersect, even with the same name (#174)', async () => {
@@ -400,42 +631,81 @@ describe('<ModpackDetail>', () => {
         mod_id: 'new-mod-id',
         enabled: true,
       }),
-      modInfo({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod', enabled: true }),
+      modInfo({
+        name: 'Stable Mod',
+        folder_name: 'StableMod',
+        mod_id: 'StableMod',
+        enabled: true,
+      }),
     ]);
     const profile = baseProfile({
       name: 'NoMatchPack',
       mods: [
         // Different folder_name AND different mod_id from the installed
         // "Reinstalled Mod" above — only the name coincides.
-        profileMod({ name: 'Reinstalled Mod', folder_name: 'OldFolder', mod_id: 'old-mod-id' }),
-        profileMod({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod' }),
+        profileMod({
+          name: 'Reinstalled Mod',
+          folder_name: 'OldFolder',
+          mod_id: 'old-mod-id',
+        }),
+        profileMod({
+          name: 'Stable Mod',
+          folder_name: 'StableMod',
+          mod_id: 'StableMod',
+        }),
       ],
     });
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'NoMatchPack' });
     // Only "Stable Mod" resolves to an enabled install → 1 active / 2.
-    expect(screen.getByText(/1 active \/ 2 mods in this modpack/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/1 active \/ 2 mods in this modpack/i),
+    ).toBeInTheDocument();
   });
 
   it('does not count a genuinely missing or disabled pack entry as active', async () => {
     registerInvokeHandler('get_installed_mods', () => [
-      modInfo({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod', enabled: true }),
+      modInfo({
+        name: 'Stable Mod',
+        folder_name: 'StableMod',
+        mod_id: 'StableMod',
+        enabled: true,
+      }),
       // Installed but disabled — must not count toward "active".
-      modInfo({ name: 'Disabled Mod', folder_name: 'DisabledMod', mod_id: 'DisabledMod', enabled: false }),
+      modInfo({
+        name: 'Disabled Mod',
+        folder_name: 'DisabledMod',
+        mod_id: 'DisabledMod',
+        enabled: false,
+      }),
     ]);
     const profile = baseProfile({
       name: 'PartialPack',
       mods: [
-        profileMod({ name: 'Stable Mod', folder_name: 'StableMod', mod_id: 'StableMod' }),
-        profileMod({ name: 'Disabled Mod', folder_name: 'DisabledMod', mod_id: 'DisabledMod' }),
+        profileMod({
+          name: 'Stable Mod',
+          folder_name: 'StableMod',
+          mod_id: 'StableMod',
+        }),
+        profileMod({
+          name: 'Disabled Mod',
+          folder_name: 'DisabledMod',
+          mod_id: 'DisabledMod',
+        }),
         // Not installed at all anymore (no matching identity in the library).
-        profileMod({ name: 'Gone Mod', folder_name: 'GoneFolder', mod_id: 'gone-mod-id' }),
+        profileMod({
+          name: 'Gone Mod',
+          folder_name: 'GoneFolder',
+          mod_id: 'gone-mod-id',
+        }),
       ],
     });
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'PartialPack' });
     // Only "Stable Mod" is both present and enabled → 1 active / 3.
-    expect(screen.getByText(/1 active \/ 3 mods in this modpack/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/1 active \/ 3 mods in this modpack/i),
+    ).toBeInTheDocument();
   });
 
   it('does not show a reinstalled (drifted) mod in Add-from-library — it is already in the pack (#174)', async () => {
@@ -450,14 +720,23 @@ describe('<ModpackDetail>', () => {
         enabled: true,
       }),
       // A genuinely-available library mod, unrelated to the pack.
-      modInfo({ name: 'Extra Mod', folder_name: 'ExtraMod', mod_id: 'ExtraMod', enabled: true }),
+      modInfo({
+        name: 'Extra Mod',
+        folder_name: 'ExtraMod',
+        mod_id: 'ExtraMod',
+        enabled: true,
+      }),
     ]);
     const profile = baseProfile({
       name: 'DriftAddPack',
       mods: [
         // Stale: saved folder_name no longer exists on disk, but the
         // mod_id still matches the install above.
-        profileMod({ name: 'Reinstalled Mod', folder_name: 'OldFolder', mod_id: 'stable-mod-id' }),
+        profileMod({
+          name: 'Reinstalled Mod',
+          folder_name: 'OldFolder',
+          mod_id: 'stable-mod-id',
+        }),
       ],
     });
     const user = userEvent.setup();
@@ -472,7 +751,7 @@ describe('<ModpackDetail>', () => {
     expect(within(available).queryByText('Reinstalled Mod')).toBeNull();
   });
 
-  it('the Audit action checks ONLY this pack\'s mods (scoped audit)', async () => {
+  it("the Audit action checks ONLY this pack's mods (scoped audit)", async () => {
     const profile = setupPack({
       inPack: [
         modInfo({ name: 'PackA', folder_name: 'PackA' }),
@@ -485,7 +764,9 @@ describe('<ModpackDetail>', () => {
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     // Audit is the updates pill in the section header.
-    await user.click(screen.getByRole('button', { name: /Check for updates/i }));
+    await user.click(
+      screen.getByRole('button', { name: /Check for updates/i }),
+    );
 
     await waitFor(() => {
       const call = getInvokeCalls().find((c) => c.cmd === 'audit_mod_versions');
@@ -506,12 +787,53 @@ describe('<ModpackDetail>', () => {
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
 
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
-    expect((await within(inPack).findAllByText('PackMod')).length).toBeGreaterThan(0);
+    expect(
+      (await within(inPack).findAllByText('PackMod')).length,
+    ).toBeGreaterThan(0);
     expect(within(inPack).queryByText('LibMod')).toBeNull();
 
     const available = await expandLibrary(user);
     expect(within(available).getByText('LibMod')).toBeInTheDocument();
     expect(within(available).queryByText('PackMod')).toBeNull();
+  });
+
+  it('collapses duplicate saved versions in Add-from-library to one visible mod', async () => {
+    const profile = setupPack({
+      available: [
+        modInfo({
+          mod_version_id: 'ritsu-030',
+          name: 'RitsuLib (STS2 0.103.2 compat)',
+          version: '0.3.0',
+          folder_name: 'STS2-RitsuLib-old',
+          mod_id: 'STS2-RitsuLib',
+          github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib',
+          nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/137',
+        }),
+        modInfo({
+          mod_version_id: 'ritsu-0424',
+          name: 'RitsuLib (STS2 0.103.2 compat)',
+          version: '0.4.24',
+          folder_name: 'STS2-RitsuLib',
+          mod_id: 'STS2-RitsuLib',
+          github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib',
+          nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/137',
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+
+    const available = await expandLibrary(user);
+
+    expect(
+      within(available).getAllByTestId('modpack-mod-row-available'),
+    ).toHaveLength(1);
+    expect(
+      within(available).getByText('RitsuLib (STS2 0.103.2 compat)'),
+    ).toBeInTheDocument();
+    expect(within(available).getByText('0.4.24')).toBeInTheDocument();
+    expect(within(available).queryByText('0.3.0')).toBeNull();
   });
 
   it('in-pack rows are the rich LibraryTable rows (toggle + kebab) on the ACTIVE pack', async () => {
@@ -526,9 +848,13 @@ describe('<ModpackDetail>', () => {
     // Rich row markers: the per-row "Mod actions" kebab and the active/stored
     // switch — the same controls the Mod Library rows use.
     await waitFor(() => {
-      expect(within(inPack).getByRole('button', { name: /Mod actions/i })).toBeInTheDocument();
+      expect(
+        within(inPack).getByRole('button', { name: /Mod actions/i }),
+      ).toBeInTheDocument();
     });
-    expect(await within(inPack).findByRole('switch')).toBeInTheDocument();
+    expect(
+      await within(inPack).findByRole('switch', { name: /active in game/i }),
+    ).toBeInTheDocument();
   });
 
   it('omits the active/stored toggle for a NON-active modpack', async () => {
@@ -541,8 +867,12 @@ describe('<ModpackDetail>', () => {
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
     await within(inPack).findByText('PackMod');
     // Kebab/actions remain, but there's no in-game switch on a non-active pack.
-    expect(within(inPack).getByRole('button', { name: /Mod actions/i })).toBeInTheDocument();
-    expect(within(inPack).queryByRole('switch')).toBeNull();
+    expect(
+      within(inPack).getByRole('button', { name: /Mod actions/i }),
+    ).toBeInTheDocument();
+    expect(
+      within(inPack).queryByRole('switch', { name: /active in game/i }),
+    ).toBeNull();
   });
 
   it('the in-pack rows have no inline drag handle (reorder is the Load order modal)', async () => {
@@ -552,17 +882,23 @@ describe('<ModpackDetail>', () => {
         modInfo({ name: 'Second', folder_name: 'Second' }),
       ],
     });
-    const { container } = render(<Wrap profile={profile} onBack={vi.fn()} onOpenLoadOrder={vi.fn()} />);
+    const { container } = render(
+      <Wrap profile={profile} onBack={vi.fn()} onOpenLoadOrder={vi.fn()} />,
+    );
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
     // The HTML5 drag handle was removed — it never worked in the webview.
     // Reordering is the Load order modal. (Use the per-row kebab as the
     // "rows rendered" proxy — the in-game switch only shows on the active
     // pack, and this pack isn't active.)
     await waitFor(() => {
-      expect(within(inPack).getAllByRole('button', { name: /Mod actions/i }).length).toBeGreaterThan(0);
+      expect(
+        within(inPack).getAllByRole('button', { name: /Mod actions/i }).length,
+      ).toBeGreaterThan(0);
     });
     expect(container.querySelector('.gf-load-order-drag')).toBeNull();
-    expect(within(inPack).getByRole('button', { name: /Load order/i })).toBeInTheDocument();
+    expect(
+      within(inPack).getByRole('button', { name: /Load order/i }),
+    ).toBeInTheDocument();
   });
 
   it('the modpack rows drop the redundant In-Modpack badge and show a Remove action', async () => {
@@ -590,8 +926,12 @@ describe('<ModpackDetail>', () => {
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     const available = await screen.findByTestId('modpack-detail-available');
     expect(within(available).queryByText('LibMod')).toBeNull();
-    expect(within(available).queryByTestId('modpack-mod-row-available')).toBeNull();
-    const toggle = within(available).getByRole('button', { name: /Add from Mod Library/i });
+    expect(
+      within(available).queryByTestId('modpack-mod-row-available'),
+    ).toBeNull();
+    const toggle = within(available).getByRole('button', {
+      name: /Add from Mod Library/i,
+    });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -615,13 +955,21 @@ describe('<ModpackDetail>', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('modpack-detail-available')).toBeNull();
     });
-    expect(screen.getByTestId('modpack-detail-all-in-pack')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('modpack-detail-all-in-pack'),
+    ).toBeInTheDocument();
   });
 
   it('available-row source badges derive from the matching installed ModInfo', async () => {
     const profile = setupPack({
       inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })],
-      available: [modInfo({ name: 'LibMod', folder_name: 'LibMod', nexus_url: 'https://nexusmods.com/z' })],
+      available: [
+        modInfo({
+          name: 'LibMod',
+          folder_name: 'LibMod',
+          nexus_url: 'https://nexusmods.com/z',
+        }),
+      ],
     });
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
@@ -632,17 +980,25 @@ describe('<ModpackDetail>', () => {
   // ── Membership: Add (available section) ───────────────────────────
   it('Add on an available row calls set_profile_mod_membership with included=true', async () => {
     const profile = setupPack({
-      available: [modInfo({
-        name: 'LibMod',
-        folder_name: 'LibMod',
-        mod_id: 'LibMod',
-        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1073',
-      })],
+      available: [
+        modInfo({
+          name: 'LibMod',
+          folder_name: 'LibMod',
+          mod_id: 'LibMod',
+          nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1073',
+        }),
+      ],
     });
     registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
     const onLibraryChanged = vi.fn();
     const user = userEvent.setup();
-    render(<Wrap profile={profile} onBack={vi.fn()} onLibraryChanged={onLibraryChanged} />);
+    render(
+      <Wrap
+        profile={profile}
+        onBack={vi.fn()}
+        onLibraryChanged={onLibraryChanged}
+      />,
+    );
     const available = await expandLibrary(user);
     await user.click(within(available).getByRole('button', { name: /^Add$/i }));
 
@@ -651,7 +1007,9 @@ describe('<ModpackDetail>', () => {
         getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership'),
       ).toBe(true);
     });
-    const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mod_membership');
+    const call = getInvokeCalls().find(
+      (c) => c.cmd === 'set_profile_mod_membership',
+    );
     expect(call?.args).toMatchObject({
       profileId: 'Sample',
       modName: 'LibMod',
@@ -669,7 +1027,9 @@ describe('<ModpackDetail>', () => {
   // same pinScroll safety net the LibraryTable rows already use.
   it('pins the scroll position when adding a mod from the library', async () => {
     const profile = setupPack({
-      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod', mod_id: 'PackMod' })],
+      inPack: [
+        modInfo({ name: 'PackMod', folder_name: 'PackMod', mod_id: 'PackMod' }),
+      ],
       available: [
         modInfo({ name: 'LibA', folder_name: 'LibA', mod_id: 'LibA' }),
         modInfo({ name: 'LibB', folder_name: 'LibB', mod_id: 'LibB' }),
@@ -688,29 +1048,45 @@ describe('<ModpackDetail>', () => {
 
     // jsdom reports 0 layout, so fake a real scroll container around the
     // detail view so pinScroll can find it and engage.
-    const scroller = container.querySelector('[data-scroller="yes"]') as HTMLElement;
-    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 4000 });
-    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 });
+    const scroller = container.querySelector(
+      '[data-scroller="yes"]',
+    ) as HTMLElement;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      value: 4000,
+    });
+    Object.defineProperty(scroller, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
     let scrollTopVal = 1800;
     Object.defineProperty(scroller, 'scrollTop', {
       configurable: true,
       get: () => scrollTopVal,
-      set: (v: number) => { scrollTopVal = v; },
+      set: (v: number) => {
+        scrollTopVal = v;
+      },
     });
     const realGCS = window.getComputedStyle.bind(window);
     const gcs = vi
       .spyOn(window, 'getComputedStyle')
       .mockImplementation((el: Element, pe?: string | null) =>
-        (el === scroller
+        el === scroller
           ? ({ overflowY: 'auto' } as CSSStyleDeclaration)
-          : realGCS(el, pe)));
+          : realGCS(el, pe),
+      );
     const rafCbs: FrameRequestCallback[] = [];
     const raf = vi
       .spyOn(window, 'requestAnimationFrame')
-      .mockImplementation((cb: FrameRequestCallback) => { rafCbs.push(cb); return rafCbs.length; });
+      .mockImplementation((cb: FrameRequestCallback) => {
+        rafCbs.push(cb);
+        return rafCbs.length;
+      });
 
     try {
-      await user.click(within(available).getAllByRole('button', { name: /^Add$/i })[0]);
+      await user.click(
+        within(available).getAllByRole('button', { name: /^Add$/i })[0],
+      );
       // Simulate the engine collapsing the list to the top mid-add…
       scrollTopVal = 0;
       // …the pin re-asserts the captured position on the following frames.
@@ -732,7 +1108,9 @@ describe('<ModpackDetail>', () => {
   // numbers stop disagreeing.
   it('shows "(N missing)" when the manifest references mods not installed on disk (Bug 5)', async () => {
     const profile = setupPack({
-      inPack: [modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' })],
+      inPack: [
+        modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' }),
+      ],
     });
     const drift: ProfileDrift = {
       added: [],
@@ -749,7 +1127,9 @@ describe('<ModpackDetail>', () => {
 
   it('the "(N missing)" indicator lists the missing mod names on hover (FB-D)', async () => {
     const profile = setupPack({
-      inPack: [modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' })],
+      inPack: [
+        modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' }),
+      ],
     });
     const drift: ProfileDrift = {
       added: [],
@@ -768,9 +1148,62 @@ describe('<ModpackDetail>', () => {
     expect(screen.getByText('Gone3')).toBeInTheDocument();
   });
 
+  it('dedupes duplicate missing manifest entries in the header tooltip', async () => {
+    const profile = setupMissingRitsuPack();
+    const drift: ProfileDrift = {
+      added: [],
+      removed: [
+        'RitsuLib (STS2 0.103.2 compat)',
+        'RitsuLib (STS2 0.103.2 compat)',
+      ],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    };
+
+    render(<Wrap profile={profile} onBack={vi.fn()} drift={drift} />);
+
+    const indicator = await screen.findByLabelText(
+      /manifest but not installed/i,
+    );
+    expect(within(indicator).getByText(/1 missing/)).toBeInTheDocument();
+    expect(
+      within(indicator).getAllByText('RitsuLib (STS2 0.103.2 compat)'),
+    ).toHaveLength(1);
+  });
+
+  it('searching the modpack list shows manifest-only missing rows', async () => {
+    const profile = setupMissingRitsuPack();
+    const drift: ProfileDrift = {
+      added: [],
+      removed: ['RitsuLib (STS2 0.103.2 compat)'],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    };
+    const user = userEvent.setup();
+
+    render(<Wrap profile={profile} onBack={vi.fn()} drift={drift} />);
+    const inPack = await screen.findByTestId('modpack-detail-in-pack');
+    await user.type(
+      within(inPack).getByRole('textbox', { name: /Search mod library/i }),
+      'ritsu',
+    );
+
+    expect(
+      await within(inPack).findByRole('heading', {
+        name: 'RitsuLib (STS2 0.103.2 compat)',
+      }),
+    ).toBeInTheDocument();
+    expect(within(inPack).getByText('Missing from disk')).toBeInTheDocument();
+    expect(within(inPack).queryByText(/No matching mods/i)).toBeNull();
+  });
+
   it('shows no missing indicator when nothing in the manifest is missing (Bug 5)', async () => {
     const profile = setupPack({
-      inPack: [modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' })],
+      inPack: [
+        modInfo({ name: 'OnDisk1', folder_name: 'OnDisk1', mod_id: 'OnDisk1' }),
+      ],
     });
     const drift: ProfileDrift = {
       added: [],
@@ -792,43 +1225,76 @@ describe('<ModpackDetail>', () => {
   it('Enable all calls set_profile_mods_enabled with enabled=true (Bug 7 / FB-A)', async () => {
     const profile = setupPack({
       inPack: [
-        modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false }),
-        modInfo({ name: 'PackB', folder_name: 'PackB', mod_id: 'PackB', enabled: false }),
+        modInfo({
+          name: 'PackA',
+          folder_name: 'PackA',
+          mod_id: 'PackA',
+          enabled: false,
+        }),
+        modInfo({
+          name: 'PackB',
+          folder_name: 'PackB',
+          mod_id: 'PackB',
+          enabled: false,
+        }),
       ],
     });
     registerInvokeHandler('set_profile_mods_enabled', () => ({
-      enabled: true, toggled: ['PackA', 'PackB'], missing: [], failed: [],
+      enabled: true,
+      toggled: ['PackA', 'PackB'],
+      missing: [],
+      failed: [],
     }));
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findAllByText('PackA');
-    await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
+    await user.click(
+      await screen.findByRole('button', { name: /^Enable all$/i }),
+    );
     await waitFor(() => {
-      const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mods_enabled');
+      const call = getInvokeCalls().find(
+        (c) => c.cmd === 'set_profile_mods_enabled',
+      );
       expect(call?.args).toMatchObject({ profileId: 'Sample', enabled: true });
     });
   });
 
   it('Disable all calls set_profile_mods_enabled with enabled=false (Bug 7 / FB-A)', async () => {
     const profile = setupPack({
-      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: true })],
+      inPack: [
+        modInfo({
+          name: 'PackA',
+          folder_name: 'PackA',
+          mod_id: 'PackA',
+          enabled: true,
+        }),
+      ],
     });
     registerInvokeHandler('set_profile_mods_enabled', () => ({
-      enabled: false, toggled: ['PackA'], missing: [], failed: [],
+      enabled: false,
+      toggled: ['PackA'],
+      missing: [],
+      failed: [],
     }));
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findAllByText('PackA');
-    await user.click(await screen.findByRole('button', { name: /^Disable all$/i }));
+    await user.click(
+      await screen.findByRole('button', { name: /^Disable all$/i }),
+    );
     await waitFor(() => {
-      const call = getInvokeCalls().find((c) => c.cmd === 'set_profile_mods_enabled');
+      const call = getInvokeCalls().find(
+        (c) => c.cmd === 'set_profile_mods_enabled',
+      );
       expect(call?.args).toMatchObject({ profileId: 'Sample', enabled: false });
     });
   });
 
   it('the modpack toolbar exposes a visible "Open mods folder" button (FB-E)', async () => {
     const profile = setupPack({
-      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA' })],
+      inPack: [
+        modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA' }),
+      ],
     });
     registerInvokeHandler('open_mods_folder', () => true);
     const user = userEvent.setup();
@@ -836,23 +1302,39 @@ describe('<ModpackDetail>', () => {
     await screen.findAllByText('PackA');
     // A real toolbar button (not the AddModsMenu dropdown item, which is a
     // hidden menuitem) sits next to Enable all / Disable all.
-    await user.click(screen.getByRole('button', { name: /^Open mods folder$/i }));
+    await user.click(
+      screen.getByRole('button', { name: /^Open mods folder$/i }),
+    );
     await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(true);
+      expect(getInvokeCalls().some((c) => c.cmd === 'open_mods_folder')).toBe(
+        true,
+      );
     });
   });
 
   it('Enable all surfaces mods that could not be toggled by name (FB-A/FB-C)', async () => {
     const profile = setupPack({
-      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false })],
+      inPack: [
+        modInfo({
+          name: 'PackA',
+          folder_name: 'PackA',
+          mod_id: 'PackA',
+          enabled: false,
+        }),
+      ],
     });
     registerInvokeHandler('set_profile_mods_enabled', () => ({
-      enabled: true, toggled: [], missing: ['GhostMod'], failed: [],
+      enabled: true,
+      toggled: [],
+      missing: ['GhostMod'],
+      failed: [],
     }));
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findAllByText('PackA');
-    await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
+    await user.click(
+      await screen.findByRole('button', { name: /^Enable all$/i }),
+    );
     // The toast names the mod that couldn't be toggled (it's not installed).
     await waitFor(() => {
       expect(screen.getByText(/GhostMod/)).toBeInTheDocument();
@@ -864,22 +1346,40 @@ describe('<ModpackDetail>', () => {
     // without a reload nonce the focused in-pack grid wouldn't re-pull and the
     // row toggles stayed stale. Assert the grid is re-fetched after Enable all.
     const profile = setupPack({
-      inPack: [modInfo({ name: 'PackA', folder_name: 'PackA', mod_id: 'PackA', enabled: false })],
+      inPack: [
+        modInfo({
+          name: 'PackA',
+          folder_name: 'PackA',
+          mod_id: 'PackA',
+          enabled: false,
+        }),
+      ],
     });
     registerInvokeHandler('set_profile_mods_enabled', () => ({
-      enabled: true, toggled: ['PackA'], missing: [], failed: [],
+      enabled: true,
+      toggled: ['PackA'],
+      missing: [],
+      failed: [],
     }));
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     await screen.findAllByText('PackA');
-    const before = getInvokeCalls().filter((c) => c.cmd === 'get_profile_memberships').length;
-    await user.click(await screen.findByRole('button', { name: /^Enable all$/i }));
+    const before = getInvokeCalls().filter(
+      (c) => c.cmd === 'get_profile_memberships',
+    ).length;
+    await user.click(
+      await screen.findByRole('button', { name: /^Enable all$/i }),
+    );
     await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mods_enabled')).toBe(true);
+      expect(
+        getInvokeCalls().some((c) => c.cmd === 'set_profile_mods_enabled'),
+      ).toBe(true);
     });
     await waitFor(() => {
-      expect(getInvokeCalls().filter((c) => c.cmd === 'get_profile_memberships').length)
-        .toBeGreaterThan(before);
+      expect(
+        getInvokeCalls().filter((c) => c.cmd === 'get_profile_memberships')
+          .length,
+      ).toBeGreaterThan(before);
     });
   });
 
@@ -927,7 +1427,11 @@ describe('<ModpackDetail>', () => {
     localStorage.setItem(AUTO_ADD_INSTALLS_TO_MODPACK_KEY, 'true');
     registerInvokeHandler('quick_add_mod', () => ({
       type: 'github_installed',
-      mod_info: modInfo({ name: 'NewMod', folder_name: 'NewMod', mod_id: 'NewMod' }),
+      mod_info: modInfo({
+        name: 'NewMod',
+        folder_name: 'NewMod',
+        mod_id: 'NewMod',
+      }),
     }));
     registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
     const user = userEvent.setup();
@@ -936,13 +1440,17 @@ describe('<ModpackDetail>', () => {
 
     await openAddMods(user);
     await user.click(screen.getByRole('menuitem', { name: /Quick add URL/i }));
-    const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
+    const input = await screen.findByPlaceholderText(
+      /https:\/\/github\.com\/user\/mod/,
+    );
     await user.type(input, 'https://github.com/x/y');
     await user.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() => {
       const call = getInvokeCalls().find(
-        (c) => c.cmd === 'set_profile_mod_membership' && c.args?.modName === 'NewMod',
+        (c) =>
+          c.cmd === 'set_profile_mod_membership' &&
+          c.args?.modName === 'NewMod',
       );
       expect(call?.args).toMatchObject({
         profileId: 'Sample',
@@ -960,20 +1468,32 @@ describe('<ModpackDetail>', () => {
     registerInvokeHandler('get_active_profile', () => 'Sample');
     registerInvokeHandler('quick_add_mod', () => ({
       type: 'github_installed',
-      mod_info: modInfo({ name: 'BaseLib', folder_name: 'BaseLib', mod_id: 'BaseLib', enabled: true }),
+      mod_info: modInfo({
+        name: 'BaseLib',
+        folder_name: 'BaseLib',
+        mod_id: 'BaseLib',
+        enabled: true,
+      }),
     }));
-    registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'Sample' }));
+    registerInvokeHandler('set_profile_mod_membership', () =>
+      baseProfile({ name: 'Sample' }),
+    );
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
 
     await openAddMods(user);
     await user.click(screen.getByRole('menuitem', { name: /Quick add URL/i }));
-    await user.type(await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/), 'https://github.com/x/y');
+    await user.type(
+      await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/),
+      'https://github.com/x/y',
+    );
     await user.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership')).toBe(true);
+      expect(
+        getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership'),
+      ).toBe(true);
     });
     // The mod is already active → no toggle, and no "Quick add failed".
     expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(false);
@@ -991,7 +1511,9 @@ describe('<ModpackDetail>', () => {
       { share_id: 'henry/AAAA', profile_name: 'Henry Pack' },
     ]);
     const user = userEvent.setup();
-    render(<Wrap profile={baseProfile({ name: 'Henry Pack' })} onBack={vi.fn()} />);
+    render(
+      <Wrap profile={baseProfile({ name: 'Henry Pack' })} onBack={vi.fn()} />,
+    );
     await screen.findByRole('heading', { level: 2, name: 'Henry Pack' });
 
     await openAddMods(user);
@@ -1000,7 +1522,9 @@ describe('<ModpackDetail>', () => {
     // The friendly toast appears…
     expect(await screen.findByText(/followed modpack/i)).toBeInTheDocument();
     // …and the install never ran (no half-completed add).
-    expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
+    expect(
+      getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file'),
+    ).toBe(false);
   });
 
   it('quick-adding into a followed pack is blocked with a friendly message (no install)', async () => {
@@ -1009,14 +1533,18 @@ describe('<ModpackDetail>', () => {
       { share_id: 'henry/AAAA', profile_name: 'Henry Pack' },
     ]);
     const user = userEvent.setup();
-    render(<Wrap profile={baseProfile({ name: 'Henry Pack' })} onBack={vi.fn()} />);
+    render(
+      <Wrap profile={baseProfile({ name: 'Henry Pack' })} onBack={vi.fn()} />,
+    );
     await screen.findByRole('heading', { level: 2, name: 'Henry Pack' });
 
     // Mirror the existing quick-add flow: open Add mods → Quick add URL →
     // type a github URL → click Add.
     await openAddMods(user);
     await user.click(screen.getByRole('menuitem', { name: /Quick add URL/i }));
-    const input = await screen.findByPlaceholderText(/https:\/\/github\.com\/user\/mod/);
+    const input = await screen.findByPlaceholderText(
+      /https:\/\/github\.com\/user\/mod/,
+    );
     await user.type(input, 'https://github.com/x/y');
     await user.click(screen.getByRole('button', { name: 'Add' }));
 
@@ -1037,11 +1565,13 @@ describe('<ModpackDetail>', () => {
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     const available = await expandLibrary(user);
     await user.click(within(available).getByRole('button', { name: /^Add$/i }));
-    expect(await screen.findByText(/Couldn't add LibMod: disk full/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Couldn't add LibMod: disk full/i),
+    ).toBeInTheDocument();
   });
 
   // ── Edit modpack (checkbox picker) ────────────────────────────────
-  it('Edit opens the membership picker pre-filled with the pack\'s mods', async () => {
+  it("Edit opens the membership picker pre-filled with the pack's mods", async () => {
     const profile = setupPack({
       inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })],
       available: [modInfo({ name: 'LibMod', folder_name: 'LibMod' })],
@@ -1053,14 +1583,16 @@ describe('<ModpackDetail>', () => {
 
     // The picker modal mounts with the pack member checked.
     await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: /Edit "Sample"/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole('dialog', { name: /Edit "Sample"/i }),
+      ).toBeInTheDocument();
     });
     expect(screen.getByLabelText('PackMod')).toBeChecked();
     expect(screen.getByLabelText('LibMod')).not.toBeChecked();
   });
 
   // ── Pack-scoped Delete all ────────────────────────────────────────
-  it('Delete all (in pack) deletes ONLY this pack\'s mods from disk', async () => {
+  it("Delete all (in pack) deletes ONLY this pack's mods from disk", async () => {
     const profile = setupPack({
       inPack: [
         modInfo({ name: 'PackOne', folder_name: 'PackOne' }),
@@ -1087,15 +1619,31 @@ describe('<ModpackDetail>', () => {
     await user.click(confirmBtn!);
 
     await waitFor(() => {
-      const deletes = getInvokeCalls().filter((c) => c.cmd === 'delete_mod_cmd');
-      expect(deletes.map((c) => c.args?.name).sort()).toEqual(['PackOne', 'PackTwo']);
+      const deletes = getInvokeCalls().filter(
+        (c) => c.cmd === 'delete_mod_cmd',
+      );
+      expect(deletes.map((c) => c.args?.name).sort()).toEqual([
+        'PackOne',
+        'PackTwo',
+      ]);
     });
-    const removals = getInvokeCalls().filter((c) => c.cmd === 'set_profile_mod_membership');
-    expect(removals.map((c) => c.args?.modName).sort()).toEqual(['PackOne', 'PackTwo']);
-    expect(removals.every((c) => c.args?.profileId === 'Sample' && c.args?.included === false)).toBe(true);
+    const removals = getInvokeCalls().filter(
+      (c) => c.cmd === 'set_profile_mod_membership',
+    );
+    expect(removals.map((c) => c.args?.modName).sort()).toEqual([
+      'PackOne',
+      'PackTwo',
+    ]);
+    expect(
+      removals.every(
+        (c) => c.args?.profileId === 'Sample' && c.args?.included === false,
+      ),
+    ).toBe(true);
     // The non-pack mod is never touched.
     expect(
-      getInvokeCalls().some((c) => c.cmd === 'delete_mod_cmd' && c.args?.name === 'OutsiderMod'),
+      getInvokeCalls().some(
+        (c) => c.cmd === 'delete_mod_cmd' && c.args?.name === 'OutsiderMod',
+      ),
     ).toBe(false);
   });
 
@@ -1109,12 +1657,22 @@ describe('<ModpackDetail>', () => {
 
   // ── Load order ────────────────────────────────────────────────────
   it('Load order button in Section 1 calls onOpenLoadOrder', async () => {
-    const profile = setupPack({ inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })] });
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })],
+    });
     const onOpenLoadOrder = vi.fn();
     const user = userEvent.setup();
-    render(<Wrap profile={profile} onBack={vi.fn()} onOpenLoadOrder={onOpenLoadOrder} />);
+    render(
+      <Wrap
+        profile={profile}
+        onBack={vi.fn()}
+        onOpenLoadOrder={onOpenLoadOrder}
+      />,
+    );
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
-    await user.click(within(inPack).getByRole('button', { name: /Load order/i }));
+    await user.click(
+      within(inPack).getByRole('button', { name: /Load order/i }),
+    );
     expect(onOpenLoadOrder).toHaveBeenCalledWith(profile);
   });
 
@@ -1147,12 +1705,16 @@ describe('<ModpackDetail>', () => {
     expect(screen.queryByTestId('modpack-detail-advanced-panel')).toBeNull();
 
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
-    expect(screen.getByRole('menuitem', { name: /Delete modpack/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('menuitem', { name: /Delete modpack/i }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole('menuitem', { name: /Duplicate/i }));
     expect(onDuplicate).toHaveBeenCalledWith('Sample');
 
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
-    await user.click(screen.getByRole('menuitem', { name: /Export .sts2pack/i }));
+    await user.click(
+      screen.getByRole('menuitem', { name: /Export .sts2pack/i }),
+    );
     expect(onExportFile).toHaveBeenCalledWith('Sample');
 
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
@@ -1162,23 +1724,40 @@ describe('<ModpackDetail>', () => {
 
   it('opens the Rename modal from the header kebab', async () => {
     const user = userEvent.setup();
-    const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
-    render(<Wrap {...baseProps()} profile={profile} renameExistingNames={['Sample']} onRenamed={vi.fn()} />);
+    const profile = setupPack({
+      packName: 'Sample',
+      inPack: [modInfo({ name: 'M', folder_name: 'M' })],
+    });
+    render(
+      <Wrap
+        {...baseProps()}
+        profile={profile}
+        renameExistingNames={['Sample']}
+        onRenamed={vi.fn()}
+      />,
+    );
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     await user.click(screen.getByRole('menuitem', { name: /^rename$/i }));
-    expect(await screen.findByRole('dialog', { name: /rename/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('dialog', { name: /rename/i }),
+    ).toBeInTheDocument();
   });
 
   it('does not offer Rename when onRenamed is not provided (e.g. a placeholder pack)', async () => {
     const user = userEvent.setup();
-    const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+    const profile = setupPack({
+      packName: 'Sample',
+      inPack: [modInfo({ name: 'M', folder_name: 'M' })],
+    });
     // baseProps() omits onRenamed, so the kebab must not surface a Rename item.
     render(<Wrap {...baseProps()} profile={profile} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     // The kebab opens (Auto-detect / Refresh are always present)…
-    expect(await screen.findByRole('menuitem', { name: /Auto-detect sources/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('menuitem', { name: /Auto-detect sources/i }),
+    ).toBeInTheDocument();
     // …but Rename is gated off.
     expect(screen.queryByRole('menuitem', { name: /^rename$/i })).toBeNull();
   });
@@ -1188,7 +1767,9 @@ describe('<ModpackDetail>', () => {
     render(<Wrap {...baseProps()} />);
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
-    await user.click(screen.getByRole('menuitem', { name: /Auto-detect sources/i }));
+    await user.click(
+      screen.getByRole('menuitem', { name: /Auto-detect sources/i }),
+    );
     // The scan modal opens — its subtitle is distinctive.
     expect(
       await screen.findByText(/Scan installed mods against GitHub/i),
@@ -1205,7 +1786,9 @@ describe('<ModpackDetail>', () => {
       has_drift: true,
     };
     const user = userEvent.setup();
-    render(<Wrap {...baseProps()} drift={drift} onRepairDrift={onRepairDrift} />);
+    render(
+      <Wrap {...baseProps()} drift={drift} onRepairDrift={onRepairDrift} />,
+    );
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     await user.click(screen.getByRole('menuitem', { name: /Repair/i }));
@@ -1216,7 +1799,9 @@ describe('<ModpackDetail>', () => {
     // Non-active pack (no get_active_profile) with no drift → nothing to repair
     // from here; switching to the pack re-applies its manifest instead.
     const user = userEvent.setup();
-    render(<Wrap {...baseProps()} onDelete={vi.fn()} onRepairDrift={vi.fn()} />);
+    render(
+      <Wrap {...baseProps()} onDelete={vi.fn()} onRepairDrift={vi.fn()} />,
+    );
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     expect(screen.queryByRole('menuitem', { name: /Repair/i })).toBeNull();
@@ -1229,8 +1814,9 @@ describe('<ModpackDetail>', () => {
     const onRepairDrift = vi.fn();
     const user = userEvent.setup();
     render(<Wrap {...baseProps()} onRepairDrift={onRepairDrift} />);
-    const titleRow = (await screen.findByRole('heading', { level: 2, name: 'Sample' }))
-      .closest('.gf-modpack-detail-title-row') as HTMLElement;
+    const titleRow = (
+      await screen.findByRole('heading', { level: 2, name: 'Sample' })
+    ).closest('.gf-modpack-detail-title-row') as HTMLElement;
     // Wait for the ACTIVE badge so isActive has propagated from AppContext.
     await within(titleRow).findByText(/active/i);
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
@@ -1262,17 +1848,27 @@ describe('<ModpackDetail>', () => {
 
   // ── Updates affordance (section header) ───────────────────────────
   it('shows a "Check for updates" pill before an audit has run', async () => {
-    const profile = setupPack({ inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })] });
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'PackMod', folder_name: 'PackMod' })],
+    });
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
-    expect(within(inPack).getByRole('button', { name: /Check for updates/i })).toBeInTheDocument();
+    expect(
+      within(inPack).getByRole('button', { name: /Check for updates/i }),
+    ).toBeInTheDocument();
   });
 
   // ── Available row presentation edge case ──────────────────────────
   it('shows the Local badge for an available mod with a source but no GitHub/Nexus link', async () => {
     const profile = setupPack({
       available: [
-        modInfo({ name: 'SideloadMod', folder_name: 'SideloadMod', source: 'file:///x', github_url: null, nexus_url: null }),
+        modInfo({
+          name: 'SideloadMod',
+          folder_name: 'SideloadMod',
+          source: 'file:///x',
+          github_url: null,
+          nexus_url: null,
+        }),
       ],
     });
     const user = userEvent.setup();
@@ -1281,47 +1877,179 @@ describe('<ModpackDetail>', () => {
     expect(within(available).getByText(/^Local$/i)).toBeInTheDocument();
   });
 
-  // ── In-pack tag filter ───────────────────────────────────────────
-  describe('in-pack tag filter', () => {
-    it('filters the pack rows to the chosen tag', async () => {
+  // ── In-pack visual sorting ───────────────────────────────────────
+  describe('in-pack visual sorting', () => {
+    it('hides visual sort controls until enabled and explains that load order is unchanged', async () => {
       const profile = setupPack({
         packName: 'Sample',
         inPack: [
-          modInfo({ name: 'CombatMod', folder_name: 'CombatMod', tags: ['combat'] }),
+          modInfo({
+            name: 'CombatMod',
+            folder_name: 'CombatMod',
+            tags: ['combat'],
+          }),
           modInfo({ name: 'UiMod', folder_name: 'UiMod', tags: ['ui'] }),
         ],
       });
       const user = userEvent.setup();
       render(<Wrap {...baseProps()} profile={profile} />);
-      // Both rows present initially.
-      expect((await screen.findAllByText('CombatMod')).length).toBeGreaterThan(0);
-      expect(screen.getAllByText('UiMod').length).toBeGreaterThan(0);
-      // Filter to "combat".
-      await chooseOption(user, /tag/i, 'combat');
-      await waitFor(() => expect(screen.queryByText('UiMod')).toBeNull());
-      expect(screen.getAllByText('CombatMod').length).toBeGreaterThan(0);
+      const inPack = await screen.findByTestId('modpack-detail-in-pack');
+
+      expect(within(inPack).getByText(/saved load order/i)).toBeInTheDocument();
+      expect(
+        within(inPack).getByText(/top mod loads first/i),
+      ).toBeInTheDocument();
+      expect(
+        within(inPack).getByRole('button', {
+          name: /Show visual sort options/i,
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(inPack).queryByRole('combobox', { name: /Sort/i }),
+      ).toBeNull();
+      expect(
+        within(inPack).queryByRole('combobox', { name: /Tag/i }),
+      ).toBeNull();
+
+      await user.click(
+        within(inPack).getByRole('button', {
+          name: /Show visual sort options/i,
+        }),
+      );
+      expect(
+        within(inPack).getByText(/only changes this screen/i),
+      ).toBeInTheDocument();
+      expect(within(inPack).getByText(/stay unchanged/i)).toBeInTheDocument();
+      expect(
+        within(inPack).getByRole('button', {
+          name: /Hide visual sort options/i,
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(inPack).getByRole('combobox', { name: /Sort/i }),
+      ).toBeInTheDocument();
+      expect(
+        within(inPack).getByRole('combobox', { name: /Tag/i }),
+      ).toBeInTheDocument();
     });
 
-    it('filters the pack rows to mods with no tags', async () => {
+    it('prioritizes the chosen tag visually without hiding other pack rows', async () => {
       const profile = setupPack({
         packName: 'Sample',
         inPack: [
-          modInfo({ name: 'TaggedMod', folder_name: 'TaggedMod', tags: ['combat'] }),
-          modInfo({ name: 'UntaggedMod', folder_name: 'UntaggedMod', tags: [] }),
+          modInfo({ name: 'UiMod', folder_name: 'UiMod', tags: ['ui'] }),
+          modInfo({
+            name: 'CombatMod',
+            folder_name: 'CombatMod',
+            tags: ['combat'],
+          }),
         ],
       });
       const user = userEvent.setup();
       render(<Wrap {...baseProps()} profile={profile} />);
-      expect((await screen.findAllByText('TaggedMod')).length).toBeGreaterThan(0);
+      const inPack = await screen.findByTestId('modpack-detail-in-pack');
+      await user.click(
+        within(inPack).getByRole('button', {
+          name: /Show visual sort options/i,
+        }),
+      );
+
+      await chooseOption(user, /tag/i, 'combat');
+      const rows = () =>
+        [...inPack.querySelectorAll('[data-testid="library-row"]')].map(
+          (row) => row.textContent ?? '',
+        );
+      await waitFor(() => {
+        expect(rows()[0]).toContain('CombatMod');
+        expect(rows()[1]).toContain('UiMod');
+      });
+      expect(
+        getInvokeCalls().filter(
+          (call) => call.cmd === 'set_profile_load_order',
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('keeps No tags as a visual-only untagged view', async () => {
+      const profile = setupPack({
+        packName: 'Sample',
+        inPack: [
+          modInfo({
+            name: 'TaggedMod',
+            folder_name: 'TaggedMod',
+            tags: ['combat'],
+          }),
+          modInfo({
+            name: 'UntaggedMod',
+            folder_name: 'UntaggedMod',
+            tags: [],
+          }),
+        ],
+      });
+      const user = userEvent.setup();
+      render(<Wrap {...baseProps()} profile={profile} />);
+      expect((await screen.findAllByText('TaggedMod')).length).toBeGreaterThan(
+        0,
+      );
       expect(screen.getAllByText('UntaggedMod').length).toBeGreaterThan(0);
 
-      await user.click(screen.getByRole('combobox', { name: 'Tag' }));
+      const inPack = await screen.findByTestId('modpack-detail-in-pack');
+      await user.click(
+        within(inPack).getByRole('button', {
+          name: /Show visual sort options/i,
+        }),
+      );
+      await user.click(within(inPack).getByRole('combobox', { name: 'Tag' }));
       const listbox = await screen.findByRole('listbox');
-      expect(within(listbox).getByRole('option', { name: /No tags/i })).toBeInTheDocument();
-      await user.click(within(listbox).getByRole('option', { name: /No tags/i }));
+      expect(
+        within(listbox).getByRole('option', { name: /No tags/i }),
+      ).toBeInTheDocument();
+      await user.click(
+        within(listbox).getByRole('option', { name: /No tags/i }),
+      );
 
       await waitFor(() => expect(screen.queryByText('TaggedMod')).toBeNull());
       expect(screen.getAllByText('UntaggedMod').length).toBeGreaterThan(0);
+    });
+
+    it('turning visual sort off resets the displayed list to saved load order', async () => {
+      const profile = setupPack({
+        packName: 'Sample',
+        inPack: [
+          modInfo({ name: 'ZetaMod', folder_name: 'ZetaMod', tags: ['ui'] }),
+          modInfo({
+            name: 'AlphaMod',
+            folder_name: 'AlphaMod',
+            tags: ['combat'],
+          }),
+        ],
+      });
+      const user = userEvent.setup();
+      render(<Wrap {...baseProps()} profile={profile} />);
+      const inPack = await screen.findByTestId('modpack-detail-in-pack');
+      const rows = () =>
+        [...inPack.querySelectorAll('[data-testid="library-row"]')].map(
+          (row) => row.textContent ?? '',
+        );
+
+      await waitFor(() => expect(rows()[0]).toContain('ZetaMod'));
+      await user.click(
+        within(inPack).getByRole('button', {
+          name: /Show visual sort options/i,
+        }),
+      );
+      await chooseOption(user, /Sort/i, 'Name A-Z');
+      await waitFor(() => expect(rows()[0]).toContain('AlphaMod'));
+      await user.click(
+        within(inPack).getByRole('button', {
+          name: /Hide visual sort options/i,
+        }),
+      );
+
+      expect(
+        within(inPack).queryByRole('combobox', { name: /Sort/i }),
+      ).toBeNull();
+      await waitFor(() => expect(rows()[0]).toContain('ZetaMod'));
     });
   });
 
@@ -1329,20 +2057,32 @@ describe('<ModpackDetail>', () => {
   describe('inactive-pack toggle hint', () => {
     it('shows the hint with a Switch action on a non-active pack', async () => {
       registerInvokeHandler('get_active_profile', () => 'Some Other Pack');
-      const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+      const profile = setupPack({
+        packName: 'Sample',
+        inPack: [modInfo({ name: 'M', folder_name: 'M' })],
+      });
       const onSwitch = vi.fn();
       render(<Wrap {...baseProps()} profile={profile} onSwitch={onSwitch} />);
-      const hint = await screen.findByText(/only available for the active modpack/i);
+      const hint = await screen.findByText(
+        /only available for the active modpack/i,
+      );
       expect(hint).toBeInTheDocument();
       // The hint's Switch control fires onSwitch for THIS pack.
-      const region = hint.closest('[data-testid="modpack-detail-inactive-hint"]') as HTMLElement;
-      fireEvent.click(within(region).getByRole('button', { name: /switch to/i }));
+      const region = hint.closest(
+        '[data-testid="modpack-detail-inactive-hint"]',
+      ) as HTMLElement;
+      fireEvent.click(
+        within(region).getByRole('button', { name: /switch to/i }),
+      );
       expect(onSwitch).toHaveBeenCalledWith('Sample');
     });
 
     it('hides the hint when the pack is active', async () => {
       registerInvokeHandler('get_active_profile', () => 'Sample');
-      const profile = setupPack({ packName: 'Sample', inPack: [modInfo({ name: 'M', folder_name: 'M' })] });
+      const profile = setupPack({
+        packName: 'Sample',
+        inPack: [modInfo({ name: 'M', folder_name: 'M' })],
+      });
       render(<Wrap {...baseProps()} profile={profile} onSwitch={vi.fn()} />);
       await screen.findByTestId('modpack-detail-in-pack');
       expect(screen.queryByTestId('modpack-detail-inactive-hint')).toBeNull();

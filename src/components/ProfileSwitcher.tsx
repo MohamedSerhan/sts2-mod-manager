@@ -6,6 +6,7 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { recordModpackLaunch } from '../lib/modpackUsage';
+import { findProfileForIdentifier, safeProfileDisplayName } from '../lib/profileDisplay';
 import { switchResultDetails, switchResultHasProblems } from '../lib/switchResultSummary';
 import type { Profile, SubscriptionUpdate } from '../types';
 
@@ -91,6 +92,11 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
   }, [onClose]);
 
   const profileKey = (profile: Profile) => profile.id || profile.name;
+  const activeProfileObject =
+    findProfileForIdentifier(profiles, activeProfileId)
+    ?? findProfileForIdentifier(profiles, activeProfile);
+  const activeProfileKey = activeProfileId ?? activeProfile;
+  const activeProfileDisplayName = activeProfileObject?.name ?? safeProfileDisplayName(activeProfile);
 
   async function handleSwitch(profile: Profile) {
     const key = profileKey(profile);
@@ -99,12 +105,12 @@ export function ProfileSwitcher({ onClose, onAddPack, onManageAll }: Props) {
       onClose();
       return;
     }
-    if (activeProfile) {
+    if (activeProfileKey) {
       try {
-        const drift = await getProfileDrift(activeProfileId ?? activeProfile);
+        const drift = await getProfileDrift(activeProfileKey);
         if (drift.has_drift) {
           const ok = await confirm({
-            title: t('profiles.confirm.switch.title', { name: activeProfile }),
+            title: t('profiles.confirm.switch.title', { name: activeProfileDisplayName ?? t('quickAdd.unknown') }),
             body: t('profiles.confirm.switch.body'),
             warning: t('profiles.confirm.switch.warning'),
             confirmLabel: t('profiles.confirm.switch.confirmLabel'),

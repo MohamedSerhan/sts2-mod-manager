@@ -54,6 +54,19 @@ describe('<ToastProvider> + useToast', () => {
     expect(alert.textContent).toContain('Boom');
   });
 
+  it('redacts UUID-shaped profile ids before rendering toast text', async () => {
+    const uuid = '731aeaec-7f3d-4859-baec-16219701e2e7';
+    const user = userEvent.setup();
+    render(
+      <ToastProvider>
+        <ToastTrigger fire={(t) => t.error(`Repair failed for ${uuid}`)} />
+      </ToastProvider>,
+    );
+    await user.click(screen.getByText('fire'));
+    expect(screen.getByRole('alert').textContent).toContain('Repair failed for Unknown');
+    expect(screen.queryByText(new RegExp(uuid))).toBeNull();
+  });
+
   it('renders info via the generic toast() method', async () => {
     const user = userEvent.setup();
     render(

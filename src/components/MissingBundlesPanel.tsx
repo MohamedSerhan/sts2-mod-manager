@@ -1,12 +1,20 @@
-import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, FolderOpen, RotateCw, Trash2, Upload, X } from 'lucide-react';
-import type { Profile } from '../types';
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  AlertTriangle,
+  Check,
+  FolderOpen,
+  RotateCw,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
+import type { Profile } from "../types";
 import {
   openModsFolder,
   restoreProfileModFromShare,
   setProfileModMembership,
-} from '../hooks/useTauri';
+} from "../hooks/useTauri";
 
 /**
  * Recovery panel rendered inline inside PublishModal when the Rust
@@ -22,7 +30,25 @@ import {
  * source before publishing again.
  */
 
-export type ModRepairStatus = 'pending' | 'repairing' | 'removing' | 'success' | 'removed' | 'failed';
+export type ModRepairStatus =
+  | "pending"
+  | "repairing"
+  | "removing"
+  | "success"
+  | "removed"
+  | "failed";
+export type PublishIssueKind =
+  | "missing_unrecoverable"
+  | "missing_recoverable"
+  | "preserved_remote_bundle"
+  | "upload_failed"
+  | "unknown";
+
+export interface ParsedPublishIssue {
+  name: string;
+  kind: PublishIssueKind;
+  detail?: string;
+}
 
 interface Props {
   profile: Profile;
@@ -60,18 +86,124 @@ export function parseMissingBundlesError(
     /missing bundles for (\d+) mod\(s?\):\s*(.+?)\.\s*(?:Details:\s*(.+?)\.\s*)?Restore or reinstall/is,
   );
   if (!match) return null;
-  const count = parseInt(match[1] ?? '0', 10);
-  const mods = (match[2] ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  const details = (match[3] ?? '').trim();
+  const mods = uniqueNames(
+    (match[2] ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  );
+  const count = mods.length || parseInt(match[1] ?? "0", 10);
+  const details = (match[3] ?? "").trim();
   return details ? { count, mods, details } : { count, mods };
 }
 
 function isUploadFailureDetail(details: string | null | undefined): boolean {
   if (!details) return false;
-  return /already_exists|release asset|failed to upload|upload of|github|rate-limit|network/i.test(details);
+  return /already_exists|release asset|failed to upload|upload of|github|rate-limit|network/i.test(
+    details,
+  );
+}
+
+function isMissingLocalDetail(details: string | null | undefined): boolean {
+  if (!details) return false;
+  return /not installed locally|local files are missing|missing locally|not refreshed locally/i.test(
+    details,
+  );
+}
+
+function kindFromDetail(detail: string): PublishIssueKind {
+  const marker = detail.match(/\[publish_issue:([a-z_]+)\]/i);
+  if (marker) {
+    const kind = marker[1] as PublishIssueKind;
+    if (
+      kind === "missing_unrecoverable" ||
+      kind === "missing_recoverable" ||
+      kind === "preserved_remote_bundle" ||
+      kind === "upload_failed"
+    ) {
+      return kind;
+    }
+  }
+  if (isMissingLocalDetail(detail)) return "missing_unrecoverable";
+  if (isUploadFailureDetail(detail)) return "upload_failed";
+  return "unknown";
+}
+
+function cleanIssueDetail(detail: string): string {
+  return detail.replace(/\[publish_issue:[a-z_]+\]\s*/gi, "").trim();
+}
+
+function uniqueNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  return names.filter((name) => {
+    const key = name.trim().toLocaleLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function issuePriority(kind: PublishIssueKind): number {
+  return kind === "upload_failed" ? 2 : 1;
+}
+
+export function parseMissingBundleIssues(
+  modNames: string[],
+  errorDetails?: string | null,
+): ParsedPublishIssue[] {
+  const issues: ParsedPublishIssue[] = [];
+  const seen = new Map<string, number>();
+  const addIssue = (issue: ParsedPublishIssue) => {
+    const key = issue.name.trim().toLocaleLowerCase();
+    if (!key) return;
+    const existingIndex = seen.get(key);
+    if (existingIndex == null) {
+      seen.set(key, issues.length);
+      issues.push(issue);
+      return;
+    }
+    if (issuePriority(issue.kind) > issuePriority(issues[existingIndex].kind)) {
+      issues[existingIndex] = issue;
+    }
+  };
+  const segments = (errorDetails ?? "")
+    .split(/\s+\|\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  for (const segment of segments) {
+    const matchedName = modNames.find((name) => segment.startsWith(`${name}:`));
+    const colon = segment.indexOf(":");
+    const name =
+      matchedName ?? (colon > 0 ? segment.slice(0, colon).trim() : "");
+    if (!name) continue;
+    const rawDetail = matchedName
+      ? segment.slice(matchedName.length + 1).trim()
+      : segment.slice(colon + 1).trim();
+    const detail = cleanIssueDetail(rawDetail);
+    const kind = kindFromDetail(rawDetail);
+    addIssue({ name, kind, detail });
+  }
+
+  const explicitMissing = issues.some(
+    (issue) =>
+      issue.kind === "missing_unrecoverable" ||
+      issue.kind === "missing_recoverable",
+  );
+  const explicitUpload = issues.some((issue) => issue.kind === "upload_failed");
+  const defaultKind: PublishIssueKind =
+    errorDetails && explicitUpload && !explicitMissing
+      ? "upload_failed"
+      : "missing_unrecoverable";
+
+  for (const name of uniqueNames(modNames)) {
+    const key = name.trim().toLocaleLowerCase();
+    if (!seen.has(key)) {
+      addIssue({ name, kind: defaultKind });
+    }
+  }
+
+  return issues;
 }
 
 export function MissingBundlesPanel({
@@ -82,15 +214,48 @@ export function MissingBundlesPanel({
   onCancel,
 }: Props) {
   const { t } = useTranslation();
-  const [statuses, setStatuses] = useState<Record<string, ModRepairStatus>>(() =>
-    Object.fromEntries(modNames.map((n) => [n, 'pending' as ModRepairStatus])),
+  const displayModNames = uniqueNames(modNames);
+  const [statuses, setStatuses] = useState<Record<string, ModRepairStatus>>(
+    () =>
+      Object.fromEntries(
+        displayModNames.map((n) => [n, "pending" as ModRepairStatus]),
+      ),
   );
   const [repairing, setRepairing] = useState(false);
   const [sharing, setSharing] = useState(false);
 
   const busy = repairing || sharing;
-  const uploadFailure = isUploadFailureDetail(errorDetails);
+  const issues = parseMissingBundleIssues(displayModNames, errorDetails);
+  const hasUploadFailure = issues.some(
+    (issue) => issue.kind === "upload_failed",
+  );
+  const localRecoveryNames = uniqueNames(
+    issues
+      .filter(
+        (issue) =>
+          issue.kind === "missing_unrecoverable" ||
+          issue.kind === "missing_recoverable",
+      )
+      .map((issue) => issue.name),
+  );
+  const hasMissingLocal = localRecoveryNames.length > 0;
+  const mixedFailure = hasUploadFailure && hasMissingLocal;
   const profileKey = profile.id || profile.name;
+  const titleKey = mixedFailure
+    ? "mixedTitle"
+    : hasUploadFailure
+      ? "uploadTitle"
+      : "localTitle";
+  const bodyKey = mixedFailure
+    ? "mixedBody"
+    : hasUploadFailure
+      ? "uploadBody"
+      : "localBody";
+  const hintKey = mixedFailure
+    ? "mixedHint"
+    : hasUploadFailure
+      ? "uploadHint"
+      : "localHint";
 
   function profileModForName(name: string) {
     return profile.mods.find((mod) => mod.name === name);
@@ -117,9 +282,9 @@ export function MissingBundlesPanel({
     // for the auto-retry decision (setState is batched and stale closures
     // make `statuses` inside the loop unreliable).
     const passResults: Record<string, ModRepairStatus> = { ...statuses };
-    for (const name of modNames) {
-      if (passResults[name] === 'success') continue; // skip already-fixed
-      setStatuses((prev) => ({ ...prev, [name]: 'repairing' }));
+    for (const name of localRecoveryNames) {
+      if (passResults[name] === "success") continue; // skip already-fixed
+      setStatuses((prev) => ({ ...prev, [name]: "repairing" }));
       try {
         const mod = profileModForName(name);
         await restoreProfileModFromShare(
@@ -128,15 +293,15 @@ export function MissingBundlesPanel({
           mod?.folder_name ?? null,
           mod?.mod_id ?? null,
         );
-        passResults[name] = 'success';
-        setStatuses((prev) => ({ ...prev, [name]: 'success' }));
+        passResults[name] = "success";
+        setStatuses((prev) => ({ ...prev, [name]: "success" }));
       } catch {
-        passResults[name] = 'failed';
-        setStatuses((prev) => ({ ...prev, [name]: 'failed' }));
+        passResults[name] = "failed";
+        setStatuses((prev) => ({ ...prev, [name]: "failed" }));
       }
     }
     setRepairing(false);
-    const allOk = modNames.every((n) => passResults[n] === 'success');
+    const allOk = localRecoveryNames.every((n) => passResults[n] === "success");
     if (allOk) {
       try {
         await onRetryPublish();
@@ -150,10 +315,10 @@ export function MissingBundlesPanel({
   async function handleRemoveFromPack() {
     setRepairing(true);
     const passResults: Record<string, ModRepairStatus> = { ...statuses };
-    for (const name of modNames) {
-      if (passResults[name] === 'removed') continue;
+    for (const name of localRecoveryNames) {
+      if (passResults[name] === "removed") continue;
       const mod = profileModForName(name);
-      setStatuses((prev) => ({ ...prev, [name]: 'removing' }));
+      setStatuses((prev) => ({ ...prev, [name]: "removing" }));
       try {
         await setProfileModMembership(
           profileKey,
@@ -164,15 +329,15 @@ export function MissingBundlesPanel({
           false,
           mod?.source ?? null,
         );
-        passResults[name] = 'removed';
-        setStatuses((prev) => ({ ...prev, [name]: 'removed' }));
+        passResults[name] = "removed";
+        setStatuses((prev) => ({ ...prev, [name]: "removed" }));
       } catch {
-        passResults[name] = 'failed';
-        setStatuses((prev) => ({ ...prev, [name]: 'failed' }));
+        passResults[name] = "failed";
+        setStatuses((prev) => ({ ...prev, [name]: "failed" }));
       }
     }
     setRepairing(false);
-    const allOk = modNames.every((n) => passResults[n] === 'removed');
+    const allOk = localRecoveryNames.every((n) => passResults[n] === "removed");
     if (allOk) {
       try {
         await onRetryPublish();
@@ -196,30 +361,24 @@ export function MissingBundlesPanel({
         <AlertTriangle size={16} className="gf-missing-bundles-icon" />
         <div>
           <h2 className="gf-missing-bundles-title">
-            {uploadFailure
-              ? t('publish.missingBundles.uploadTitle')
-              : t('publish.missingBundles.localTitle')}
+            {t(`publish.missingBundles.${titleKey}`)}
           </h2>
           <p className="gf-missing-bundles-body">
-            {uploadFailure
-              ? t('publish.missingBundles.uploadBody')
-              : t('publish.missingBundles.localBody')}
+            {t(`publish.missingBundles.${bodyKey}`)}
           </p>
           <p className="gf-missing-bundles-subbody">
-            {uploadFailure
-              ? t('publish.missingBundles.uploadHint')
-              : t('publish.missingBundles.localHint')}
+            {t(`publish.missingBundles.${hintKey}`)}
           </p>
           {errorDetails && (
             <p className="gf-missing-bundles-detail">
-              {t('publish.missingBundles.lastError', { error: errorDetails })}
+              {t("publish.missingBundles.lastError", { error: errorDetails })}
             </p>
           )}
         </div>
       </div>
       <ul className="gf-missing-bundles-list">
-        {modNames.map((name) => {
-          const status = statuses[name] ?? 'pending';
+        {displayModNames.map((name) => {
+          const status = statuses[name] ?? "pending";
           return (
             <li
               key={name}
@@ -227,27 +386,34 @@ export function MissingBundlesPanel({
             >
               <span className="gf-missing-bundles-name">{name}</span>
               <span className={`gf-missing-bundles-status status-${status}`}>
-                {(status === 'success' || status === 'removed') && (
+                {(status === "success" || status === "removed") && (
                   <Check size={12} className="gf-missing-bundles-status-icon" />
                 )}
-                {status === 'failed' && (
+                {status === "failed" && (
                   <X size={12} className="gf-missing-bundles-status-icon" />
                 )}
-                {status === 'pending' && t('publish.missingBundles.statusPending')}
-                {status === 'repairing' && t('publish.missingBundles.statusRepairing')}
-                {status === 'removing' && t('publish.missingBundles.statusRemoving')}
-                {status === 'success' && t('publish.missingBundles.statusSuccess')}
-                {status === 'removed' && t('publish.missingBundles.statusRemoved')}
-                {status === 'failed' && t('publish.missingBundles.statusFailed')}
+                {status === "pending" &&
+                  t("publish.missingBundles.statusPending")}
+                {status === "repairing" &&
+                  t("publish.missingBundles.statusRepairing")}
+                {status === "removing" &&
+                  t("publish.missingBundles.statusRemoving")}
+                {status === "success" &&
+                  t("publish.missingBundles.statusSuccess")}
+                {status === "removed" &&
+                  t("publish.missingBundles.statusRemoved")}
+                {status === "failed" &&
+                  t("publish.missingBundles.statusFailed")}
               </span>
-              {status === 'failed' && (
+              {status === "failed" && (
                 <button
                   type="button"
                   className="gf-btn-3 gf-missing-bundles-folder"
                   onClick={handleOpenFolder}
-                  title={t('publish.missingBundles.openFolderTitle')}
+                  title={t("publish.missingBundles.openFolderTitle")}
                 >
-                  <FolderOpen size={12} /> {t('publish.missingBundles.openFolder')}
+                  <FolderOpen size={12} />{" "}
+                  {t("publish.missingBundles.openFolder")}
                 </button>
               )}
             </li>
@@ -261,10 +427,38 @@ export function MissingBundlesPanel({
           onClick={onCancel}
           disabled={busy}
         >
-          {t('common.cancel')}
+          {t("common.cancel")}
         </button>
         <div style={{ flex: 1 }} />
-        {uploadFailure ? (
+        {hasMissingLocal && (
+          <>
+            <button
+              type="button"
+              className="gf-btn-2"
+              disabled={busy}
+              onClick={handleRemoveFromPack}
+              title={t("publish.missingBundles.removeBtnTitle")}
+            >
+              <Trash2 size={12} />
+              {repairing
+                ? t("publish.missingBundles.fixing")
+                : t("publish.missingBundles.removeBtn")}
+            </button>
+            <button
+              type="button"
+              className="gf-btn"
+              disabled={busy}
+              onClick={handleReinstall}
+              title={t("publish.missingBundles.reinstallBtnTitle")}
+            >
+              <RotateCw size={12} />
+              {repairing
+                ? t("publish.missingBundles.fixing")
+                : t("publish.missingBundles.reinstallBtn")}
+            </button>
+          </>
+        )}
+        {hasUploadFailure && (
           <button
             type="button"
             className="gf-btn"
@@ -273,36 +467,9 @@ export function MissingBundlesPanel({
           >
             <Upload size={12} />
             {sharing
-              ? t('publish.missingBundles.sharingAgain')
-              : t('publish.missingBundles.shareAgainBtn')}
+              ? t("publish.missingBundles.sharingAgain")
+              : t("publish.missingBundles.shareAgainBtn")}
           </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              className="gf-btn-2"
-              disabled={busy}
-              onClick={handleRemoveFromPack}
-              title={t('publish.missingBundles.removeBtnTitle')}
-            >
-              <Trash2 size={12} />
-              {repairing
-                ? t('publish.missingBundles.fixing')
-                : t('publish.missingBundles.removeBtn')}
-            </button>
-            <button
-              type="button"
-              className="gf-btn"
-              disabled={busy}
-              onClick={handleReinstall}
-              title={t('publish.missingBundles.reinstallBtnTitle')}
-            >
-              <RotateCw size={12} />
-              {repairing
-                ? t('publish.missingBundles.fixing')
-                : t('publish.missingBundles.reinstallBtn')}
-            </button>
-          </>
         )}
       </div>
     </section>

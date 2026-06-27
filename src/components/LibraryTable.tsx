@@ -27,7 +27,13 @@
  * view can re-pull after a mutation without leaking into LibraryTable
  * state.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search } from 'lucide-react';
 import { Card } from './Card';
@@ -45,12 +51,15 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { isActionableUpdate } from '../lib/auditState';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
+import { profileDisplayName } from '../lib/profileDisplay';
 import { Select } from './Select';
 import {
   getLibraryVersionOptions,
   getProfileMemberships,
+  previewLibraryModVersionRemoval,
+  removeLibraryModVersion,
+  removeLibraryModVersionManual,
   selectLibraryModVersion,
-  selectProfileModVersion,
   setProfileLoadOrder,
   setProfileModMembership,
   toggleMod,
@@ -59,6 +68,9 @@ import type {
   ModAuditEntry,
   ModInfo,
   LocalModVersionOption,
+  LocalModVersionRemovalPreview,
+  ManualModVersionRemovalMode,
+  ManualModVersionProfileReplacement,
   Profile,
   ProfileMembershipGrid,
   ProfileMembershipMod,
@@ -110,18 +122,20 @@ export interface LibraryTableProps {
    *  the handle/chip stay hidden and the drag handlers no-op — there's
    *  no load order to set across the all-installed-mods list. */
   enableReorder?: boolean;
-  /** Couple membership with the active loadout: when true AND this table
-   *  is focused on the *active* modpack, adding/removing a mod via the
-   *  kebab also enables/disables it in the game folder. The modpack detail
-   *  view sets this so "the pack is the live loadout" — removing a mod from
-   *  your active pack actually unloads it. All Mods leaves it off (default),
-   *  keeping membership and on-disk state independent there. */
+  /** Couple membership additions with the active loadout: when true AND this
+   *  table is focused on the *active* modpack, adding a stored mod via the
+   *  kebab also enables it in the game folder. Removing from a pack remains a
+   *  pure membership edit; the storage switch owns active/stored state. */
   coupleActiveStorage?: boolean;
   /** Dedicated modpack view (shows only this pack's mods). Hides the sort
    *  control + the "store unused" bulk action + the checkbox/drag explainer
    *  (all redundant or wrong there), and switches each row's visible action
    *  to "Remove from pack". */
   packScoped?: boolean;
+  /** In the dedicated modpack view, allow presentation-only sorts from the
+   *  Mod Library. When false, pack rows always render in saved load order and
+   *  ignore priorityTag/sort UI state. */
+  packVisualSortEnabled?: boolean;
   /** Extra controls rendered in the toolbar, to the right of the search box
    *  (where sort/store-unused sit in the All Mods view). The modpack view
    *  puts its "+ Add mods" / Edit / Load order actions here so they share
@@ -145,6 +159,9 @@ export interface LibraryTableProps {
    *  tag A–Z (untagged last); ties by display name. OVERRIDES the sort mode
    *  while a tag is chosen, and hides nothing — it only reorders. */
   priorityTag?: string;
+  /** Additional rows supplied by the parent when the backend membership grid
+   *  cannot represent a saved manifest entry, e.g. a missing modpack member. */
+  extraRows?: ProfileMembershipMod[];
 
   // ─── ModRow-style per-row action surface (optional) ──────────────
   // When supplied, these are forwarded to LibraryRow's kebab menu.
@@ -182,7 +199,11 @@ export interface LibraryTableProps {
   onFindGithubFromNexus?: (mod: ModInfo) => void;
   onOpenExternalUrl?: (url: string, mod: ModInfo) => void;
   onAutoDetectSource?: (mod: ModInfo) => void;
-  onSelectProfileVersion?: (current: ProfileMembershipMod, selected: LocalModVersionOption, applyToDisk: boolean) => Promise<void> | void;
+  onSelectProfileVersion?: (
+    current: ProfileMembershipMod,
+    selected: LocalModVersionOption,
+    applyToDisk: boolean,
+  ) => Promise<void> | void;
   /** Render-prop for the inline source editor: when a row's key
    *  matches, the parent returns the editor JSX to slot inside the
    *  row. Returns null otherwise. */
@@ -211,10 +232,15 @@ function firstTagKey(
   row: ProfileMembershipMod,
   modInfoByKey?: Map<string, ModInfo>,
 ): string | null {
-  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
-  const tags = (info?.tags ?? []).map((tg) => tg.trim().toLowerCase()).filter(Boolean);
+  const info =
+    modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  const tags = (info?.tags ?? [])
+    .map((tg) => tg.trim().toLowerCase())
+    .filter(Boolean);
   if (tags.length === 0) return null;
-  return tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))[0];
+  return tags.sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }),
+  )[0];
 }
 
 /** Whether a row's ModInfo carries the given (already case-folded) tag. */
@@ -223,8 +249,11 @@ function rowHasTag(
   lowerTag: string,
   modInfoByKey?: Map<string, ModInfo>,
 ): boolean {
-  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
-  return (info?.tags ?? []).some((tg) => tg.trim().toLocaleLowerCase() === lowerTag);
+  const info =
+    modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  return (info?.tags ?? []).some(
+    (tg) => tg.trim().toLocaleLowerCase() === lowerTag,
+  );
 }
 
 /** Whether a row has at least one manager tag after trimming whitespace. */
@@ -232,7 +261,8 @@ function rowHasAnyTags(
   row: ProfileMembershipMod,
   modInfoByKey?: Map<string, ModInfo>,
 ): boolean {
-  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  const info =
+    modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
   return (info?.tags ?? []).some((tg) => tg.trim().length > 0);
 }
 
@@ -240,13 +270,60 @@ function sourceHintForRow(
   row: ProfileMembershipMod,
   modInfoByKey?: Map<string, ModInfo>,
 ): string | null {
-  const info = modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+  const info =
+    modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
   return info?.source ?? info?.github_url ?? info?.nexus_url ?? null;
 }
 
 function cleanDisplayVersion(version: string): string {
   const cleaned = version.trim().replace(/^v/i, '');
   return cleaned || '?';
+}
+
+function versionOptionIdentity(option: LocalModVersionOption): string {
+  return (option.mod_id ?? option.folder_name ?? option.name)
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function dedupeVersionOptions(
+  options: LocalModVersionOption[],
+): LocalModVersionOption[] {
+  const sorted = [...options].sort((a, b) => {
+    const byVersion = modVersionSortValue(b.version).localeCompare(
+      modVersionSortValue(a.version),
+      undefined,
+      { sensitivity: 'base', numeric: true },
+    );
+    return (
+      byVersion ||
+      Number(b.installed_enabled) - Number(a.installed_enabled) ||
+      Number(b.installed) - Number(a.installed) ||
+      Number(b.cached) - Number(a.cached) ||
+      (b.used_by_profiles?.length ?? 0) - (a.used_by_profiles?.length ?? 0) ||
+      a.name.localeCompare(b.name, undefined, {
+        sensitivity: 'base',
+        numeric: true,
+      })
+    );
+  });
+  const seen = new Set<string>();
+  return sorted.filter((option) => {
+    const key = `${versionOptionIdentity(option)}::${modVersionSortValue(option.version)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+interface VersionRemovalWizardState {
+  row: ProfileMembershipMod;
+  option: LocalModVersionOption;
+  preview: LocalModVersionRemovalPreview;
+  mode: ManualModVersionRemovalMode;
+  activeReplacementId: string;
+  profileReplacementIds: Record<string, string>;
+  committing: boolean;
 }
 
 export function LibraryTable({
@@ -261,11 +338,13 @@ export function LibraryTable({
   enableReorder = false,
   coupleActiveStorage = false,
   packScoped = false,
+  packVisualSortEnabled = false,
   toolbarActions,
   bulkActionsBar,
   reloadToken,
   filterRow,
   priorityTag = '',
+  extraRows = [],
   modInfoByKey,
   auditByKey,
   gameRunning,
@@ -294,22 +373,45 @@ export function LibraryTable({
   const { t } = useTranslation();
   const toastCtx = useToast();
   const confirm = useConfirm();
-  const { mods: appMods, refreshAll, activeProfile, activeProfileId } = useApp();
-  const focusedProfileLabel = modpackLabel ?? modpackName;
+  const {
+    mods: appMods,
+    refreshAll,
+    activeProfile,
+    activeProfileId,
+  } = useApp();
+  const focusedProfileLabel = profileDisplayName(
+    modpackLabel ?? modpackName,
+    t('quickAdd.unknown'),
+  );
 
   const [grid, setGrid] = useState<ProfileMembershipGrid | null>(null);
-  const [libraryVersionOptionsById, setLibraryVersionOptionsById] = useState<Map<string, LocalModVersionOption[]>>(new Map());
+  const [libraryVersionOptionsById, setLibraryVersionOptionsById] = useState<
+    Map<string, LocalModVersionOption[]>
+  >(new Map());
   const [loading, setLoading] = useState(modpackName != null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState(initialSearch);
   const [sort, setSort] = useState<LibrarySortMode>(
-    initialSort ?? (packScoped ? 'loadOrder' : modpackName ? 'inPackFirst' : 'nameAsc'),
+    initialSort ??
+      (packScoped ? 'loadOrder' : modpackName ? 'inPackFirst' : 'nameAsc'),
   );
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
   const [storageSaving, setStorageSaving] = useState<string | null>(null);
+  const [removingVersionKey, setRemovingVersionKey] = useState<string | null>(
+    null,
+  );
+  const [versionRemovalWizard, setVersionRemovalWizard] =
+    useState<VersionRemovalWizardState | null>(null);
+  const [selectedVersionKeyByRow, setSelectedVersionKeyByRow] = useState<
+    Map<string, string>
+  >(new Map());
   // Comfortable / compact row density (persisted, shared with the modpack view).
   const [density, setDensity] = useModListDensity();
+
+  useEffect(() => {
+    if (packScoped && !packVisualSortEnabled) setSort('loadOrder');
+  }, [packScoped, packVisualSortEnabled]);
 
   // Scroll-pin safety net (shared with ModpackDetail via usePinScroll):
   // a row mutation triggers refreshAll + a full re-render, and we don't want
@@ -338,7 +440,11 @@ export function LibraryTable({
     // name, so the signal changes only when the set of installed identities
     // does. Written as an escape, not a literal NUL byte — a raw NUL made the
     // whole file read as binary to ripgrep/grep.
-    () => appMods.map((m) => m.folder_name ?? m.name).sort().join('\u0000'),
+    () =>
+      appMods
+        .map((m) => m.folder_name ?? m.name)
+        .sort()
+        .join('\u0000'),
     [appMods],
   );
 
@@ -346,7 +452,7 @@ export function LibraryTable({
     if (modpackName == null) {
       // No-focus mode — rows are synthesized from the AppContext mods
       // array (see the synthesizedGrid useMemo below). Fetch only the compact
-      // version-option map so cache-only updates can still appear here without
+      // version-option map so promoted/downloaded versions can appear here without
       // pulling the full profile-by-mod membership grid.
       try {
         setLoading(true);
@@ -397,16 +503,30 @@ export function LibraryTable({
         folder_name: mod.folder_name,
         mod_id: mod.mod_id,
         display_name: mod.display_name,
+        installed: true,
+        cached: false,
         installed_enabled: mod.enabled,
         version_options: mod.mod_version_id
-          ? libraryVersionOptionsById.get(mod.mod_version_id) ?? []
+          ? (libraryVersionOptionsById.get(mod.mod_version_id) ?? [])
           : [],
         profiles: [],
       })),
     };
   }, [modpackName, appMods, libraryVersionOptionsById]);
 
-  const effectiveGrid = modpackName == null ? synthesizedGrid : grid;
+  const baseGrid = modpackName == null ? synthesizedGrid : grid;
+  const effectiveGrid = useMemo<ProfileMembershipGrid | null>(() => {
+    if (!baseGrid || extraRows.length === 0) return baseGrid;
+    const seen = new Set(baseGrid.mods.map((row) => membershipRowKey(row)));
+    const appended = extraRows.filter((row) => {
+      const key = membershipRowKey(row);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (appended.length === 0) return baseGrid;
+    return { ...baseGrid, mods: [...baseGrid.mods, ...appended] };
+  }, [baseGrid, extraRows]);
 
   // Reset pagination when the filter or sort changes, otherwise the
   // user can be looking at "showing 20 of 200" but the visible page
@@ -419,10 +539,25 @@ export function LibraryTable({
    *  Returns undefined when modpackName is null (no-focus mode). */
   function focusedState(row: ProfileMembershipMod) {
     if (modpackName == null) return undefined;
-    return row.profiles.find((p) =>
-      p.profile_id === modpackName || p.profile_name === modpackName
+    return row.profiles.find(
+      (p) => p.profile_id === modpackName || p.profile_name === modpackName,
     );
   }
+
+  const modInfoForRow = useCallback(
+    (row: ProfileMembershipMod) => {
+      const rowKey = membershipRowKey(row);
+      const exact = modInfoByKey?.get(rowKey);
+      if (exact) return exact;
+      if (row.installed === false || row.mod_version_id) return undefined;
+      return (
+        modInfoByKey?.get(row.folder_name ?? '') ??
+        modInfoByKey?.get(row.mod_id ?? '') ??
+        modInfoByKey?.get(row.name)
+      );
+    },
+    [modInfoByKey],
+  );
 
   /** Rows that have this modpack in their `profiles` array (so the
    *  table can show the in-pack subset for drag reorder + counts).
@@ -431,8 +566,8 @@ export function LibraryTable({
     if (!effectiveGrid || modpackName == null) return new Set<string>();
     const set = new Set<string>();
     for (const row of effectiveGrid.mods) {
-      const state = row.profiles.find((p) =>
-        p.profile_id === modpackName || p.profile_name === modpackName
+      const state = row.profiles.find(
+        (p) => p.profile_id === modpackName || p.profile_name === modpackName,
       );
       if (state?.included) set.add(membershipRowKey(row));
     }
@@ -452,14 +587,20 @@ export function LibraryTable({
       .map((row, gridIndex) => ({
         row,
         gridIndex,
-        state: row.profiles.find((p) =>
-          p.profile_id === modpackName || p.profile_name === modpackName
+        state: row.profiles.find(
+          (p) => p.profile_id === modpackName || p.profile_name === modpackName,
         ),
       }))
       .filter(({ state }) => state?.included)
       .sort((a, b) => {
-        const ai = typeof a.state?.order_index === 'number' ? a.state.order_index : Number.MAX_SAFE_INTEGER;
-        const bi = typeof b.state?.order_index === 'number' ? b.state.order_index : Number.MAX_SAFE_INTEGER;
+        const ai =
+          typeof a.state?.order_index === 'number'
+            ? a.state.order_index
+            : Number.MAX_SAFE_INTEGER;
+        const bi =
+          typeof b.state?.order_index === 'number'
+            ? b.state.order_index
+            : Number.MAX_SAFE_INTEGER;
         return ai - bi || a.gridIndex - b.gridIndex;
       })
       .map(({ row }) => row);
@@ -486,35 +627,46 @@ export function LibraryTable({
     // External pre-filter (e.g. Library view's tag filter) is applied
     // first so the table's own search runs against an already-narrowed
     // set.
-    const externallyFiltered = filterRow ? effectiveGrid.mods.filter(filterRow) : effectiveGrid.mods;
-    const preFiltered = priorityTag === NO_TAGS_FILTER_VALUE
-      ? externallyFiltered.filter((row) => !rowHasAnyTags(row, modInfoByKey))
-      : packScoped && priorityTag
-        ? externallyFiltered.filter((row) => rowHasTag(row, priorityTag.toLocaleLowerCase(), modInfoByKey))
+    const externallyFiltered = filterRow
+      ? effectiveGrid.mods.filter(filterRow)
+      : effectiveGrid.mods;
+    const visualSortActive = !packScoped || packVisualSortEnabled;
+    const preFiltered =
+      visualSortActive && priorityTag === NO_TAGS_FILTER_VALUE
+        ? externallyFiltered.filter((row) => !rowHasAnyTags(row, modInfoByKey))
         : externallyFiltered;
     const loadOrderIndex = (row: ProfileMembershipMod) => {
       const rowKey = membershipRowKey(row);
-      const idx = loadOrderDraft.findIndex((pm) =>
-        (pm.mod_version_id ?? pm.folder_name ?? pm.mod_id ?? pm.name) === rowKey
-        || (!!row.mod_version_id && pm.mod_version_id === row.mod_version_id)
-        || (!!row.folder_name && pm.folder_name === row.folder_name)
-        || (!!row.mod_id && pm.mod_id === row.mod_id)
-        || pm.name === row.name
+      const idx = loadOrderDraft.findIndex(
+        (pm) =>
+          (pm.mod_version_id ?? pm.folder_name ?? pm.mod_id ?? pm.name) ===
+            rowKey ||
+          (!!row.mod_version_id && pm.mod_version_id === row.mod_version_id) ||
+          (!!row.folder_name && pm.folder_name === row.folder_name) ||
+          (!!row.mod_id && pm.mod_id === row.mod_id) ||
+          pm.name === row.name,
       );
       if (idx !== -1) return idx;
       const savedIndex = focusedState(row)?.order_index;
-      return typeof savedIndex === 'number' ? savedIndex : Number.MAX_SAFE_INTEGER;
+      return typeof savedIndex === 'number'
+        ? savedIndex
+        : Number.MAX_SAFE_INTEGER;
     };
-    const compareLoadOrder = (a: ProfileMembershipMod, b: ProfileMembershipMod) =>
-      loadOrderIndex(a) - loadOrderIndex(b) || compareMembershipDisplayName(a, b);
+    const compareLoadOrder = (
+      a: ProfileMembershipMod,
+      b: ProfileMembershipMod,
+    ) =>
+      loadOrderIndex(a) - loadOrderIndex(b) ||
+      compareMembershipDisplayName(a, b);
     const auditForRow = (row: ProfileMembershipMod) =>
-      auditByKey?.get(membershipRowKey(row)) ?? auditByKey?.get(row.folder_name ?? '') ?? auditByKey?.get(row.name);
+      auditByKey?.get(membershipRowKey(row)) ??
+      auditByKey?.get(row.folder_name ?? '') ??
+      auditByKey?.get(row.name);
     const searchedRows = query
       ? preFiltered.filter((row) => {
           // Tags are part of the haystack so "anime" finds every mod the
           // user tagged that way, not just name matches (Solo, 2026-06-10).
-          const info =
-            modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+          const info = modInfoForRow(row);
           const haystack = [
             row.name,
             row.display_name ?? '',
@@ -530,35 +682,39 @@ export function LibraryTable({
       : preFiltered;
     const groups = new Map<string, ProfileMembershipMod[]>();
     for (const row of searchedRows) {
-      const info =
-        modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+      const info = modInfoForRow(row);
       const groupKey = logicalModKey(row, info);
       const existing = groups.get(groupKey);
       if (existing) existing.push(row);
       else groups.set(groupKey, [row]);
     }
     const rows = [...groups.values()].flatMap((group) => {
-      const versionCount = new Set(group.map((row) => modVersionSortValue(row.version))).size;
+      const versionCount = new Set(
+        group.map((row) => modVersionSortValue(row.version)),
+      ).size;
       const canSelectVersions = group.every((row) => !!row.mod_version_id);
-      if (group.length === 1 || versionCount < 2 || !canSelectVersions) return group;
-      return [[...group].sort((a, b) => {
-        if (packScoped) return compareLoadOrder(a, b);
-        if (a.installed_enabled !== b.installed_enabled) {
-          return Number(b.installed_enabled) - Number(a.installed_enabled);
-        }
-        const byVersion = modVersionSortValue(b.version).localeCompare(
-          modVersionSortValue(a.version),
-          undefined,
-          { sensitivity: 'base', numeric: true },
-        );
-        return byVersion || compareMembershipDisplayName(a, b);
-      })[0]];
+      if (group.length === 1 || versionCount < 2 || !canSelectVersions)
+        return group;
+      return [
+        [...group].sort((a, b) => {
+          if (packScoped) return compareLoadOrder(a, b);
+          if (a.installed_enabled !== b.installed_enabled) {
+            return Number(b.installed_enabled) - Number(a.installed_enabled);
+          }
+          const byVersion = modVersionSortValue(b.version).localeCompare(
+            modVersionSortValue(a.version),
+            undefined,
+            { sensitivity: 'base', numeric: true },
+          );
+          return byVersion || compareMembershipDisplayName(a, b);
+        })[0],
+      ];
     });
     const sorted = [...rows];
     sorted.sort((a, b) => {
       const aIn = inPackRowKeys.has(membershipRowKey(a));
       const bIn = inPackRowKeys.has(membershipRowKey(b));
-      if (packScoped) return compareLoadOrder(a, b);
+      if (packScoped && !packVisualSortEnabled) return compareLoadOrder(a, b);
       // Tag-priority ordering (the page Tag picker) OVERRIDES the sort mode
       // while a tag is chosen: that tag's mods first, then the rest by first
       // tag A–Z (untagged last); ties by display name. Nothing is hidden.
@@ -571,9 +727,12 @@ export function LibraryTable({
         const bt = firstTagKey(b, modInfoByKey);
         if (at !== bt) {
           /* v8 ignore start -- sort comparator call direction is engine-dependent; ordering behavior is tested. */
-          if (at === null) return 1;   // untagged after tagged
+          if (at === null) return 1; // untagged after tagged
           if (bt === null) return -1;
-          const byTag = at.localeCompare(bt, undefined, { sensitivity: 'base', numeric: true });
+          const byTag = at.localeCompare(bt, undefined, {
+            sensitivity: 'base',
+            numeric: true,
+          });
           if (byTag !== 0) return byTag;
           /* v8 ignore stop */
         }
@@ -593,20 +752,33 @@ export function LibraryTable({
       }
       if (sort === 'activeFirst') {
         return (
-          Number(b.installed_enabled) - Number(a.installed_enabled)
-          || compareMembershipDisplayName(a, b)
+          Number(b.installed_enabled) - Number(a.installed_enabled) ||
+          compareMembershipDisplayName(a, b)
         );
       }
       if (sort === 'storedFirst') {
         return (
-          Number(a.installed_enabled) - Number(b.installed_enabled)
-          || compareMembershipDisplayName(a, b)
+          Number(a.installed_enabled) - Number(b.installed_enabled) ||
+          compareMembershipDisplayName(a, b)
         );
       }
       return compareMembershipDisplayName(a, b);
     });
     return sorted;
-  }, [effectiveGrid, filter, sort, priorityTag, inPackRowKeys, filterRow, modInfoByKey, loadOrderDraft, auditByKey, packScoped]);
+  }, [
+    effectiveGrid,
+    filter,
+    sort,
+    priorityTag,
+    inPackRowKeys,
+    filterRow,
+    modInfoByKey,
+    modInfoForRow,
+    loadOrderDraft,
+    auditByKey,
+    packScoped,
+    packVisualSortEnabled,
+  ]);
 
   const visibleItems = filteredRows.slice(0, visibleLimit);
 
@@ -614,31 +786,27 @@ export function LibraryTable({
     const map = new Map<string, LocalModVersionOption[]>();
     if (!effectiveGrid) return map;
     for (const row of effectiveGrid.mods) {
-      const options = row.version_options ?? [];
-      const versionCount = new Set(options.map((option) => modVersionSortValue(option.version))).size;
+      const options = dedupeVersionOptions(row.version_options ?? []);
+      const versionCount = new Set(
+        options.map((option) => modVersionSortValue(option.version)),
+      ).size;
       if (options.length > 1 && versionCount > 1) {
-        map.set(membershipRowKey(row), [...options].sort((a, b) => {
-          const byVersion = modVersionSortValue(b.version).localeCompare(
-            modVersionSortValue(a.version),
-            undefined,
-            { sensitivity: 'base', numeric: true },
-          );
-          return byVersion || a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
-        }));
+        map.set(membershipRowKey(row), options);
       }
     }
     const groups = new Map<string, ProfileMembershipMod[]>();
     for (const row of effectiveGrid.mods) {
       if (map.has(membershipRowKey(row))) continue;
-      const info =
-        modInfoByKey?.get(membershipRowKey(row)) ?? modInfoByKey?.get(row.name);
+      const info = modInfoForRow(row);
       const groupKey = logicalModKey(row, info);
       const existing = groups.get(groupKey);
       if (existing) existing.push(row);
       else groups.set(groupKey, [row]);
     }
     for (const group of groups.values()) {
-      const versionCount = new Set(group.map((row) => modVersionSortValue(row.version))).size;
+      const versionCount = new Set(
+        group.map((row) => modVersionSortValue(row.version)),
+      ).size;
       const canSelectVersions = group.every((row) => !!row.mod_version_id);
       if (group.length < 2 || versionCount < 2 || !canSelectVersions) continue;
       const sortedGroup = [...group].sort((a, b) => {
@@ -664,47 +832,42 @@ export function LibraryTable({
             installed_enabled: option.installed_enabled,
             cached: false,
             pinned: false,
-            used_by_profiles: option.profiles.filter((profile) => profile.included).map((profile) => profile.profile_name),
+            used_by_profiles: option.profiles
+              .filter((profile) => profile.included)
+              .map((profile) => profile.profile_name),
           })),
         );
       }
     }
     return map;
-  }, [effectiveGrid, modInfoByKey]);
+  }, [effectiveGrid, modInfoByKey, modInfoForRow]);
 
-  async function handleSelectRowVersion(row: ProfileMembershipMod, selectedKey: string) {
+  async function handleSelectRowVersion(
+    row: ProfileMembershipMod,
+    selectedKey: string,
+  ) {
     /* v8 ignore next -- rendered selects only emit real option changes. */
     if (!effectiveGrid || selectedKey === membershipRowKey(row)) return;
-    const options = versionOptionsByKey.get(membershipRowKey(row)) ?? [];
-    const selected = options.find((option) => option.mod_version_id === selectedKey);
+    const rowKey = membershipRowKey(row);
+    const options = versionOptionsByKey.get(rowKey) ?? [];
+    const selected = options.find(
+      (option) => option.mod_version_id === selectedKey,
+    );
     /* v8 ignore next -- selectedKey comes from the rendered option list. */
     if (!selected) return;
     const packActive =
-      modpackName != null && (modpackName === activeProfileId || (!activeProfileId && modpackName === activeProfile));
+      modpackName != null &&
+      (modpackName === activeProfileId ||
+        (!activeProfileId && modpackName === activeProfile));
     try {
       pinScroll();
-      const state = focusedState(row);
+      setSelectedVersionKeyByRow((prev) => {
+        const next = new Map(prev);
+        next.set(rowKey, selectedKey);
+        return next;
+      });
       if (packScoped && modpackName) {
         await onSelectProfileVersion?.(row, selected, packActive);
-        await onMembershipChanged?.();
-        await onLoadOrderChanged?.();
-      } else if (modpackName && state?.included) {
-        await selectProfileModVersion(
-          modpackName,
-          {
-            mod_version_id: row.mod_version_id ?? null,
-            folder_name: row.folder_name ?? null,
-            mod_id: row.mod_id ?? null,
-            name: row.name,
-          },
-          {
-            mod_version_id: selected.mod_version_id,
-            folder_name: selected.folder_name ?? null,
-            mod_id: selected.mod_id ?? null,
-            name: selected.name,
-          },
-          packActive,
-        );
         await onMembershipChanged?.();
         await onLoadOrderChanged?.();
       } else {
@@ -725,16 +888,152 @@ export function LibraryTable({
       }
       await refreshAll();
       await load();
-      toastCtx.success(t('profiles.library.versionSelectToast', { name: selected.display_name?.trim() || selected.name, version: selected.version }));
+      toastCtx.success(
+        t('profiles.library.versionSelectToast', {
+          name: selected.display_name?.trim() || selected.name,
+          version: selected.version,
+        }),
+      );
     } catch (e) {
-      toastCtx.error(t('profiles.library.versionSelectFailed', { error: e instanceof Error ? e.message : String(e) }));
+      toastCtx.error(
+        t('profiles.library.versionSelectFailed', {
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setSelectedVersionKeyByRow((prev) => {
+        if (!prev.has(rowKey)) return prev;
+        const next = new Map(prev);
+        next.delete(rowKey);
+        return next;
+      });
     }
   }
 
-  function patchRowMembership(
-    rowKey: string,
-    nextIncluded: boolean,
+  async function handleRemoveRowVersion(
+    row: ProfileMembershipMod,
+    option: LocalModVersionOption,
   ) {
+    const displayVersion = cleanDisplayVersion(option.version);
+    try {
+      setRemovingVersionKey(option.mod_version_id);
+      const preview = await previewLibraryModVersionRemoval(
+        option.mod_version_id,
+      );
+      if (!preview.can_delete_directly) {
+        const defaultReplacement =
+          preview.replacement_candidates[0]?.mod_version_id ?? '';
+        setVersionRemovalWizard({
+          row,
+          option,
+          preview,
+          mode:
+            preview.replacement_candidates.length > 0
+              ? 'remap'
+              : 'remove_from_packs',
+          activeReplacementId: defaultReplacement,
+          profileReplacementIds: Object.fromEntries(
+            preview.affected_profiles.map((profile) => [
+              profile.profile_id,
+              defaultReplacement,
+            ]),
+          ),
+          committing: false,
+        });
+        return;
+      }
+
+      const ok = await confirm({
+        title: t('mods.versionRemoveConfirmTitle', {
+          mod: option.display_name?.trim() || membershipDisplayName(row),
+          version: displayVersion,
+        }),
+        body: preview.installed
+          ? t('mods.versionRemoveConfirmDiskBody')
+          : t('mods.versionRemoveConfirmCacheBody'),
+        warning: t('mods.versionRemoveConfirmWarning'),
+        confirmLabel: t('mods.versionRemoveConfirm'),
+        destructive: true,
+      });
+      if (!ok) return;
+      pinScroll();
+      await removeLibraryModVersion(option.mod_version_id);
+      await refreshAll();
+      await load();
+      toastCtx.success(
+        t('mods.toast.versionRemoved', {
+          name: option.display_name?.trim() || membershipDisplayName(row),
+          version: displayVersion,
+        }),
+      );
+    } catch (e) {
+      toastCtx.error(
+        t('mods.toast.versionRemoveFailed', {
+          version: displayVersion,
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setRemovingVersionKey(null);
+    }
+  }
+
+  async function commitVersionRemovalWizard() {
+    if (!versionRemovalWizard || versionRemovalWizard.committing) return;
+    const {
+      option,
+      row,
+      preview,
+      mode,
+      profileReplacementIds,
+      activeReplacementId,
+    } = versionRemovalWizard;
+    const replacements: ManualModVersionProfileReplacement[] =
+      preview.affected_profiles.map((profile) => ({
+        profile_id: profile.profile_id,
+        mod_version_id: profileReplacementIds[profile.profile_id] ?? '',
+      }));
+    try {
+      pinScroll();
+      setVersionRemovalWizard((current) =>
+        current ? { ...current, committing: true } : current,
+      );
+      setRemovingVersionKey(option.mod_version_id);
+      const result = await removeLibraryModVersionManual(
+        option.mod_version_id,
+        mode,
+        mode === 'remap' ? replacements : [],
+        mode === 'remap' && preview.active ? activeReplacementId : null,
+      );
+      await refreshAll();
+      await load();
+      setVersionRemovalWizard(null);
+      toastCtx.success(
+        t('mods.toast.versionManualRemoved', {
+          name: option.display_name?.trim() || membershipDisplayName(row),
+          version: cleanDisplayVersion(option.version),
+          profiles:
+            result.mode === 'remap'
+              ? (result.remapped_profiles?.length ?? 0)
+              : (result.removed_profiles?.length ?? 0),
+        }),
+      );
+    } catch (e) {
+      setVersionRemovalWizard((current) =>
+        current ? { ...current, committing: false } : current,
+      );
+      toastCtx.error(
+        t('mods.toast.versionRemoveFailed', {
+          version: cleanDisplayVersion(option.version),
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setRemovingVersionKey(null);
+    }
+  }
+
+  function patchRowMembership(rowKey: string, nextIncluded: boolean) {
     setGrid((prev) => {
       if (!prev) return prev;
       return {
@@ -781,16 +1080,16 @@ export function LibraryTable({
     try {
       pinScroll();
       setMembershipSaving(key);
-      // When the modpack view treats the pack as the live loadout, mirror the
-      // membership change onto the active game folder. Do the disk toggle
-      // FIRST: toggle_mod guards on the game running (and can fail the move)
-      // while the membership write doesn't — toggling first keeps the two in
-      // sync, so a running game aborts before the manifest is touched. Only
-      // for the *active* pack and only when disk state needs to change.
+      // Adding a stored mod to the active pack should activate it before the
+      // manifest edit. Removing from a pack is a membership-only action: the
+      // storage toggle is the explicit way to move the installed mod between
+      // mods/ and mods_disabled/.
       const mirrorsToDisk =
-        coupleActiveStorage
-        && (modpackName === activeProfileId || (!activeProfileId && modpackName === activeProfile))
-        && row.installed_enabled !== nextIncluded;
+        coupleActiveStorage &&
+        (modpackName === activeProfileId ||
+          (!activeProfileId && modpackName === activeProfile)) &&
+        nextIncluded &&
+        row.installed_enabled !== nextIncluded;
       if (mirrorsToDisk) {
         await toggleMod(row.name, row.folder_name, nextIncluded);
         patchRowStorage(membershipRowKey(row), nextIncluded);
@@ -840,10 +1139,20 @@ export function LibraryTable({
     // and keep it stored. Only when there's an editable active pack to add
     // to — otherwise enabling proceeds straight through.
     let alsoAddToPack = false;
-    if (nextEnabled && modpackName != null && state && !state.included && state.editable) {
+    if (
+      nextEnabled &&
+      modpackName != null &&
+      state &&
+      !state.included &&
+      state.editable
+    ) {
       const result = await confirm({
-        title: t('profiles.library.enableNotInPack.title', { mod: displayName }),
-        body: t('profiles.library.enableNotInPack.body', { pack: focusedProfileLabel }),
+        title: t('profiles.library.enableNotInPack.title', {
+          mod: displayName,
+        }),
+        body: t('profiles.library.enableNotInPack.body', {
+          pack: focusedProfileLabel,
+        }),
         cancelLabel: t('profiles.library.enableNotInPack.keepStored'),
         width: 560,
         choices: [
@@ -854,7 +1163,9 @@ export function LibraryTable({
           },
           {
             value: 'enableAndAdd',
-            label: t('profiles.library.enableNotInPack.enableAndAdd', { pack: focusedProfileLabel }),
+            label: t('profiles.library.enableNotInPack.enableAndAdd', {
+              pack: focusedProfileLabel,
+            }),
             variant: 'secondary',
           },
         ],
@@ -867,7 +1178,11 @@ export function LibraryTable({
     // followed / non-editable one, can't add it (you don't own its manifest).
     // Flag it so the toast explains instead of silently enabling.
     const enabledOutsideFollowedPack =
-      nextEnabled && modpackName != null && state != null && !state.included && !state.editable;
+      nextEnabled &&
+      modpackName != null &&
+      state != null &&
+      !state.included &&
+      !state.editable;
 
     const key = libraryStorageKey(row);
     try {
@@ -875,7 +1190,10 @@ export function LibraryTable({
       setStorageSaving(key);
       await toggleMod(row.name, row.folder_name, nextEnabled);
       patchRowStorage(membershipRowKey(row), nextEnabled);
-      if ((alsoAddToPack || (state?.included && state.editable)) && modpackName != null) {
+      if (
+        (alsoAddToPack || (state?.included && state.editable)) &&
+        modpackName != null
+      ) {
         await setProfileModMembership(
           modpackName,
           row.name,
@@ -889,17 +1207,27 @@ export function LibraryTable({
       }
       await refreshAll();
       if (!nextEnabled) {
-        toastCtx.success(t('profiles.library.toastStored', { mod: displayName }));
+        toastCtx.success(
+          t('profiles.library.toastStored', { mod: displayName }),
+        );
       } else if (alsoAddToPack) {
         toastCtx.success(
-          t('profiles.library.toastActivatedAndAdded', { mod: displayName, pack: focusedProfileLabel }),
+          t('profiles.library.toastActivatedAndAdded', {
+            mod: displayName,
+            pack: focusedProfileLabel,
+          }),
         );
       } else if (enabledOutsideFollowedPack) {
         toastCtx.info(
-          t('profiles.library.toastActivatedFollowed', { mod: displayName, pack: focusedProfileLabel }),
+          t('profiles.library.toastActivatedFollowed', {
+            mod: displayName,
+            pack: focusedProfileLabel,
+          }),
         );
       } else {
-        toastCtx.success(t('profiles.library.toastActivated', { mod: displayName }));
+        toastCtx.success(
+          t('profiles.library.toastActivated', { mod: displayName }),
+        );
       }
       onMembershipChanged?.();
     } catch (e) {
@@ -932,7 +1260,11 @@ export function LibraryTable({
         })),
       );
       onLoadOrderChanged?.();
-      toastCtx.success(t('profiles.loadOrder.toastSavedApplied', { name: modpackName }));
+      toastCtx.success(
+        t('profiles.loadOrder.toastSavedApplied', {
+          name: focusedProfileLabel,
+        }),
+      );
     } catch (e) {
       toastCtx.error(
         t('profiles.loadOrder.toastFailed', {
@@ -976,11 +1308,41 @@ export function LibraryTable({
   if (effectiveGrid.mods.length === 0 && !packScoped) {
     return (
       <div className="gf-empty">
-        <div className="gf-empty-title">{t('profiles.library.empty.title')}</div>
+        <div className="gf-empty-title">
+          {t('profiles.library.empty.title')}
+        </div>
         <div className="gf-empty-sub">{t('profiles.library.empty.hint')}</div>
       </div>
     );
   }
+
+  const versionRemovalReplacementOptions = versionRemovalWizard
+    ? versionRemovalWizard.preview.replacement_candidates.map((candidate) => ({
+        value: candidate.mod_version_id,
+        label: t('mods.versionReplacementOption', {
+          version: cleanDisplayVersion(candidate.version),
+          state: candidate.installed_enabled
+            ? t('mods.versionActiveStatus')
+            : candidate.installed
+              ? t('mods.versionStoredOnDiskStatus')
+              : candidate.cached
+                ? t('mods.versionSavedStatus')
+                : t('mods.versionStoredStatus'),
+        }),
+      }))
+    : [];
+  const versionRemovalCanCommit =
+    !!versionRemovalWizard &&
+    !versionRemovalWizard.committing &&
+    !versionRemovalWizard.preview.pinned &&
+    (versionRemovalWizard.mode === 'remove_from_packs' ||
+      (versionRemovalWizard.preview.replacement_candidates.length > 0 &&
+        (!versionRemovalWizard.preview.active ||
+          !!versionRemovalWizard.activeReplacementId) &&
+        versionRemovalWizard.preview.affected_profiles.every(
+          (profile) =>
+            !!versionRemovalWizard.profileReplacementIds[profile.profile_id],
+        )));
 
   return (
     <div
@@ -1000,7 +1362,9 @@ export function LibraryTable({
             placeholder={
               packScoped
                 ? t('profiles.library.searchPackPlaceholder')
-                : t('profiles.library.searchPlaceholder', { count: effectiveGrid.mods.length })
+                : t('profiles.library.searchPlaceholder', {
+                    count: effectiveGrid.mods.length,
+                  })
             }
             aria-label={t('profiles.library.searchLabel')}
           />
@@ -1011,6 +1375,42 @@ export function LibraryTable({
         {packScoped && (
           <div className="gf-profile-library-toolbar-actions">
             <ModViewToggle density={density} onChange={setDensity} />
+            {packVisualSortEnabled && (
+              <label className="gf-sort-control gf-profile-library-sort">
+                <span>{t('profiles.library.sort.label')}</span>
+                <Select
+                  value={sort}
+                  onChange={(v) => setSort(v as LibrarySortMode)}
+                  aria-label={t('profiles.library.sort.label')}
+                  options={[
+                    {
+                      value: 'loadOrder',
+                      label: t('profiles.library.sort.loadOrder'),
+                    },
+                    {
+                      value: 'updatesFirst',
+                      label: t('profiles.library.sort.updatesFirst'),
+                    },
+                    {
+                      value: 'nameAsc',
+                      label: t('profiles.library.sort.nameAsc'),
+                    },
+                    {
+                      value: 'nameDesc',
+                      label: t('profiles.library.sort.nameDesc'),
+                    },
+                    {
+                      value: 'activeFirst',
+                      label: t('profiles.library.sort.activeFirst'),
+                    },
+                    {
+                      value: 'storedFirst',
+                      label: t('profiles.library.sort.storedFirst'),
+                    },
+                  ]}
+                />
+              </label>
+            )}
             {toolbarActions}
           </div>
         )}
@@ -1028,13 +1428,33 @@ export function LibraryTable({
                   // is focused. In the no-focus Library view, this option is
                   // omitted so the user doesn't see a sort with no effect.
                   ...(modpackName != null
-                    ? [{ value: 'inPackFirst', label: t('profiles.library.sort.inPackFirst') }]
+                    ? [
+                        {
+                          value: 'inPackFirst',
+                          label: t('profiles.library.sort.inPackFirst'),
+                        },
+                      ]
                     : []),
-                  { value: 'updatesFirst', label: t('profiles.library.sort.updatesFirst') },
-                  { value: 'nameAsc', label: t('profiles.library.sort.nameAsc') },
-                  { value: 'nameDesc', label: t('profiles.library.sort.nameDesc') },
-                  { value: 'activeFirst', label: t('profiles.library.sort.activeFirst') },
-                  { value: 'storedFirst', label: t('profiles.library.sort.storedFirst') },
+                  {
+                    value: 'updatesFirst',
+                    label: t('profiles.library.sort.updatesFirst'),
+                  },
+                  {
+                    value: 'nameAsc',
+                    label: t('profiles.library.sort.nameAsc'),
+                  },
+                  {
+                    value: 'nameDesc',
+                    label: t('profiles.library.sort.nameDesc'),
+                  },
+                  {
+                    value: 'activeFirst',
+                    label: t('profiles.library.sort.activeFirst'),
+                  },
+                  {
+                    value: 'storedFirst',
+                    label: t('profiles.library.sort.storedFirst'),
+                  },
                 ]}
               />
             </label>
@@ -1057,8 +1477,12 @@ export function LibraryTable({
         <div className="gf-empty">
           {packScoped && !filter.trim() ? (
             <>
-              <div className="gf-empty-title">{t('profiles.library.packEmpty.title')}</div>
-              <div className="gf-empty-sub">{t('profiles.library.packEmpty.hint')}</div>
+              <div className="gf-empty-title">
+                {t('profiles.library.packEmpty.title')}
+              </div>
+              <div className="gf-empty-sub">
+                {t('profiles.library.packEmpty.hint')}
+              </div>
             </>
           ) : (
             <>
@@ -1077,33 +1501,46 @@ export function LibraryTable({
           const inPack = !!state?.included;
           const inPackIndex = loadOrderDraft.findIndex(
             (m) =>
-              (m.folder_name ?? m.mod_id ?? m.name)
-              === (row.folder_name ?? row.mod_id ?? row.name),
+              (m.folder_name ?? m.mod_id ?? m.name) ===
+              (row.folder_name ?? row.mod_id ?? row.name),
           );
           const rowKey = membershipRowKey(row);
-          const modInfo
-            = modInfoByKey?.get(rowKey) ?? modInfoByKey?.get(row.name);
+          const modInfo = modInfoForRow(row);
           const audit = auditByKey?.get(rowKey) ?? auditByKey?.get(row.name);
-          const sourceEditorSlot
-            = modInfo && renderSourceEditor
+          const sourceEditorSlot =
+            modInfo && renderSourceEditor
               ? renderSourceEditor(modInfo)
               : undefined;
           const versionRows = versionOptionsByKey.get(rowKey) ?? [];
           const rowActionHandlers = modInfo
             ? {
                 onUpdate: onUpdate ? () => onUpdate(modInfo) : undefined,
-                onTogglePin: onTogglePin ? () => onTogglePin(modInfo) : undefined,
+                onTogglePin: onTogglePin
+                  ? () => onTogglePin(modInfo)
+                  : undefined,
                 onSnooze: onSnooze ? () => onSnooze(modInfo, audit) : undefined,
                 onUnsnooze: onUnsnooze ? () => onUnsnooze(modInfo) : undefined,
                 onRepair: onRepair ? () => onRepair(modInfo) : undefined,
                 onRollback: onRollback ? () => onRollback(modInfo) : undefined,
                 onDelete: onDelete ? () => onDelete(modInfo) : undefined,
-                onCopyVersion: onCopyVersion ? () => onCopyVersion(modInfo) : undefined,
-                onOpenThisModFolder: onOpenThisModFolder ? () => onOpenThisModFolder(modInfo) : undefined,
-                onEditSources: onEditSources ? () => onEditSources(modInfo) : undefined,
-                onFindGithubFromNexus: onFindGithubFromNexus ? () => onFindGithubFromNexus(modInfo) : undefined,
-                onOpenExternalUrl: onOpenExternalUrl ? (url: string) => onOpenExternalUrl(url, modInfo) : undefined,
-                onAutoDetectSource: onAutoDetectSource ? () => onAutoDetectSource(modInfo) : undefined,
+                onCopyVersion: onCopyVersion
+                  ? () => onCopyVersion(modInfo)
+                  : undefined,
+                onOpenThisModFolder: onOpenThisModFolder
+                  ? () => onOpenThisModFolder(modInfo)
+                  : undefined,
+                onEditSources: onEditSources
+                  ? () => onEditSources(modInfo)
+                  : undefined,
+                onFindGithubFromNexus: onFindGithubFromNexus
+                  ? () => onFindGithubFromNexus(modInfo)
+                  : undefined,
+                onOpenExternalUrl: onOpenExternalUrl
+                  ? (url: string) => onOpenExternalUrl(url, modInfo)
+                  : undefined,
+                onAutoDetectSource: onAutoDetectSource
+                  ? () => onAutoDetectSource(modInfo)
+                  : undefined,
               }
             : {};
           return (
@@ -1111,12 +1548,17 @@ export function LibraryTable({
               key={rowKey}
               row={row}
               modpackName={modpackName}
+              modpackLabel={focusedProfileLabel}
               state={state}
               inPack={inPack}
               inPackIndex={inPackIndex}
               enableReorder={enableReorder}
               packScoped={packScoped}
-              packActive={modpackName != null && (modpackName === activeProfileId || (!activeProfileId && modpackName === activeProfile))}
+              packActive={
+                modpackName != null &&
+                (modpackName === activeProfileId ||
+                  (!activeProfileId && modpackName === activeProfile))
+              }
               isDragOver={dragOverIndex === inPackIndex && inPack}
               isDragging={draggedIndex === inPackIndex && inPack}
               loadOrderSaving={loadOrderSaving}
@@ -1137,7 +1579,8 @@ export function LibraryTable({
                 // document-level handler in App.tsx so the file-install
                 // dropzone overlay shows.
                 /* v8 ignore next -- drag guard permutations depend on browser DnD event shape; reorder behavior is tested. */
-                if (!enableReorder || !inPack || loadOrderSaving || index < 0) return;
+                if (!enableReorder || !inPack || loadOrderSaving || index < 0)
+                  return;
                 if (!event.dataTransfer.types.includes('text/plain')) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = 'move';
@@ -1155,19 +1598,16 @@ export function LibraryTable({
                 if (!enableReorder || !inPack || loadOrderSaving) return;
                 if (!event.dataTransfer.types.includes('text/plain')) return;
                 event.preventDefault();
-                const from
-                  = draggedIndex
-                    ?? Number.parseInt(
-                      event.dataTransfer.getData('text/plain'),
-                      10,
-                    );
+                const from =
+                  draggedIndex ??
+                  Number.parseInt(event.dataTransfer.getData('text/plain'), 10);
                 if (
-                  Number.isFinite(from)
-                  && from !== index
-                  && from >= 0
-                  && from < loadOrderDraft.length
-                  && index >= 0
-                  && index < loadOrderDraft.length
+                  Number.isFinite(from) &&
+                  from !== index &&
+                  from >= 0 &&
+                  from < loadOrderDraft.length &&
+                  index >= 0 &&
+                  index < loadOrderDraft.length
                 ) {
                   // Optimistic local reorder, then commit. Build `next` OUTSIDE
                   // any setState updater so the commit side-effect runs exactly
@@ -1198,6 +1638,7 @@ export function LibraryTable({
               anyUpdating={anyUpdating}
               anyRecoveryInFlight={anyRecoveryInFlight}
               {...rowActionHandlers}
+              selectedVersionKey={selectedVersionKeyByRow.get(rowKey) ?? rowKey}
               versionOptions={versionRows.map((option) => ({
                 key: option.mod_version_id,
                 version: option.version,
@@ -1207,8 +1648,22 @@ export function LibraryTable({
                     ? t('mods.versionActiveSuffix')
                     : t('mods.versionStoredSuffix'),
                 }),
+                installed: option.installed,
+                installedEnabled: option.installed_enabled,
+                cached: option.cached,
+                pinned: option.pinned,
+                usedByProfiles: option.used_by_profiles ?? [],
               }))}
-              onSelectVersion={(selectedKey) => handleSelectRowVersion(row, selectedKey)}
+              onSelectVersion={(selectedKey) =>
+                handleSelectRowVersion(row, selectedKey)
+              }
+              onRemoveVersion={(option) => {
+                const selected = versionRows.find(
+                  (candidate) => candidate.mod_version_id === option.key,
+                );
+                if (selected) void handleRemoveRowVersion(row, selected);
+              }}
+              removingVersionKey={removingVersionKey}
               sourceEditorSlot={sourceEditorSlot}
             />
           );
@@ -1234,6 +1689,208 @@ export function LibraryTable({
               ),
             })}
           </Button>
+        </div>
+      )}
+      {versionRemovalWizard && (
+        <div
+          className="gf-modal-back"
+          onClick={() => setVersionRemovalWizard(null)}
+        >
+          <div
+            className="gf-modal gf-version-removal-wizard"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="version-removal-wizard-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="gf-modal-head">
+              <div>
+                <div
+                  id="version-removal-wizard-title"
+                  className="gf-modal-title"
+                >
+                  {t('mods.versionRemovalWizardTitle', {
+                    mod:
+                      versionRemovalWizard.option.display_name?.trim() ||
+                      membershipDisplayName(versionRemovalWizard.row),
+                    version: cleanDisplayVersion(
+                      versionRemovalWizard.option.version,
+                    ),
+                  })}
+                </div>
+                <div className="gf-modal-sub">
+                  {t('mods.versionRemovalWizardSub')}
+                </div>
+              </div>
+            </div>
+            <div className="gf-modal-body">
+              <div className="gf-version-removal-impact">
+                <span>
+                  {versionRemovalWizard.preview.active
+                    ? t('mods.versionRemovalImpactActive')
+                    : versionRemovalWizard.preview.installed
+                      ? t('mods.versionRemovalImpactStored')
+                      : t('mods.versionRemovalImpactSaved')}
+                </span>
+                <span>
+                  {t('mods.versionRemovalImpactPacks', {
+                    count:
+                      versionRemovalWizard.preview.affected_profiles.length,
+                  })}
+                </span>
+              </div>
+              {versionRemovalWizard.preview.pinned && (
+                <div className="gf-version-removal-warning">
+                  {t('mods.versionRemovalPinnedWarning')}
+                </div>
+              )}
+              {versionRemovalWizard.preview.affected_profiles.length > 0 && (
+                <div className="gf-version-removal-section">
+                  <div className="gf-version-removal-section-title">
+                    {t('mods.versionRemovalAffectedTitle')}
+                  </div>
+                  <ul className="gf-version-removal-pack-list">
+                    {versionRemovalWizard.preview.affected_profiles.map(
+                      (profile) => (
+                        <li key={profile.profile_id}>{profile.profile_name}</li>
+                      ),
+                    )}
+                  </ul>
+                </div>
+              )}
+              {versionRemovalWizard.preview.replacement_candidates.length >
+              0 ? (
+                <div className="gf-version-removal-mode-grid">
+                  <button
+                    type="button"
+                    className={`gf-version-removal-mode${versionRemovalWizard.mode === 'remap' ? ' is-selected' : ''}`}
+                    onClick={() =>
+                      setVersionRemovalWizard((current) =>
+                        current ? { ...current, mode: 'remap' } : current,
+                      )
+                    }
+                  >
+                    <strong>{t('mods.versionRemovalModeRemapTitle')}</strong>
+                    <span>{t('mods.versionRemovalModeRemapBody')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`gf-version-removal-mode${versionRemovalWizard.mode === 'remove_from_packs' ? ' is-selected' : ''}`}
+                    onClick={() =>
+                      setVersionRemovalWizard((current) =>
+                        current
+                          ? { ...current, mode: 'remove_from_packs' }
+                          : current,
+                      )
+                    }
+                  >
+                    <strong>{t('mods.versionRemovalModeRemoveTitle')}</strong>
+                    <span>{t('mods.versionRemovalModeRemoveBody')}</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="gf-version-removal-warning">
+                  {t('mods.versionRemovalNoReplacement')}
+                </div>
+              )}
+              {versionRemovalWizard.mode === 'remap' &&
+                versionRemovalWizard.preview.replacement_candidates.length >
+                  0 && (
+                  <div className="gf-version-removal-section">
+                    {versionRemovalWizard.preview.active && (
+                      <label className="gf-version-removal-field">
+                        <span>{t('mods.versionRemovalActiveReplacement')}</span>
+                        <Select
+                          value={versionRemovalWizard.activeReplacementId}
+                          onChange={(value) =>
+                            setVersionRemovalWizard((current) =>
+                              current
+                                ? { ...current, activeReplacementId: value }
+                                : current,
+                            )
+                          }
+                          aria-label={t('mods.versionRemovalActiveReplacement')}
+                          options={versionRemovalReplacementOptions}
+                        />
+                      </label>
+                    )}
+                    {versionRemovalWizard.preview.affected_profiles.map(
+                      (profile) => (
+                        <label
+                          key={profile.profile_id}
+                          className="gf-version-removal-field"
+                        >
+                          <span>
+                            {t('mods.versionRemovalPackReplacement', {
+                              profile: profile.profile_name,
+                            })}
+                          </span>
+                          <Select
+                            value={
+                              versionRemovalWizard.profileReplacementIds[
+                                profile.profile_id
+                              ] ?? ''
+                            }
+                            onChange={(value) =>
+                              setVersionRemovalWizard((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      profileReplacementIds: {
+                                        ...current.profileReplacementIds,
+                                        [profile.profile_id]: value,
+                                      },
+                                    }
+                                  : current,
+                              )
+                            }
+                            aria-label={t(
+                              'mods.versionRemovalPackReplacement',
+                              {
+                                profile: profile.profile_name,
+                              },
+                            )}
+                            options={versionRemovalReplacementOptions}
+                          />
+                        </label>
+                      ),
+                    )}
+                  </div>
+                )}
+              {versionRemovalWizard.mode === 'remove_from_packs' && (
+                <div className="gf-version-removal-warning">
+                  {versionRemovalWizard.preview.affected_profiles.length > 0
+                    ? t('mods.versionRemovalRemoveFromPacksWarning', {
+                        count:
+                          versionRemovalWizard.preview.affected_profiles.length,
+                      })
+                    : t('mods.versionRemovalDeleteOnlyWarning')}
+                </div>
+              )}
+            </div>
+            <div className="gf-modal-foot">
+              <button
+                type="button"
+                className="gf-btn-3"
+                onClick={() => setVersionRemovalWizard(null)}
+                disabled={versionRemovalWizard.committing}
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                className="gf-btn-3 gf-btn-danger"
+                onClick={commitVersionRemovalWizard}
+                disabled={!versionRemovalCanCommit}
+              >
+                {versionRemovalWizard.committing
+                  ? t('mods.versionRemoving')
+                  : versionRemovalWizard.mode === 'remap'
+                    ? t('mods.versionRemovalConfirmRemap')
+                    : t('mods.versionRemovalConfirmRemove')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -70,6 +70,33 @@ pub struct LocalModVersionOption {
     pub used_by_profiles: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct LocalModVersionAffectedProfile {
+    pub profile_id: String,
+    pub profile_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct LocalModVersionRemovalPreview {
+    pub target: LocalModVersionOption,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub affected_profiles: Vec<LocalModVersionAffectedProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replacement_candidates: Vec<LocalModVersionOption>,
+    pub active: bool,
+    pub installed: bool,
+    pub cached: bool,
+    pub pinned: bool,
+    pub can_delete_directly: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct LocalModVersionDeleteSummary {
+    pub removed_record: bool,
+    pub deleted_cache: bool,
+    pub deleted_disk: bool,
+}
+
 fn db_path(config_path: &Path) -> PathBuf {
     config_path.join(DB_FILE)
 }
@@ -202,6 +229,31 @@ fn key_for_profile_mod(pm: &ProfileMod) -> String {
     )
 }
 
+pub(crate) fn canonical_profile_mod_artifact_id(
+    pm: &ProfileMod,
+    db: &ModVersionsDb,
+) -> Option<String> {
+    if let Some(record) = record_for_profile_mod_in_db(pm, db) {
+        return Some(record.id);
+    }
+
+    let id = pm
+        .mod_version_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    if db.conflicts.contains_key(id) {
+        return None;
+    }
+    Some(resolve_alias(db, id).to_string())
+}
+
+pub(crate) fn artifact_key_for_profile_mod(pm: &ProfileMod, db: &ModVersionsDb) -> String {
+    canonical_profile_mod_artifact_id(pm, db)
+        .map(|id| format!("artifact:{id}"))
+        .unwrap_or_else(|| key_for_profile_mod(pm))
+}
+
 pub fn load(config_path: &Path) -> ModVersionsDb {
     let path = db_path(config_path);
     if !path.exists() {
@@ -239,7 +291,7 @@ pub fn save(db: &ModVersionsDb, config_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn resolve_alias<'a>(db: &'a ModVersionsDb, id: &'a str) -> &'a str {
+pub(crate) fn resolve_alias<'a>(db: &'a ModVersionsDb, id: &'a str) -> &'a str {
     db.aliases.get(id).map(String::as_str).unwrap_or(id)
 }
 
@@ -576,7 +628,13 @@ fn cached_path_for_record(cache_path: &Path, record: &ModVersionRecord) -> PathB
 
 pub fn cached_record_path(cache_path: &Path, record: &ModVersionRecord) -> Option<PathBuf> {
     let path = cached_path_for_record(cache_path, record);
-    path.exists().then_some(path)
+    if path.exists() {
+        return Some(path);
+    }
+    record.aliases.iter().find_map(|alias| {
+        let alias_path = cache_path_for_id(cache_path, alias);
+        alias_path.exists().then_some(alias_path)
+    })
 }
 
 pub fn install_cached_record_to_base(
@@ -640,6 +698,111 @@ pub fn local_version_options_for_target(
     by_family.get(&target_family).cloned().unwrap_or_default()
 }
 
+pub fn preview_local_mod_version_removal(
+    config_path: &Path,
+    cache_path: &Path,
+    installed_mods: &[ModInfo],
+    profiles: &[crate::profiles::Profile],
+    mod_version_id: &str,
+) -> Result<LocalModVersionRemovalPreview> {
+    let db = load(config_path);
+    let requested_id = mod_version_id.trim();
+    if requested_id.is_empty() {
+        return Err(AppError::Other(
+            "No stored version was selected. Refresh the mod list and try again.".into(),
+        ));
+    }
+    let resolved_id = resolve_alias(&db, requested_id).to_string();
+    let record = db.records.get(&resolved_id).cloned().ok_or_else(|| {
+        AppError::Other(
+            "That stored version is no longer available. Refresh the mod list and try again."
+                .into(),
+        )
+    })?;
+    let family = family_key_for_record(&record);
+    let by_family = local_version_options_by_family(installed_mods, profiles, &db, cache_path);
+    let family_options = by_family.get(&family).cloned().unwrap_or_default();
+    let active = family_options.iter().any(|option| {
+        resolve_alias(&db, &option.mod_version_id) == resolved_id && option.installed_enabled
+    });
+    let installed = family_options.iter().any(|option| {
+        resolve_alias(&db, &option.mod_version_id) == resolved_id && option.installed
+    });
+    let cached = cached_record_path(cache_path, &record).is_some()
+        || family_options.iter().any(|option| {
+            resolve_alias(&db, &option.mod_version_id) == resolved_id && option.cached
+        });
+    let pinned = family_options
+        .iter()
+        .any(|option| resolve_alias(&db, &option.mod_version_id) == resolved_id && option.pinned)
+        || installed_mods
+            .iter()
+            .any(|info| info.pinned && family_key_for_mod(info) == family);
+    let target = family_options
+        .iter()
+        .find(|option| resolve_alias(&db, &option.mod_version_id) == resolved_id)
+        .cloned()
+        .unwrap_or_else(|| LocalModVersionOption {
+            mod_version_id: record.id.clone(),
+            name: record.name.clone(),
+            version: record
+                .source_version
+                .clone()
+                .unwrap_or_else(|| record.version.clone()),
+            folder_name: record.folder_name.clone(),
+            mod_id: record.mod_id.clone(),
+            display_name: None,
+            bundle_member_ids: record.bundle_member_ids.clone(),
+            installed,
+            installed_enabled: active,
+            cached,
+            pinned,
+            used_by_profiles: Vec::new(),
+        });
+
+    let affected_profiles = profiles
+        .iter()
+        .filter(|profile| {
+            profile.mods.iter().any(|pm| {
+                record_for_profile_mod_in_db(pm, &db)
+                    .map(|record| record.id == resolved_id)
+                    .unwrap_or(false)
+            })
+        })
+        .map(|profile| LocalModVersionAffectedProfile {
+            profile_id: profile.id.clone(),
+            profile_name: profile.name.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let replacement_candidates = family_options
+        .into_iter()
+        .filter(|option| resolve_alias(&db, &option.mod_version_id) != resolved_id)
+        .collect::<Vec<_>>();
+    let can_delete_directly = !active && !pinned && affected_profiles.is_empty();
+
+    Ok(LocalModVersionRemovalPreview {
+        target: LocalModVersionOption {
+            installed,
+            installed_enabled: active,
+            cached,
+            pinned,
+            used_by_profiles: affected_profiles
+                .iter()
+                .map(|profile| profile.profile_name.clone())
+                .collect(),
+            ..target
+        },
+        affected_profiles,
+        replacement_candidates,
+        active,
+        installed,
+        cached,
+        pinned,
+        can_delete_directly,
+    })
+}
+
 pub fn local_version_options_by_mod_version_id(
     installed_mods: &[ModInfo],
     profiles: &[crate::profiles::Profile],
@@ -668,6 +831,18 @@ pub(crate) fn local_version_options_by_mod_version_id_in_db(
             let resolved = resolve_alias(&db, id);
             if resolved != id {
                 by_mod_version_id.insert(resolved.to_string(), options.clone());
+            }
+        }
+    }
+    for record in db.records.values() {
+        if cached_record_path(cache_path, record).is_none() {
+            continue;
+        }
+        let target_family = family_key_for_record(record);
+        if let Some(options) = by_family.get(&target_family) {
+            by_mod_version_id.insert(record.id.clone(), options.clone());
+            for alias in &record.aliases {
+                by_mod_version_id.insert(alias.clone(), options.clone());
             }
         }
     }
@@ -836,11 +1011,63 @@ fn local_version_options_by_family(
                 version
                     .then_with(|| b.installed_enabled.cmp(&a.installed_enabled))
                     .then_with(|| b.installed.cmp(&a.installed))
+                    .then_with(|| b.cached.cmp(&a.cached))
+                    .then_with(|| b.used_by_profiles.len().cmp(&a.used_by_profiles.len()))
                     .then_with(|| a.name.cmp(&b.name))
             });
+            let mut seen = HashSet::new();
+            options.retain(|option| seen.insert(local_option_dedupe_key(option, db)));
             (family, options)
         })
         .collect()
+}
+
+fn local_option_dedupe_key(option: &LocalModVersionOption, db: &ModVersionsDb) -> String {
+    let record = db
+        .records
+        .get(resolve_alias(db, option.mod_version_id.as_str()));
+    let source = record
+        .and_then(|record| normalize_part(record.source.as_deref()))
+        .unwrap_or_else(|| "unknown".into());
+    let content = record.and_then(|record| {
+        normalize_part(record.content_hash.as_deref())
+            .or_else(|| normalize_part(record.archive_sha256.as_deref()))
+    });
+    let folder_guard = if content.is_some() {
+        String::new()
+    } else {
+        format!(
+            "|folder:{}",
+            normalize_part(option.folder_name.as_deref()).unwrap_or_else(|| "unknown".into())
+        )
+    };
+    let mut member_ids = option
+        .bundle_member_ids
+        .iter()
+        .filter_map(|id| normalize_part(Some(id)))
+        .collect::<Vec<_>>();
+    member_ids.sort();
+    let identity = if !member_ids.is_empty() {
+        format!(
+            "bundle:{}|members:{}",
+            normalize_part(Some(&option.name)).unwrap_or_else(|| "unknown".into()),
+            member_ids.join(",")
+        )
+    } else {
+        normalize_part(option.mod_id.as_deref())
+            .map(|id| format!("mod_id:{id}"))
+            .unwrap_or_else(|| {
+                format!(
+                    "name:{}",
+                    normalize_part(Some(&option.name)).unwrap_or_else(|| "unknown".into())
+                )
+            })
+    };
+    format!(
+        "{identity}|version:{}|source:{source}|content:{}{folder_guard}",
+        normalize_part(Some(&option.version)).unwrap_or_else(|| "unknown".into()),
+        content.unwrap_or_else(|| "unknown".into()),
+    )
 }
 
 pub fn has_local_version_for_mod(
@@ -1038,6 +1265,151 @@ pub fn prune_cached_versions_around(
     Ok(removed)
 }
 
+pub fn remove_local_mod_version(
+    config_path: &Path,
+    cache_path: &Path,
+    disabled_path: &Path,
+    installed_mods: &[ModInfo],
+    profiles: &[crate::profiles::Profile],
+    mod_version_id: &str,
+) -> Result<()> {
+    remove_local_mod_version_with_policy(
+        config_path,
+        cache_path,
+        None,
+        disabled_path,
+        installed_mods,
+        profiles,
+        mod_version_id,
+        false,
+    )
+    .map(|_| ())
+}
+
+pub(crate) fn remove_local_mod_version_with_policy(
+    config_path: &Path,
+    cache_path: &Path,
+    mods_path: Option<&Path>,
+    disabled_path: &Path,
+    installed_mods: &[ModInfo],
+    profiles: &[crate::profiles::Profile],
+    mod_version_id: &str,
+    allow_active: bool,
+) -> Result<LocalModVersionDeleteSummary> {
+    let mut db = load(config_path);
+    let requested_id = mod_version_id.trim();
+    if requested_id.is_empty() {
+        return Err(AppError::Other(
+            "No stored version was selected. Refresh the mod list and try again.".into(),
+        ));
+    }
+    let resolved_id = resolve_alias(&db, requested_id).to_string();
+    let record = db.records.get(&resolved_id).cloned().ok_or_else(|| {
+        AppError::Other(
+            "That stored version is no longer available. Refresh the mod list and try again."
+                .into(),
+        )
+    })?;
+    let family = family_key_for_record(&record);
+
+    let installed_matches: Vec<&ModInfo> = installed_mods
+        .iter()
+        .filter(|info| {
+            info.mod_version_id
+                .as_deref()
+                .map(|id| resolve_alias(&db, id) == resolved_id)
+                .unwrap_or(false)
+        })
+        .collect();
+    if installed_matches.iter().any(|info| info.enabled) {
+        if !allow_active {
+            return Err(AppError::Other(
+                "Switch away from this active version before removing it.".into(),
+            ));
+        }
+        if mods_path.is_none() {
+            return Err(AppError::Other(
+                "The active mod folder is unavailable. Set the game path and try again.".into(),
+            ));
+        }
+    }
+    if installed_matches
+        .iter()
+        .any(|info| info.enabled && info.pinned)
+    {
+        return Err(AppError::Other(
+            "Unfreeze this mod before removing one of its stored versions.".into(),
+        ));
+    }
+    if installed_mods
+        .iter()
+        .any(|info| info.pinned && family_key_for_mod(info) == family)
+    {
+        return Err(AppError::Other(
+            "Unfreeze this mod before removing one of its stored versions.".into(),
+        ));
+    }
+
+    for profile in profiles {
+        for pm in &profile.mods {
+            if record_for_profile_mod_in_db(pm, &db)
+                .map(|record| record.id == resolved_id)
+                .unwrap_or(false)
+            {
+                return Err(AppError::Other(format!(
+                    "Remove this version from \"{}\" before deleting it.",
+                    profile.name
+                )));
+            }
+        }
+    }
+
+    let mut summary = LocalModVersionDeleteSummary::default();
+    for info in installed_matches {
+        let base = if info.enabled {
+            mods_path.ok_or_else(|| {
+                AppError::Other(
+                    "The active mod folder is unavailable. Set the game path and try again.".into(),
+                )
+            })?
+        } else {
+            disabled_path
+        };
+        crate::mods::delete_mod_files_by_info(info, base);
+        summary.deleted_disk = true;
+    }
+    if let Some(path) = cached_record_path(cache_path, &record) {
+        match fs::remove_file(&path) {
+            Ok(()) => {
+                summary.deleted_cache = true;
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(AppError::Other(format!(
+                    "Failed to remove stored version at {}: {}",
+                    path.display(),
+                    e
+                )));
+            }
+        }
+    }
+
+    if let Some(record) = db.records.remove(&resolved_id) {
+        summary.removed_record = true;
+        for alias in record.aliases {
+            db.aliases.remove(&alias);
+        }
+    }
+    db.aliases
+        .retain(|_, target| db.records.contains_key(target));
+    db.conflicts.retain(|_, ids| {
+        ids.retain(|id| db.records.contains_key(id));
+        !ids.is_empty()
+    });
+    save(&db, config_path)?;
+    Ok(summary)
+}
+
 fn sha256_file(path: &Path) -> io::Result<String> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
@@ -1162,12 +1534,7 @@ pub fn get_cached_mod_path_for_profile_mod(
     pm: &ProfileMod,
 ) -> Option<PathBuf> {
     let record = record_for_profile_mod(pm, config_path)?;
-    let path = record
-        .cache_relpath
-        .as_deref()
-        .map(|rel| cache_path.join(rel))
-        .unwrap_or_else(|| cache_path_for_id(cache_path, &record.id));
-    path.exists().then_some(path)
+    cached_record_path(cache_path, &record)
 }
 
 pub fn restore_mod_from_cache_by_id(
@@ -1270,6 +1637,49 @@ mod tests {
         assert_eq!(local, aliased);
         let db = load(dir.path());
         assert_eq!(db.aliases.get("shared-id"), Some(&local));
+    }
+
+    #[test]
+    fn cached_record_path_falls_back_to_alias_archive() {
+        let cache = tempfile::tempdir().unwrap();
+        let alias_id = "legacy-source-version-id";
+        let alias_path = cache_path_for_id(cache.path(), alias_id);
+        fs::create_dir_all(alias_path.parent().unwrap()).unwrap();
+        fs::write(&alias_path, b"cached zip").unwrap();
+
+        let record = ModVersionRecord {
+            id: "canonical-id".into(),
+            identity_key: "mod_id:regentcardsanimerework|version:0.6|content:hash".into(),
+            aliases: vec![alias_id.into()],
+            name: "RegentCardsAnimeRework".into(),
+            version: "v0.6".into(),
+            source_version: Some("v0.6.5".into()),
+            folder_name: Some("RegentCardsAnimeRework".into()),
+            mod_id: Some("RegentCardsAnimeRework".into()),
+            bundle_member_ids: Vec::new(),
+            source: Some("github:DoublePigeon/RegentCardsAnimeRework".into()),
+            content_hash: Some("hash".into()),
+            archive_sha256: None,
+            cache_relpath: Some(cache_relpath_for_id("canonical-id")),
+        };
+
+        assert_eq!(cached_record_path(cache.path(), &record), Some(alias_path));
+    }
+
+    #[test]
+    fn artifact_key_for_profile_mod_resolves_aliases_to_canonical_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut info = mod_info("RitsuLib (STS2 0.103.2 compat)", "0.4.24", Some("abc"));
+        let canonical_id = ensure_mod_info_id(&mut info, dir.path()).unwrap();
+        alias_shared_id("shared-ritsulib-id", &mut info, dir.path()).unwrap();
+        let db = load(dir.path());
+        let mut pm = profile_mod("shared-ritsulib-id".into(), "0.4.24", "abc");
+        pm.name = "RitsuLib (STS2 0.103.2 compat)".into();
+
+        assert_eq!(
+            artifact_key_for_profile_mod(&pm, &db),
+            format!("artifact:{canonical_id}")
+        );
     }
 
     #[test]
@@ -1587,6 +1997,72 @@ mod tests {
     }
 
     #[test]
+    fn local_options_collapse_duplicate_stored_artifacts() {
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let mut installed = mod_info("BaseLib", "3.2.1", Some("hash-321"));
+        installed.name = "BaseLib".into();
+        installed.folder_name = Some("BaseLib".into());
+        installed.mod_id = Some("BaseLib".into());
+        installed.source = Some("github:basemod/baselib".into());
+        let installed_id = ensure_mod_info_id(&mut installed, config.path()).unwrap();
+
+        let mut db = load(config.path());
+        for (id, version, hash) in [
+            ("dup-a", "3.2.1", "hash-321"),
+            ("dup-b", "3.2.1", "hash-321"),
+            ("distinct-new", "3.3.1", "hash-331"),
+        ] {
+            db.records.insert(
+                id.into(),
+                ModVersionRecord {
+                    id: id.into(),
+                    identity_key: format!("legacy:{id}"),
+                    aliases: Vec::new(),
+                    name: "BaseLib".into(),
+                    version: version.into(),
+                    source_version: None,
+                    folder_name: Some("BaseLib".into()),
+                    mod_id: Some("BaseLib".into()),
+                    bundle_member_ids: Vec::new(),
+                    source: Some("github:basemod/baselib".into()),
+                    content_hash: Some(hash.into()),
+                    archive_sha256: None,
+                    cache_relpath: Some(cache_relpath_for_id(id)),
+                },
+            );
+            let path = cache_path_for_id(cache.path(), id);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"placeholder").unwrap();
+        }
+        save(&db, config.path()).unwrap();
+
+        let options = local_version_options_for_target(
+            &[installed.clone()],
+            &[],
+            config.path(),
+            cache.path(),
+            &installed.name,
+            Some(&installed_id),
+            installed.mod_id.as_deref(),
+        );
+        let base_321 = options
+            .iter()
+            .filter(|option| option.version == "3.2.1")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            base_321.len(),
+            1,
+            "duplicate stored copies of the same artifact should collapse"
+        );
+        assert_eq!(base_321[0].mod_version_id, installed_id);
+        assert!(
+            options.iter().any(|option| option.version == "3.3.1"),
+            "distinct artifacts must remain selectable"
+        );
+    }
+
+    #[test]
     fn readable_nexus_filename_version_suppresses_update_pill() {
         let base = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
@@ -1809,5 +2285,120 @@ mod tests {
             "unused cached versions should not stack forever"
         );
         assert!(record_by_id(config.path(), &stale_id).is_none());
+    }
+
+    #[test]
+    fn remove_local_mod_version_deletes_unused_cached_record() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+
+        write_manifest(base.path(), "4.0.0");
+        let mut stale = mod_info("Test", "4.0.0", Some("stale"));
+        let stale_id = ensure_mod_info_id(&mut stale, config.path()).unwrap();
+        let stale_zip =
+            cache_mod_version_by_id(&mut stale, base.path(), cache.path(), config.path()).unwrap();
+
+        remove_local_mod_version(
+            config.path(),
+            cache.path(),
+            disabled.path(),
+            &[],
+            &[],
+            &stale_id,
+        )
+        .unwrap();
+
+        assert!(!stale_zip.exists());
+        assert!(record_by_id(config.path(), &stale_id).is_none());
+    }
+
+    #[test]
+    fn remove_local_mod_version_blocks_active_installed_version() {
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+
+        let mut active = mod_info("Test", "1.0.0", Some("active"));
+        let active_id = ensure_mod_info_id(&mut active, config.path()).unwrap();
+
+        let err = remove_local_mod_version(
+            config.path(),
+            cache.path(),
+            disabled.path(),
+            &[active],
+            &[],
+            &active_id,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("active version"));
+        assert!(record_by_id(config.path(), &active_id).is_some());
+    }
+
+    #[test]
+    fn remove_local_mod_version_blocks_profile_used_version() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+
+        write_manifest(base.path(), "2.0.0");
+        let mut profile_used = mod_info("Test", "2.0.0", Some("profile"));
+        let profile_used_id = ensure_mod_info_id(&mut profile_used, config.path()).unwrap();
+        let profile_used_zip =
+            cache_mod_version_by_id(&mut profile_used, base.path(), cache.path(), config.path())
+                .unwrap();
+        let profile = crate::profiles::Profile {
+            id: "stable-id".into(),
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![profile_mod(profile_used_id.clone(), "2.0.0", "profile")],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: std::collections::HashMap::new(),
+        };
+
+        let err = remove_local_mod_version(
+            config.path(),
+            cache.path(),
+            disabled.path(),
+            &[],
+            &[profile],
+            &profile_used_id,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("Stable"));
+        assert!(profile_used_zip.exists());
+        assert!(record_by_id(config.path(), &profile_used_id).is_some());
+    }
+
+    #[test]
+    fn remove_local_mod_version_deletes_disabled_stored_copy() {
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+
+        write_manifest(disabled.path(), "1.0.0");
+        let mut stored = mod_info("Test", "1.0.0", Some("stored"));
+        stored.enabled = false;
+        let stored_id = ensure_mod_info_id(&mut stored, config.path()).unwrap();
+
+        remove_local_mod_version(
+            config.path(),
+            cache.path(),
+            disabled.path(),
+            &[stored],
+            &[],
+            &stored_id,
+        )
+        .unwrap();
+
+        assert!(!disabled.path().join("Mod/manifest.json").exists());
+        assert!(record_by_id(config.path(), &stored_id).is_none());
     }
 }

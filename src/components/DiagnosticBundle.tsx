@@ -1,4 +1,4 @@
-import { useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { AlertTriangle, Bug, Check, Copy, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
@@ -13,6 +13,7 @@ import {
   bugReportEndpointHost,
 } from '../hooks/useTauri';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
+import { findProfileForIdentifier, profileDisplayName } from '../lib/profileDisplay';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { useOpenFeedback } from '../hooks/useOpenFeedback';
 
@@ -48,11 +49,12 @@ export function DiagnosticBundle({ open, onClose }: Props) {
 function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const toast = useToast();
-  const { gameInfo, mods, activeProfile } = useApp();
+  const { gameInfo, mods, activeProfile, activeProfileId } = useApp();
   const [description, setDescription] = useState('');
   const [redactPaths, setRedactPaths] = useState(true);
   const [busy, setBusy] = useState(false);
   const [generated, setGenerated] = useState<string | null>(null);
+  const [resolvedActiveProfileName, setResolvedActiveProfileName] = useState<string | null>(null);
   // Host of the upload endpoint, learned at report-build time. When set we
   // pause on a consent banner (`awaitingConsent`) before any upload happens.
   const [uploadHost, setUploadHost] = useState<string | null>(null);
@@ -60,6 +62,27 @@ function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
   const modalRef = useRef<HTMLElement>(null);
   useModalA11y(modalRef, onClose);
   const openFeedback = useOpenFeedback();
+  const activeProfileKey = activeProfileId ?? activeProfile;
+
+  useEffect(() => {
+    if (!activeProfileKey) {
+      setResolvedActiveProfileName(null);
+      return;
+    }
+    let cancelled = false;
+    listProfiles()
+      .then((profiles) => {
+        if (cancelled) return;
+        const active =
+          findProfileForIdentifier(profiles, activeProfileKey)
+          ?? findProfileForIdentifier(profiles, activeProfile);
+        setResolvedActiveProfileName(active?.name ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedActiveProfileName(null);
+      });
+    return () => { cancelled = true; };
+  }, [activeProfile, activeProfileKey]);
 
   function redact(s: string): string {
     // Tokens/secrets are ALWAYS stripped (an auth concern); home-folder
@@ -107,11 +130,17 @@ function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
     // The active modpack's manifest IS the load order. The manifest rows
     // don't carry source links, so cross-reference the installed mods.
     let loadOrderLines: string[] = [];
-    if (activeProfile) {
+    let activeProfileName = activeProfileKey
+      ? resolvedActiveProfileName ?? profileDisplayName(activeProfile, t('quickAdd.unknown'))
+      : t('common.vanilla');
+    if (activeProfileKey) {
       try {
         const profiles = await listProfiles();
-        const active = profiles.find((p) => p.name === activeProfile);
+        const active =
+          findProfileForIdentifier(profiles, activeProfileKey)
+          ?? findProfileForIdentifier(profiles, activeProfile);
         if (active) {
+          activeProfileName = active.name;
           loadOrderLines = active.mods.map((m, i) => {
             const installed = mods.find(
               (x) => (x.folder_name ?? x.name) === (m.folder_name ?? m.name),
@@ -147,7 +176,7 @@ function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
       }),
       '',
       t('diagnosticBundle.reportActiveProfileSection'),
-      t('diagnosticBundle.reportProfileName', { name: activeProfile || t('common.vanilla') }),
+      t('diagnosticBundle.reportProfileName', { name: activeProfileName }),
       ...(loadOrderLines.length
         ? ['', t('diagnosticBundle.reportLoadOrderSection'), ...loadOrderLines]
         : []),
@@ -279,6 +308,10 @@ function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
     if (awaitingConsent) setAwaitingConsent(false);
   }
 
+  const activeProfileLabel = activeProfileId
+    ? resolvedActiveProfileName ?? profileDisplayName(activeProfile, t('quickAdd.unknown'))
+    : profileDisplayName(activeProfile, t('common.vanilla'));
+
   /** Secondary action: build + copy the full report without leaving the app. */
   async function copyReport() {
     if (busy) return;
@@ -354,7 +387,7 @@ function DiagnosticBundlePanel({ onClose }: { onClose: () => void }) {
             <div className="gf-diag-item">
               <span className="check"><Check size={12} /></span>
               <b style={{ color: 'var(--ink)' }}>{t('diagnosticBundle.loadOrder')}</b>
-              <span style={{ marginInlineStart: 'auto', fontSize: 11 }}>{activeProfile || t('common.vanilla')}</span>
+              <span style={{ marginInlineStart: 'auto', fontSize: 11 }}>{activeProfileLabel}</span>
             </div>
             <div className="gf-diag-item">
               <span className="check"><Check size={12} /></span>

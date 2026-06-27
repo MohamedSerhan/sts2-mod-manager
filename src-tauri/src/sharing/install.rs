@@ -555,7 +555,7 @@ pub async fn install_shared_profile(
     // ── STEP 2: Apply profile AFTER downloads ──
     // Now all downloadable mods are in mods_path, apply_profile can correctly enable/disable
     emit_modpack_install_progress(&app_handle, &profile.name, "applying", 0, total_mods, None);
-    crate::profiles::apply_profile_with_pins(
+    let apply_result = crate::profiles::apply_profile_with_pins(
         &profile,
         &mods_path,
         &disabled_path,
@@ -563,6 +563,24 @@ pub async fn install_shared_profile(
         &config_path,
     )
     .map_err(|e| e.to_string())?;
+    let missing_enabled_mods: Vec<String> = apply_result
+        .missing_enabled_mods
+        .into_iter()
+        .filter(|name| {
+            !skipped_incompatible
+                .iter()
+                .any(|skipped| skipped.mod_name == *name)
+        })
+        .collect();
+    if !missing_enabled_mods.is_empty() {
+        let message = format!(
+            "Modpack '{}' could not be fully applied. Still missing: {}",
+            profile.name,
+            missing_enabled_mods.join(", ")
+        );
+        log::error!("{}", message);
+        return Err(message);
+    }
 
     // ── STEP 3: Mark imported profile as active ──
     // We just rewrote disk to match this profile. If we leave the

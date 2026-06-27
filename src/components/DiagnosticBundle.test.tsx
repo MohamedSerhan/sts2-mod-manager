@@ -507,6 +507,42 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     expect(ta.value).not.toContain('D:\\Steam');
   });
 
+  it('uses the active modpack display name instead of its UUID in the checklist and report', async () => {
+    const uuid = '731aeaec-7f3d-4859-baec-16219701e2e7';
+    registerInvokeHandler('get_active_profile', () => uuid);
+    registerInvokeHandler('get_active_profile_id', () => uuid);
+    registerInvokeHandler('get_installed_mods', () => [
+      { name: 'Core', version: '1.2', enabled: true, pinned: false, folder_name: 'Core', github_url: null, nexus_url: null },
+    ]);
+    registerInvokeHandler('list_profiles_cmd', () => [
+      {
+        id: uuid,
+        name: 'TesterW',
+        game_version: '0.105.0',
+        created_by: null,
+        created_at: '2026-01-01',
+        updated_at: '2026-01-01',
+        mods: [
+          { name: 'Core', version: '1.2', source: null, hash: null, files: [], enabled: true, bundle_url: null, folder_name: 'Core', mod_id: 'Core' },
+        ],
+      },
+    ]);
+    registerInvokeHandler('read_log_tail', () => '');
+    registerInvokeHandler('get_log_path', () => '/p.log');
+
+    render(<Wrap />);
+
+    await waitFor(() => {
+      expect(screen.getByText('TesterW')).toBeInTheDocument();
+    });
+    expect(document.body.textContent).not.toContain(uuid);
+
+    fireEvent.click(getCopyButton());
+    const ta = (await screen.findByDisplayValue(/Bug Report/)) as HTMLTextAreaElement;
+    expect(ta.value).toContain('Name: TesterW');
+    expect(ta.value).not.toContain(uuid);
+  });
+
   it('catches non-Error throw values (String(e) branch)', async () => {
     registerInvokeHandler('get_installed_mods', () => [
       Object.defineProperty(

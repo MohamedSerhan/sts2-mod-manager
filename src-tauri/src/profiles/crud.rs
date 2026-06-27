@@ -18,7 +18,7 @@
 //!   - Sanity helpers reused across modules: `sanitize_filename`,
 //!     `hide_app_created_by`, `version_is_wildcard`,
 //!     `subscribed_profile_names`, `profile_has_json`.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -90,7 +90,7 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
                 if !seen_profile_stems.contains(&stem) {
                     // Create a placeholder profile -- will be fetched from GitHub on activation
                     profiles.push(Profile {
-                        id: new_profile_id(),
+                        id: stem.clone(),
                         name: stem.clone(),
                         game_version: None,
                         created_by: Some("Shared (click Activate to fetch)".to_string()),
@@ -112,9 +112,11 @@ pub fn list_profiles(profiles_path: &Path) -> Vec<Profile> {
 
 /// Save a profile to disk.
 pub fn save_profile(profile: &Profile, profiles_path: &Path) -> Result<()> {
-    let file_name = profile_file_stem(profile);
+    let mut profile = profile.clone();
+    collapse_equivalent_profile_mods(&mut profile, &crate::mod_versions::ModVersionsDb::default());
+    let file_name = profile_file_stem(&profile);
     let path = profiles_path.join(format!("{}.json", file_name));
-    let json = serde_json::to_string_pretty(profile)?;
+    let json = serde_json::to_string_pretty(&profile)?;
     // atomic_write creates the parent dir (propagating any error, unlike the
     // old silent `let _ = create_dir_all`) and renames into place.
     crate::fs_safety::atomic_write(&path, json.as_bytes())?;
@@ -255,8 +257,9 @@ pub fn export_profile(profile: &Profile) -> String {
 
 /// Import a profile from a JSON string and save it.
 pub fn import_profile(json: &str, profiles_path: &Path) -> Result<Profile> {
-    let profile: Profile = serde_json::from_str(json)
+    let mut profile: Profile = serde_json::from_str(json)
         .map_err(|e| AppError::InvalidProfile(format!("Invalid profile JSON: {}", e)))?;
+    collapse_equivalent_profile_mods(&mut profile, &crate::mod_versions::ModVersionsDb::default());
     save_profile(&profile, profiles_path)?;
     Ok(profile)
 }
@@ -296,18 +299,22 @@ pub(crate) fn profile_file_stem(profile: &Profile) -> String {
 
 fn load_profile_from_path(path: &Path) -> Result<Profile> {
     let content = fs::read_to_string(path)?;
-    let mut profile: Profile = serde_json::from_str(&content)?;
+    let mut profile: Profile = serde_json::from_str(profile_json_text(&content))?;
     if profile.id.trim().is_empty() {
         profile.id = new_profile_id();
     }
     Ok(profile)
 }
 
+fn profile_json_text(content: &str) -> &str {
+    content.strip_prefix('\u{feff}').unwrap_or(content)
+}
+
 fn profile_file_missing_id(path: &Path) -> bool {
     let Ok(content) = fs::read_to_string(path) else {
         return false;
     };
-    serde_json::from_str::<serde_json::Value>(&content)
+    serde_json::from_str::<serde_json::Value>(profile_json_text(&content))
         .ok()
         .and_then(|value| value.get("id").cloned())
         .and_then(|value| value.as_str().map(str::trim).map(str::is_empty))
@@ -324,7 +331,7 @@ fn find_profile_json(name_or_id: &str, profiles_path: &Path) -> Option<std::path
         let Ok(content) = fs::read_to_string(&path) else {
             continue;
         };
-        let Ok(profile) = serde_json::from_str::<Profile>(&content) else {
+        let Ok(profile) = serde_json::from_str::<Profile>(profile_json_text(&content)) else {
             continue;
         };
         if profile.id.eq_ignore_ascii_case(name_or_id) {
@@ -408,7 +415,17 @@ pub(crate) fn migrate_profile_identity_storage(
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let mut profile = load_profile_from_path(&path)?;
+        let mut profile = match load_profile_from_path(&path) {
+            Ok(profile) => profile,
+            Err(e) => {
+                log::warn!(
+                    "Skipping invalid profile during identity migration at {}: {}",
+                    path.display(),
+                    e
+                );
+                continue;
+            }
+        };
         if profile.id.trim().is_empty() {
             profile.id = new_profile_id();
         }
@@ -497,6 +514,26 @@ fn identity_lists_intersect(a: &[String], b: &[String]) -> bool {
     a.iter().any(|key| b.contains(key))
 }
 
+fn identity_value_matches(keys: &[String], value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty() && keys.iter().any(|key| key.eq_ignore_ascii_case(value))
+}
+
+pub(crate) fn profile_mod_matches_bundle_member(pm: &ProfileMod, installed: &ModInfo) -> bool {
+    if installed.bundle_members.is_empty() && installed.bundle_member_ids.is_empty() {
+        return false;
+    }
+    let profile_keys = mod_identity_keys(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref());
+    installed
+        .bundle_member_ids
+        .iter()
+        .any(|id| identity_value_matches(&profile_keys, id))
+        || installed
+            .bundle_members
+            .iter()
+            .any(|member| identity_value_matches(&profile_keys, member))
+}
+
 pub(crate) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo) -> bool {
     if let (Some(profile_id), Some(installed_id)) = (
         pm.mod_version_id.as_deref(),
@@ -505,6 +542,10 @@ pub(crate) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo
         if profile_id == installed_id {
             return true;
         }
+    }
+
+    if profile_mod_matches_bundle_member(pm, installed) {
+        return true;
     }
 
     let profile_strong = strong_mod_identity_keys(pm.folder_name.as_deref(), pm.mod_id.as_deref());
@@ -553,6 +594,9 @@ pub(crate) fn profile_mod_matches_installed_with_registry(
             .as_deref()
             .is_some_and(|id| !id.trim().is_empty())
     {
+        if profile_mod_matches_bundle_member(pm, installed) {
+            return true;
+        }
         return profile_mod_artifact_id_matches(pm, installed, config_path).unwrap_or(false);
     }
 
@@ -573,6 +617,9 @@ pub(crate) fn profile_mod_matches_installed_with_version_db(
             .as_deref()
             .is_some_and(|id| !id.trim().is_empty())
     {
+        if profile_mod_matches_bundle_member(pm, installed) {
+            return true;
+        }
         return profile_mod_artifact_id_matches_in_db(pm, installed, version_db).unwrap_or(false);
     }
 
@@ -692,6 +739,106 @@ pub(crate) fn profile_mod_from_installed(installed: &ModInfo) -> ProfileMod {
         bundle_members: installed.bundle_members.clone(),
         bundle_member_ids: installed.bundle_member_ids.clone(),
     }
+}
+
+fn profile_mod_extra_key(pm: &ProfileMod) -> String {
+    pm.folder_name
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| pm.name.clone())
+}
+
+fn canonicalize_profile_mod_artifact_id(
+    pm: &mut ProfileMod,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) {
+    if let Some(id) = crate::mod_versions::canonical_profile_mod_artifact_id(pm, version_db) {
+        pm.mod_version_id = Some(id);
+    }
+}
+
+fn merge_duplicate_profile_mod_metadata(
+    target: &mut ProfileMod,
+    duplicate: ProfileMod,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) {
+    if target.mod_version_id.is_none() {
+        target.mod_version_id = duplicate.mod_version_id.clone();
+    }
+    if target.source.is_none() {
+        target.source = duplicate.source;
+    }
+    if target.hash.is_none() {
+        target.hash = duplicate.hash;
+    }
+    if target.bundle_url.is_none() {
+        target.bundle_url = duplicate.bundle_url;
+    }
+    if target.bundle_sha256.is_none() {
+        target.bundle_sha256 = duplicate.bundle_sha256;
+    }
+    if target.folder_name.is_none() {
+        target.folder_name = duplicate.folder_name;
+    }
+    if target.mod_id.is_none() {
+        target.mod_id = duplicate.mod_id;
+    }
+    if target.files.is_empty() {
+        target.files = duplicate.files;
+    }
+    if target.bundle_members.is_empty() {
+        target.bundle_members = duplicate.bundle_members;
+    }
+    if target.bundle_member_ids.is_empty() {
+        target.bundle_member_ids = duplicate.bundle_member_ids;
+    }
+    if target.version.trim().is_empty()
+        || target.version.eq_ignore_ascii_case("unknown")
+        || target.version == "0.0.0"
+    {
+        target.version = duplicate.version;
+    }
+    canonicalize_profile_mod_artifact_id(target, version_db);
+}
+
+pub(crate) fn collapse_equivalent_profile_mods(
+    profile: &mut Profile,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> usize {
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut collapsed: Vec<ProfileMod> = Vec::with_capacity(profile.mods.len());
+    let mut removed = 0usize;
+
+    for mut profile_mod in profile.mods.drain(..) {
+        canonicalize_profile_mod_artifact_id(&mut profile_mod, version_db);
+        let artifact_key =
+            crate::mod_versions::artifact_key_for_profile_mod(&profile_mod, version_db);
+        if let Some(&target_index) = seen.get(&artifact_key) {
+            let target_extra_key = profile_mod_extra_key(&collapsed[target_index]);
+            let duplicate_extra_key = profile_mod_extra_key(&profile_mod);
+            if target_extra_key != duplicate_extra_key
+                && !profile.mod_extras.contains_key(&target_extra_key)
+            {
+                if let Some(extra) = profile.mod_extras.get(&duplicate_extra_key).cloned() {
+                    profile.mod_extras.insert(target_extra_key, extra);
+                }
+            }
+            merge_duplicate_profile_mod_metadata(
+                &mut collapsed[target_index],
+                profile_mod,
+                version_db,
+            );
+            removed += 1;
+        } else {
+            seen.insert(artifact_key, collapsed.len());
+            collapsed.push(profile_mod);
+        }
+    }
+
+    profile.mods = collapsed;
+    removed
 }
 
 #[cfg(test)]
@@ -927,6 +1074,63 @@ mod public_field_tests {
 mod profile_schema_compat_tests {
     use super::*;
 
+    fn mod_info_bundle() -> ModInfo {
+        ModInfo {
+            mod_version_id: Some("bundle-artifact".into()),
+            name: "AliceDefectSkin V2.0".into(),
+            version: "2.0".into(),
+            description: String::new(),
+            enabled: true,
+            files: vec!["AliceDefectSkin V2.0/AliceDefectSkin.dll".into()],
+            source: None,
+            hash: None,
+            dependencies: vec![],
+            size_bytes: 0,
+            folder_name: Some("AliceDefectSkin V2.0".into()),
+            mod_id: None,
+            github_url: None,
+            github_auto_detected: false,
+            nexus_url: None,
+            pinned: false,
+            min_game_version: None,
+            author: None,
+            note: None,
+            custom_url: None,
+            tags: vec![],
+            display_name: None,
+            display_description: None,
+            bundle_members: vec![
+                "Alice Defect Skin".into(),
+                "Alice Defect Voice Bridge".into(),
+            ],
+            bundle_member_ids: vec!["AliceDefectSkin".into()],
+        }
+    }
+
+    #[test]
+    fn profile_member_row_matches_installed_bundle_container() {
+        let pm = ProfileMod {
+            mod_version_id: Some("member-artifact".into()),
+            name: "Alice Defect Skin".into(),
+            version: "2.1".into(),
+            source: None,
+            hash: None,
+            files: vec![],
+            folder_name: Some("AliceDefectSkin".into()),
+            mod_id: Some("AliceDefectSkin".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        };
+
+        assert!(
+            profile_mod_matches_installed(&pm, &mod_info_bundle()),
+            "a local member row should be satisfied by the restored bundle container"
+        );
+    }
+
     #[test]
     fn legacy_profile_without_bundle_sha256_deserializes() {
         let legacy = r#"{
@@ -1133,6 +1337,58 @@ mod profile_identity_storage_tests {
         }
     }
 
+    fn saved_mod(name: &str, version: &str, hash: &str) -> ProfileMod {
+        ProfileMod {
+            mod_version_id: None,
+            name: name.into(),
+            version: version.into(),
+            source: None,
+            hash: Some(hash.into()),
+            files: vec![format!("{name}/{name}.dll")],
+            folder_name: Some(name.into()),
+            mod_id: Some(name.into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        }
+    }
+
+    #[test]
+    fn save_profile_collapses_identical_duplicate_mod_entries() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        let mut profile = sample_profile("profile-123", "TesterW", 0);
+        let ritsu = saved_mod("STS2-RitsuLib", "0.4.24", "same-hash");
+        profile.mods = vec![ritsu.clone(), ritsu];
+
+        save_profile(&profile, dir).unwrap();
+        let loaded = load_profile("TesterW", dir).unwrap();
+
+        assert_eq!(loaded.mods.len(), 1);
+        assert_eq!(loaded.mods[0].name, "STS2-RitsuLib");
+        assert_eq!(loaded.mods[0].version, "0.4.24");
+    }
+
+    #[test]
+    fn save_profile_keeps_distinct_versions_of_same_mod() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        let mut profile = sample_profile("profile-123", "TesterW", 0);
+        profile.mods = vec![
+            saved_mod("STS2-RitsuLib", "0.3.0", "old-hash"),
+            saved_mod("STS2-RitsuLib", "0.4.24", "new-hash"),
+        ];
+
+        save_profile(&profile, dir).unwrap();
+        let loaded = load_profile("TesterW", dir).unwrap();
+
+        assert_eq!(loaded.mods.len(), 2);
+        assert!(loaded.mods.iter().any(|pm| pm.version == "0.3.0"));
+        assert!(loaded.mods.iter().any(|pm| pm.version == "0.4.24"));
+    }
+
     #[test]
     fn id_named_share_sidecar_does_not_create_placeholder_profile() {
         let tmp = tempdir().unwrap();
@@ -1147,6 +1403,41 @@ mod profile_identity_storage_tests {
         assert_eq!(profiles[0].id, "profile-123");
         assert_eq!(profiles[0].name, "TesterW");
         assert_eq!(profiles[0].mods.len(), 2);
+    }
+
+    #[test]
+    fn share_placeholder_uses_sidecar_stem_as_stable_key() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("profile-123.share"), "{}").unwrap();
+
+        let profiles = list_profiles(dir);
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].id, "profile-123");
+        assert_eq!(profiles[0].name, "profile-123");
+        assert_eq!(profiles[0].mods.len(), 0);
+    }
+
+    #[test]
+    fn utf8_bom_profile_json_loads_before_share_placeholder_fallback() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        let profile = sample_profile("profile-123", "OG Crue Spyer Pack", 21);
+        let mut bytes = vec![0xef, 0xbb, 0xbf];
+        bytes.extend(serde_json::to_vec_pretty(&profile).unwrap());
+        std::fs::write(dir.join("profile-123.json"), bytes).unwrap();
+        std::fs::write(dir.join("profile-123.share"), "{}").unwrap();
+
+        let profiles = list_profiles(dir);
+        let loaded = load_profile("profile-123", dir).unwrap();
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].id, "profile-123");
+        assert_eq!(profiles[0].name, "OG Crue Spyer Pack");
+        assert_eq!(profiles[0].mods.len(), 21);
+        assert_eq!(loaded.name, "OG Crue Spyer Pack");
+        assert_eq!(loaded.mods.len(), 21);
     }
 
     #[test]
@@ -1169,6 +1460,36 @@ mod profile_identity_storage_tests {
         assert_eq!(profiles[0].id, "profile-123");
         assert_eq!(loaded.id, "profile-123");
         assert_eq!(loaded.mods.len(), 2);
+    }
+
+    #[test]
+    fn identity_migration_skips_invalid_profile_jsons() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path();
+        let config = tmp.path().join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(dir.join("Broken.json"), "").unwrap();
+        std::fs::write(config.join("active_profile.txt"), "Legacy Pack").unwrap();
+        let legacy = sample_profile("", "Legacy Pack", 1);
+        std::fs::write(
+            dir.join("Legacy Pack.json"),
+            serde_json::to_string_pretty(&legacy).unwrap(),
+        )
+        .unwrap();
+
+        migrate_profile_identity_storage(dir, &config).unwrap();
+
+        let profiles = list_profiles(dir);
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].name, "Legacy Pack");
+        assert!(!profiles[0].id.trim().is_empty());
+        assert_eq!(
+            std::fs::read_to_string(config.join("active_profile.txt"))
+                .unwrap()
+                .trim(),
+            profiles[0].id
+        );
+        assert!(dir.join("Broken.json").exists());
     }
 }
 

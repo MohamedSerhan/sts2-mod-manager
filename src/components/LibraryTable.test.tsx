@@ -125,6 +125,55 @@ describe('<LibraryTable>', () => {
     expect(screen.getAllByText('CardArtEditor').length).toBeGreaterThan(0);
   });
 
+  it('appends extra rows once and ignores duplicates already in the membership grid', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [
+      baseProfile({ name: 'Stable' }),
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'BaseLib',
+          version: '1.0.0',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    render(
+      <Wrap
+        modpackName="Stable"
+        extraRows={[
+          {
+            name: 'BaseLib',
+            version: '1.0.0',
+            folder_name: 'BaseLib',
+            mod_id: 'BaseLib',
+            installed_enabled: true,
+            profiles: [],
+          },
+          {
+            name: 'ExtraMod',
+            version: '2.0.0',
+            folder_name: 'ExtraMod',
+            mod_id: 'ExtraMod',
+            installed_enabled: false,
+            profiles: [],
+          },
+        ]}
+      />,
+    );
+
+    expect((await screen.findAllByText('BaseLib')).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('heading', { name: 'BaseLib' })).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'ExtraMod' })).toBeInTheDocument();
+  });
+
   it('applies the compact density class when compact is the saved view preference', async () => {
     localStorage.setItem('sts2mm-mod-density', 'compact');
     registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
@@ -712,6 +761,14 @@ describe('<LibraryTable>', () => {
     };
     fireEvent.dragStart(secondRow, { dataTransfer });
     fireEvent.dragOver(firstRow, { dataTransfer });
+    await waitFor(() => {
+      expect(firstRow).toHaveClass('drag-over');
+    });
+    fireEvent.dragLeave(firstRow, { dataTransfer });
+    await waitFor(() => {
+      expect(firstRow).not.toHaveClass('drag-over');
+    });
+    fireEvent.dragOver(firstRow, { dataTransfer });
     fireEvent.drop(firstRow, { dataTransfer });
     // dragEnd is a no-op for the assertion but matches a real browser
     // sequence and clears the optimistic indices.
@@ -731,6 +788,56 @@ describe('<LibraryTable>', () => {
       | Array<{ name: string }>
       | undefined;
     expect(orderedMods?.map((m) => m.name)).toEqual(['Second', 'First']);
+  });
+
+  it('load-order save toast uses modpackLabel when the focused modpack key is a UUID', async () => {
+    const uuid = '731aeaec-7f3d-4859-baec-16219701e2e7';
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ id: uuid, name: 'TesterW' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ profile_id: uuid, profile_name: 'TesterW', editable: true }],
+      mods: [
+        {
+          name: 'First',
+          version: '1.0',
+          folder_name: 'First',
+          mod_id: 'First',
+          installed_enabled: true,
+          profiles: [{ profile_id: uuid, profile_name: 'TesterW', included: true, enabled: true, editable: true }],
+        },
+        {
+          name: 'Second',
+          version: '1.0',
+          folder_name: 'Second',
+          mod_id: 'Second',
+          installed_enabled: true,
+          profiles: [{ profile_id: uuid, profile_name: 'TesterW', included: true, enabled: true, editable: true }],
+        },
+      ],
+    }));
+    registerInvokeHandler('set_profile_load_order', () => ({
+      profile: baseProfile({ id: uuid, name: 'TesterW' }),
+      settings_status: 'applied',
+      settings_path: 'settings.save',
+    }));
+
+    const { container } = render(<Wrap modpackName={uuid} modpackLabel="TesterW" enableReorder />);
+    await screen.findByText('#1');
+    await screen.findByText('#2');
+    const rows = Array.from(container.querySelectorAll('.gf-profile-library-row')) as HTMLElement[];
+    const dataTransfer = {
+      data: new Map<string, string>(),
+      setData(type: string, value: string) { this.data.set(type, value); },
+      getData(type: string) { return this.data.get(type) ?? ''; },
+      effectAllowed: '',
+      dropEffect: '',
+      get types() { return Array.from(this.data.keys()); },
+    };
+    fireEvent.dragStart(rows[1], { dataTransfer });
+    fireEvent.dragOver(rows[0], { dataTransfer });
+    fireEvent.drop(rows[0], { dataTransfer });
+
+    expect(await screen.findByText(/Load order saved for TesterW/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(uuid);
   });
 
   it('drag reorder failure shows a toast and reloads the membership grid', async () => {
@@ -1088,6 +1195,56 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(getInvokeCalls().some((call) => call.cmd === 'select_profile_mod_version')).toBe(false);
   });
 
+  it('keeps the selected Library version visible while the switch refresh is pending', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'watcher-143',
+        name: 'Watcher',
+        version: '1.4.3',
+        folder_name: 'Watcher',
+        mod_id: 'Watcher',
+        enabled: true,
+      }),
+      mkModInfo({
+        mod_version_id: 'watcher-130',
+        name: 'Watcher',
+        version: '1.3.0',
+        folder_name: 'Watcher-old',
+        mod_id: 'Watcher',
+        enabled: false,
+      }),
+    ]);
+    let resolveSelect: ((value: ModInfo) => void) | undefined;
+    registerInvokeHandler('select_library_mod_version', () => new Promise<ModInfo>((resolve) => {
+      resolveSelect = resolve;
+    }));
+    const user = userEvent.setup();
+    render(<Wrap modpackName={null} />);
+
+    const picker = await screen.findByRole('combobox', { name: /Choose version/i });
+    expect(picker).toHaveTextContent(/1\.4\.3 \(active\)/i);
+    await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+
+    await waitFor(() => expect(picker).toHaveTextContent(/1\.3\.0 \(stored\)/i));
+    resolveSelect?.(mkModInfo({
+      mod_version_id: 'watcher-130',
+      name: 'Watcher',
+      version: '1.3.0',
+      folder_name: 'Watcher-old',
+      mod_id: 'Watcher',
+      enabled: true,
+    }));
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+        cmd: 'select_library_mod_version',
+        args: expect.objectContaining({
+          currentModVersionId: 'watcher-143',
+          selectedModVersionId: 'watcher-130',
+        }),
+      }));
+    });
+  });
+
   it('shows cached-only backend versions in the no-focus Library selector', async () => {
     registerInvokeHandler('get_installed_mods', () => [
       mkModInfo({
@@ -1249,6 +1406,79 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(within(listbox).getByRole('option', { name: /1\.4\.2 \(active\)/i })).toBeInTheDocument();
   });
 
+  it('collapses duplicate stored backend version options in the no-focus Library selector', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'baselib-321',
+        name: 'BaseLib',
+        version: '3.2.1',
+        folder_name: 'BaseLib',
+        mod_id: 'BaseLib',
+        enabled: true,
+      }),
+    ]);
+    registerInvokeHandler('get_library_version_options', () => ({
+      'baselib-321': [
+        {
+          mod_version_id: 'baselib-331',
+          name: 'BaseLib',
+          version: '3.3.1',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed: false,
+          installed_enabled: false,
+          cached: true,
+          pinned: false,
+          used_by_profiles: [],
+        },
+        {
+          mod_version_id: 'baselib-321',
+          name: 'BaseLib',
+          version: '3.2.1',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed: true,
+          installed_enabled: true,
+          cached: true,
+          pinned: false,
+          used_by_profiles: ['Stable'],
+        },
+        {
+          mod_version_id: 'baselib-321-stored-a',
+          name: 'BaseLib',
+          version: '3.2.1',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed: false,
+          installed_enabled: false,
+          cached: true,
+          pinned: false,
+          used_by_profiles: [],
+        },
+        {
+          mod_version_id: 'baselib-321-stored-b',
+          name: 'BaseLib',
+          version: '3.2.1',
+          folder_name: 'BaseLib',
+          mod_id: 'BaseLib',
+          installed: false,
+          installed_enabled: false,
+          cached: true,
+          pinned: false,
+          used_by_profiles: [],
+        },
+      ],
+    }));
+
+    render(<Wrap modpackName={null} />);
+
+    const user = userEvent.setup();
+    const listbox = await openSelect(user, /Choose version/i);
+    expect(within(listbox).getByRole('option', { name: /3\.3\.1 \(stored\)/i })).toBeInTheDocument();
+    expect(within(listbox).getAllByRole('option', { name: /3\.2\.1/i })).toHaveLength(1);
+    expect(within(listbox).getByRole('option', { name: /3\.2\.1 \(active\)/i })).toBeInTheDocument();
+  });
+
   it('renders rows without the storage chip or per-row Store button', async () => {
     seedInstalledMods();
     const { container } = render(<Wrap modpackName={null} />);
@@ -1271,6 +1501,13 @@ describe('<LibraryTable modpackName={null}>', () => {
 
   it('threads optional row action callbacks when matching mod info is available', async () => {
     seedInstalledMods();
+    const onAutoDetectSource = vi.fn();
+    const onOpenExternalUrl = vi.fn();
+    const onRepair = vi.fn();
+    const onRollback = vi.fn();
+    const onCopyVersion = vi.fn();
+    const onOpenThisModFolder = vi.fn();
+    const onTogglePin = vi.fn();
     const modInfoByKey = new Map([
       ['BaseLib', mkModInfo({
         name: 'BaseLib',
@@ -1285,21 +1522,63 @@ describe('<LibraryTable modpackName={null}>', () => {
         modpackName={null}
         modInfoByKey={modInfoByKey}
         onUpdate={vi.fn()}
-        onTogglePin={vi.fn()}
+        onTogglePin={onTogglePin}
         onSnooze={vi.fn()}
         onUnsnooze={vi.fn()}
-        onRepair={vi.fn()}
-        onRollback={vi.fn()}
+        onRepair={onRepair}
+        onRollback={onRollback}
         onDelete={vi.fn()}
-        onCopyVersion={vi.fn()}
-        onOpenThisModFolder={vi.fn()}
+        onCopyVersion={onCopyVersion}
+        onOpenThisModFolder={onOpenThisModFolder}
         onEditSources={vi.fn()}
         onFindGithubFromNexus={vi.fn()}
-        onOpenExternalUrl={vi.fn()}
-        onAutoDetectSource={vi.fn()}
+        onOpenExternalUrl={onOpenExternalUrl}
+        onAutoDetectSource={onAutoDetectSource}
       />,
     );
     expect(await screen.findAllByText('BaseLib')).not.toHaveLength(0);
+    const user = userEvent.setup();
+    const openRowMenu = async () => {
+      await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    };
+
+    await openRowMenu();
+    await user.click(screen.getByRole('menuitem', { name: /auto-detect source/i }));
+    expect(onAutoDetectSource).toHaveBeenCalledWith(expect.objectContaining({ name: 'BaseLib' }));
+
+    await openRowMenu();
+    await user.click(screen.getByRole('menuitem', { name: /^view on github$/i }));
+    expect(onOpenExternalUrl).toHaveBeenCalledWith(
+      'https://github.com/owner/baselib',
+      expect.objectContaining({ name: 'BaseLib' }),
+    );
+
+    await openRowMenu();
+    await user.click(screen.getByRole('menuitem', { name: /^view on nexus$/i }));
+    expect(onOpenExternalUrl).toHaveBeenCalledWith(
+      'https://www.nexusmods.com/slaythespire2/mods/123',
+      expect.objectContaining({ name: 'BaseLib' }),
+    );
+
+    await openRowMenu();
+    await user.click(screen.getByRole('menuitem', { name: /repair this mod/i }));
+    expect(onRepair).toHaveBeenCalledWith(expect.objectContaining({ name: 'BaseLib' }));
+
+    await openRowMenu();
+    await user.click(screen.getByRole('menuitem', { name: /roll back one version/i }));
+    expect(onRollback).toHaveBeenCalledWith(expect.objectContaining({ name: 'BaseLib' }));
+
+    await openRowMenu();
+    await user.click(screen.getByRole('menuitem', { name: /copy version/i }));
+    expect(onCopyVersion).toHaveBeenCalledWith(expect.objectContaining({ name: 'BaseLib' }));
+
+    await openRowMenu();
+    await user.click(screen.getByRole('menuitem', { name: /open this mod's folder/i }));
+    expect(onOpenThisModFolder).toHaveBeenCalledWith(expect.objectContaining({ name: 'BaseLib' }));
+
+    await openRowMenu();
+    await user.click(screen.getByRole('menuitem', { name: /freeze this mod/i }));
+    expect(onTogglePin).toHaveBeenCalledWith(expect.objectContaining({ name: 'BaseLib' }));
   });
 
   // ── packScoped (dedicated modpack view) ───────────────────────────
@@ -1428,7 +1707,114 @@ describe('<LibraryTable modpackName={null}>', () => {
       expect(rows[1]).toContain('Beta');
     });
 
-    it('filters pack rows by tag without changing saved load order', async () => {
+    it('visual sort reorders pack rows without changing saved load order', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'Alpha',
+            version: '1.0.0',
+            folder_name: 'Alpha',
+            mod_id: 'Alpha',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 0 }],
+          },
+          {
+            name: 'Beta',
+            version: '1.0.0',
+            folder_name: 'Beta',
+            mod_id: 'Beta',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 1 }],
+          },
+          {
+            name: 'Gamma',
+            version: '1.0.0',
+            folder_name: 'Gamma',
+            mod_id: 'Gamma',
+            installed_enabled: false,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: false, editable: true, order_index: 2 }],
+          },
+        ],
+      }));
+      const auditByKey = new Map([
+        ['Beta', {
+          mod_name: 'Beta',
+          folder_name: 'Beta',
+          github_repo: 'owner/beta',
+          installed_version: '1.0.0',
+          latest_release_tag: 'v2.0.0',
+          latest_release_with_assets_tag: 'v2.0.0',
+          latest_has_assets: true,
+          needs_update: true,
+          asset_names: ['Beta.zip'],
+          releases_scanned: 1,
+          error: null,
+          nexus_url: null,
+          nexus_version: null,
+          nexus_update_available: false,
+          update_source: 'github',
+          github_auto_detected: false,
+          pinned: false,
+          latest_compatible_tag: 'v2.0.0',
+        }],
+      ]);
+      const modInfoByKey = new Map([
+        ['Alpha', mkModInfo({ name: 'Alpha', folder_name: 'Alpha', mod_id: 'Alpha' })],
+        ['Beta', mkModInfo({ name: 'Beta', folder_name: 'Beta', mod_id: 'Beta' })],
+        ['Gamma', mkModInfo({ name: 'Gamma', folder_name: 'Gamma', mod_id: 'Gamma' })],
+      ]);
+      const user = userEvent.setup();
+      const { container } = render(<Wrap modpackName="Stable" packScoped packVisualSortEnabled auditByKey={auditByKey} modInfoByKey={modInfoByKey} />);
+      await screen.findByText('Alpha');
+      const rows = () => [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
+
+      expect(rows()[0]).toContain('Alpha');
+      await chooseOption(user, /Sort/i, 'Updates first');
+      expect(rows()[0]).toContain('Beta');
+      await chooseOption(user, /Sort/i, 'Name Z-A');
+      expect(rows()[0]).toContain('Gamma');
+      await chooseOption(user, /Sort/i, 'Stored first');
+      expect(rows()[0]).toContain('Gamma');
+      expect(getInvokeCalls().filter((call) => call.cmd === 'set_profile_load_order')).toHaveLength(0);
+    });
+
+    it('ignores tag priority until visual sort is enabled', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'Alpha',
+            version: '1.0.0',
+            folder_name: 'Alpha',
+            mod_id: 'Alpha',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 0 }],
+          },
+          {
+            name: 'Beta',
+            version: '1.0.0',
+            folder_name: 'Beta',
+            mod_id: 'Beta',
+            installed_enabled: true,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true, order_index: 1 }],
+          },
+        ],
+      }));
+      const modInfoByKey = new Map([
+        ['Alpha', mkModInfo({ name: 'Alpha', folder_name: 'Alpha', mod_id: 'Alpha', tags: ['utility'] })],
+        ['Beta', mkModInfo({ name: 'Beta', folder_name: 'Beta', mod_id: 'Beta', tags: ['combat'] })],
+      ]);
+      const { container } = render(<Wrap modpackName="Stable" packScoped priorityTag="combat" modInfoByKey={modInfoByKey} />);
+      await screen.findByText('Alpha');
+      const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
+      expect(rows[0]).toContain('Alpha');
+      expect(rows[1]).toContain('Beta');
+    });
+
+    it('visual tag priority reorders pack rows without hiding tagged-out rows', async () => {
       registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
       registerInvokeHandler('get_profile_memberships', () => ({
         profiles: [{ name: 'Stable', editable: true }],
@@ -1465,13 +1851,14 @@ describe('<LibraryTable modpackName={null}>', () => {
         ['Beta', mkModInfo({ name: 'Beta', folder_name: 'Beta', mod_id: 'Beta', tags: ['combat'] })],
         ['Gamma', mkModInfo({ name: 'Gamma', folder_name: 'Gamma', mod_id: 'Gamma', tags: ['utility'] })],
       ]);
-      const { container } = render(<Wrap modpackName="Stable" packScoped priorityTag="utility" modInfoByKey={modInfoByKey} />);
+      const { container } = render(<Wrap modpackName="Stable" packScoped packVisualSortEnabled priorityTag="utility" modInfoByKey={modInfoByKey} />);
       await screen.findByText('Alpha');
       const rows = [...container.querySelectorAll('[data-testid="library-row"]')].map((row) => row.textContent ?? '');
-      expect(rows).toHaveLength(2);
+      expect(rows).toHaveLength(3);
       expect(rows[0]).toContain('Alpha');
       expect(rows[1]).toContain('Gamma');
-      expect(screen.queryByText('Beta')).toBeNull();
+      expect(rows[2]).toContain('Beta');
+      expect(getInvokeCalls().filter((call) => call.cmd === 'set_profile_load_order')).toHaveLength(0);
     });
 
     it('falls back to grid order for legacy pack rows without order indexes', async () => {
@@ -1609,6 +1996,14 @@ describe('<LibraryTable modpackName={null}>', () => {
         ['Watcher-old', mkModInfo({ name: 'Watcher', folder_name: 'Watcher-old', mod_id: 'Watcher', version: 'V1.3.0', enabled: false })],
         ['Watcher-unknown', mkModInfo({ name: 'Watcher', folder_name: 'Watcher-unknown', mod_id: 'Watcher', version: '  ', enabled: false })],
       ]);
+      registerInvokeHandler('select_library_mod_version', () => mkModInfo({
+        mod_version_id: 'watcher-130',
+        name: 'Watcher',
+        version: '1.3.0',
+        folder_name: 'Watcher-old',
+        mod_id: 'Watcher',
+        enabled: true,
+      }));
       const { container } = render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
       await screen.findByText('Watcher');
       expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
@@ -1620,16 +2015,15 @@ describe('<LibraryTable modpackName={null}>', () => {
       await user.click(within(listbox).getByRole('option', { name: /1\.3\.0 \(stored\)/i }));
       await waitFor(() => {
         expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
-          cmd: 'select_profile_mod_version',
+          cmd: 'select_library_mod_version',
           args: expect.objectContaining({
-            profileId: 'Stable',
             currentModVersionId: 'watcher-143',
             selectedModVersionId: 'watcher-130',
-            applyToDisk: false,
           }),
         }));
+      });
+      expect(getInvokeCalls().some((call) => call.cmd === 'select_profile_mod_version')).toBe(false);
     });
-  });
 
     it('uses backend version options so cached downloads are selectable', async () => {
       registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
@@ -1673,7 +2067,14 @@ describe('<LibraryTable modpackName={null}>', () => {
           },
         ],
       }));
-      registerInvokeHandler('select_profile_mod_version', () => ({}));
+      registerInvokeHandler('select_library_mod_version', () => mkModInfo({
+        mod_version_id: 'watcher-150',
+        name: 'Watcher',
+        version: '1.5.0',
+        folder_name: 'Watcher',
+        mod_id: 'Watcher',
+        enabled: true,
+      }));
       const user = userEvent.setup();
       render(<Wrap modpackName="Stable" />);
 
@@ -1681,11 +2082,638 @@ describe('<LibraryTable modpackName={null}>', () => {
 
       await waitFor(() => {
         expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
-          cmd: 'select_profile_mod_version',
+          cmd: 'select_library_mod_version',
           args: expect.objectContaining({
-            profileId: 'Stable',
             currentModVersionId: 'watcher-143',
             selectedModVersionId: 'watcher-150',
+          }),
+        }));
+      });
+      expect(getInvokeCalls().some((call) => call.cmd === 'select_profile_mod_version')).toBe(false);
+    });
+
+    it('shows modpack usage with the pinned version for each local version option', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [
+        baseProfile({ name: 'Stable' }),
+        baseProfile({ name: 'TesterW' }),
+      ]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }, { name: 'TesterW', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'baselib-331',
+            name: 'BaseLib',
+            version: '3.3.1',
+            folder_name: 'BaseLib',
+            mod_id: 'BaseLib',
+            installed: true,
+            cached: true,
+            installed_enabled: true,
+            version_options: [
+              {
+                mod_version_id: 'baselib-331',
+                name: 'BaseLib',
+                version: '3.3.1',
+                folder_name: 'BaseLib',
+                mod_id: 'BaseLib',
+                installed: true,
+                installed_enabled: true,
+                cached: true,
+                pinned: false,
+                used_by_profiles: ['Stable'],
+              },
+              {
+                mod_version_id: 'baselib-321',
+                name: 'BaseLib',
+                version: '3.2.1',
+                folder_name: 'BaseLib',
+                mod_id: 'BaseLib',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: ['TesterW'],
+              },
+            ],
+            profiles: [
+              { profile_name: 'Stable', included: true, enabled: true, editable: true },
+              { profile_name: 'TesterW', included: false, enabled: false, editable: true },
+            ],
+          },
+        ],
+      }));
+
+      render(<Wrap modpackName="Stable" />);
+
+      const usage = await screen.findByText(/In 2 modpacks/i);
+      expect(usage).toHaveAttribute('title', expect.stringContaining('Stable: v3.3.1'));
+      expect(usage).toHaveAttribute('title', expect.stringContaining('TesterW: v3.2.1'));
+    });
+
+    it('manages stored versions and removes an unused cached version', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            version_options: [
+              {
+                mod_version_id: 'watcher-150',
+                name: 'Watcher',
+                version: '1.5.0',
+                folder_name: 'Watcher-v1.5.0',
+                mod_id: 'Watcher',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: [],
+              },
+              {
+                mod_version_id: 'watcher-143',
+                name: 'Watcher',
+                version: '1.4.3',
+                folder_name: 'Watcher',
+                mod_id: 'Watcher',
+                installed: true,
+                installed_enabled: true,
+                cached: true,
+                pinned: false,
+                used_by_profiles: ['Stable'],
+              },
+              {
+                mod_version_id: 'watcher-130',
+                name: 'Watcher',
+                version: '1.3.0',
+                folder_name: 'Watcher-v1.3.0',
+                mod_id: 'Watcher',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: ['Legacy'],
+              },
+              {
+                mod_version_id: 'watcher-120',
+                name: 'Watcher',
+                version: '1.2.0',
+                folder_name: 'Watcher-v1.2.0',
+                mod_id: 'Watcher',
+                installed: false,
+                installed_enabled: false,
+                cached: false,
+                pinned: false,
+                used_by_profiles: [],
+              },
+            ],
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      registerInvokeHandler('preview_library_mod_version_removal', ({ modVersionId }) => ({
+        target: {
+          mod_version_id: modVersionId,
+          name: 'Watcher',
+          version: '1.5.0',
+          folder_name: 'Watcher-v1.5.0',
+          mod_id: 'Watcher',
+          installed: false,
+          installed_enabled: false,
+          cached: true,
+          pinned: false,
+          used_by_profiles: [],
+        },
+        affected_profiles: [],
+        replacement_candidates: [],
+        active: false,
+        installed: false,
+        cached: true,
+        pinned: false,
+        can_delete_directly: true,
+      }));
+      registerInvokeHandler('remove_library_mod_version', () => true);
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+
+      await screen.findByRole('combobox', { name: /Choose version/i });
+      await user.click(screen.getByRole('button', { name: /Manage stored versions/i }));
+
+      const activeItem = screen.getByText('v1.4.3').closest('li') as HTMLElement;
+      expect(within(activeItem).getByText(/Switch away from this active version first/i)).toBeInTheDocument();
+      expect(within(activeItem).getByRole('button', { name: /^Remove$/i })).toBeEnabled();
+      const profileItem = screen.getByText('v1.3.0').closest('li') as HTMLElement;
+      expect(within(profileItem).getByText(/Used by: Legacy/i)).toBeInTheDocument();
+      expect(within(profileItem).getByRole('button', { name: /^Remove$/i })).toBeEnabled();
+
+      const cachedItem = screen.getByText('v1.5.0').closest('li') as HTMLElement;
+      const cachedRemove = within(cachedItem).getByRole('button', { name: /^Remove$/i });
+      expect(cachedRemove).toBeEnabled();
+      await user.click(cachedRemove);
+      await user.click(await screen.findByRole('button', { name: /Remove version/i }));
+
+      await waitFor(() => {
+        expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+          cmd: 'remove_library_mod_version',
+          args: { modVersionId: 'watcher-150' },
+        }));
+      });
+    });
+
+    it('remaps attached modpacks before manually removing a broken version', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ id: 'Stable', name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ id: 'Stable', name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            version_options: [
+              {
+                mod_version_id: 'watcher-150',
+                name: 'Watcher',
+                version: '1.5.0',
+                folder_name: 'Watcher-v1.5.0',
+                mod_id: 'Watcher',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: [],
+              },
+              {
+                mod_version_id: 'watcher-143',
+                name: 'Watcher',
+                version: '1.4.3',
+                folder_name: 'Watcher',
+                mod_id: 'Watcher',
+                installed: true,
+                installed_enabled: true,
+                cached: true,
+                pinned: false,
+                used_by_profiles: ['Stable'],
+              },
+            ],
+            profiles: [{ profile_id: 'Stable', profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      registerInvokeHandler('preview_library_mod_version_removal', () => ({
+        target: {
+          mod_version_id: 'watcher-143',
+          name: 'Watcher',
+          version: '1.4.3',
+          folder_name: 'Watcher',
+          mod_id: 'Watcher',
+          installed: true,
+          installed_enabled: true,
+          cached: true,
+          pinned: false,
+          used_by_profiles: ['Stable'],
+        },
+        affected_profiles: [{ profile_id: 'Stable', profile_name: 'Stable' }],
+        replacement_candidates: [
+          {
+            mod_version_id: 'watcher-150',
+            name: 'Watcher',
+            version: '1.5.0',
+            folder_name: 'Watcher-v1.5.0',
+            mod_id: 'Watcher',
+            installed: false,
+            installed_enabled: false,
+            cached: true,
+            pinned: false,
+            used_by_profiles: [],
+          },
+        ],
+        active: true,
+        installed: true,
+        cached: true,
+        pinned: false,
+        can_delete_directly: false,
+      }));
+      registerInvokeHandler('remove_library_mod_version_manual', () => ({
+        removed_mod_version_id: 'watcher-143',
+        mode: 'remap',
+        remapped_profiles: [{ profile_id: 'Stable', profile_name: 'Stable' }],
+        removed_profiles: [],
+        switched_active: true,
+        deleted_disk: true,
+        deleted_cache: true,
+        removed_record: true,
+      }));
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+
+      await screen.findByRole('combobox', { name: /Choose version/i });
+      await user.click(screen.getByRole('button', { name: /Manage stored versions/i }));
+      const activeItem = screen.getByText('v1.4.3').closest('li') as HTMLElement;
+      await user.click(within(activeItem).getByRole('button', { name: /^Remove$/i }));
+
+      expect(await screen.findByRole('dialog', { name: /Remove Watcher v1.4.3/i })).toBeInTheDocument();
+      expect(screen.getByText('Affected modpacks', { selector: '.gf-version-removal-section-title' })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /Remap and remove/i }));
+
+      await waitFor(() => {
+        expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+          cmd: 'remove_library_mod_version_manual',
+          args: expect.objectContaining({
+            modVersionId: 'watcher-143',
+            mode: 'remap',
+            activeReplacementModVersionId: 'watcher-150',
+            profileReplacements: [
+              { profile_id: 'Stable', mod_version_id: 'watcher-150' },
+            ],
+          }),
+        }));
+      });
+    });
+
+    it('lets the manual version-removal wizard cancel, switch modes, and choose replacements', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ id: 'Stable', name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ id: 'Stable', name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            version_options: [
+              {
+                mod_version_id: 'watcher-160',
+                name: 'Watcher',
+                version: '1.6.0',
+                folder_name: 'Watcher-v1.6.0',
+                mod_id: 'Watcher',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: [],
+              },
+              {
+                mod_version_id: 'watcher-150',
+                name: 'Watcher',
+                version: '1.5.0',
+                folder_name: 'Watcher-v1.5.0',
+                mod_id: 'Watcher',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: [],
+              },
+              {
+                mod_version_id: 'watcher-143',
+                name: 'Watcher',
+                version: '1.4.3',
+                folder_name: 'Watcher',
+                mod_id: 'Watcher',
+                installed: true,
+                installed_enabled: true,
+                cached: true,
+                pinned: false,
+                used_by_profiles: ['Stable'],
+              },
+            ],
+            profiles: [{ profile_id: 'Stable', profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      registerInvokeHandler('preview_library_mod_version_removal', () => ({
+        target: {
+          mod_version_id: 'watcher-143',
+          name: 'Watcher',
+          version: '1.4.3',
+          folder_name: 'Watcher',
+          mod_id: 'Watcher',
+          installed: true,
+          installed_enabled: true,
+          cached: true,
+          pinned: false,
+          used_by_profiles: ['Stable'],
+        },
+        affected_profiles: [{ profile_id: 'Stable', profile_name: 'Stable' }],
+        replacement_candidates: [
+          {
+            mod_version_id: 'watcher-150',
+            name: 'Watcher',
+            version: '1.5.0',
+            folder_name: 'Watcher-v1.5.0',
+            mod_id: 'Watcher',
+            installed: false,
+            installed_enabled: false,
+            cached: true,
+            pinned: false,
+            used_by_profiles: [],
+          },
+          {
+            mod_version_id: 'watcher-160',
+            name: 'Watcher',
+            version: '1.6.0',
+            folder_name: 'Watcher-v1.6.0',
+            mod_id: 'Watcher',
+            installed: false,
+            installed_enabled: false,
+            cached: true,
+            pinned: false,
+            used_by_profiles: [],
+          },
+        ],
+        active: true,
+        installed: true,
+        cached: true,
+        pinned: false,
+        can_delete_directly: false,
+      }));
+      registerInvokeHandler('remove_library_mod_version_manual', () => ({
+        removed_mod_version_id: 'watcher-143',
+        mode: 'remap',
+        remapped_profiles: [{ profile_id: 'Stable', profile_name: 'Stable' }],
+        removed_profiles: [],
+        switched_active: true,
+        deleted_disk: true,
+        deleted_cache: true,
+        removed_record: true,
+      }));
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+
+      await user.click(await screen.findByRole('button', { name: /Manage stored versions/i }));
+      const activeItem = screen.getByText('v1.4.3').closest('li') as HTMLElement;
+      await user.click(within(activeItem).getByRole('button', { name: /^Remove$/i }));
+      expect(await screen.findByRole('dialog', { name: /Remove Watcher v1.4.3/i })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /^Cancel$/i }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /Remove Watcher v1.4.3/i })).not.toBeInTheDocument();
+      });
+
+      await user.click(within(activeItem).getByRole('button', { name: /^Remove$/i }));
+      const backdropDialog = await screen.findByRole('dialog', { name: /Remove Watcher v1.4.3/i });
+      await user.click(backdropDialog.parentElement as HTMLElement);
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /Remove Watcher v1.4.3/i })).not.toBeInTheDocument();
+      });
+
+      await user.click(within(activeItem).getByRole('button', { name: /^Remove$/i }));
+      await user.click(await screen.findByRole('button', { name: /Remove from modpacks/i }));
+      expect(screen.getByText(/This will remove the mod from 1 affected modpack/i)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /Remap to another version/i }));
+      await chooseOption(user, /Active game copy/i, /1\.6\.0/i);
+      await chooseOption(user, /Stable replacement/i, /1\.6\.0/i);
+      await user.click(screen.getByRole('button', { name: /Remap and remove/i }));
+
+      await waitFor(() => {
+        expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+          cmd: 'remove_library_mod_version_manual',
+          args: expect.objectContaining({
+            modVersionId: 'watcher-143',
+            mode: 'remap',
+            activeReplacementModVersionId: 'watcher-160',
+            profileReplacements: [
+              { profile_id: 'Stable', mod_version_id: 'watcher-160' },
+            ],
+          }),
+        }));
+      });
+    });
+
+    it('keeps the manual version-removal wizard open after commit failure', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ id: 'Stable', name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ id: 'Stable', name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-143',
+            name: 'Watcher',
+            version: '1.4.3',
+            folder_name: 'Watcher',
+            mod_id: 'Watcher',
+            installed_enabled: true,
+            version_options: [
+              {
+                mod_version_id: 'watcher-150',
+                name: 'Watcher',
+                version: '1.5.0',
+                folder_name: 'Watcher-v1.5.0',
+                mod_id: 'Watcher',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: [],
+              },
+              {
+                mod_version_id: 'watcher-143',
+                name: 'Watcher',
+                version: '1.4.3',
+                folder_name: 'Watcher',
+                mod_id: 'Watcher',
+                installed: true,
+                installed_enabled: true,
+                cached: true,
+                pinned: false,
+                used_by_profiles: ['Stable'],
+              },
+            ],
+            profiles: [{ profile_id: 'Stable', profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      registerInvokeHandler('preview_library_mod_version_removal', () => ({
+        target: {
+          mod_version_id: 'watcher-143',
+          name: 'Watcher',
+          version: '1.4.3',
+          folder_name: 'Watcher',
+          mod_id: 'Watcher',
+          installed: true,
+          installed_enabled: true,
+          cached: true,
+          pinned: false,
+          used_by_profiles: ['Stable'],
+        },
+        affected_profiles: [{ profile_id: 'Stable', profile_name: 'Stable' }],
+        replacement_candidates: [
+          {
+            mod_version_id: 'watcher-150',
+            name: 'Watcher',
+            version: '1.5.0',
+            folder_name: 'Watcher-v1.5.0',
+            mod_id: 'Watcher',
+            installed: false,
+            installed_enabled: false,
+            cached: true,
+            pinned: false,
+            used_by_profiles: [],
+          },
+        ],
+        active: true,
+        installed: true,
+        cached: true,
+        pinned: false,
+        can_delete_directly: false,
+      }));
+      registerInvokeHandler('remove_library_mod_version_manual', () => {
+        throw new Error('remove failed');
+      });
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+
+      await user.click(await screen.findByRole('button', { name: /Manage stored versions/i }));
+      const activeItem = screen.getByText('v1.4.3').closest('li') as HTMLElement;
+      await user.click(within(activeItem).getByRole('button', { name: /^Remove$/i }));
+      await user.click(await screen.findByRole('button', { name: /Remap and remove/i }));
+
+      expect(await screen.findByText(/Could not remove v1.4.3: remove failed/i)).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: /Remove Watcher v1.4.3/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Remap and remove/i })).toBeEnabled();
+    });
+
+    it('falls back to removing a broken version from affected modpacks when no replacement exists', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ id: 'Legacy', name: 'Legacy' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ id: 'Legacy', name: 'Legacy', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'watcher-130',
+            name: 'Watcher',
+            version: '1.3.0',
+            folder_name: 'Watcher-v1.3.0',
+            mod_id: 'Watcher',
+            installed: false,
+            cached: true,
+            installed_enabled: false,
+            version_options: [
+              {
+                mod_version_id: 'watcher-130',
+                name: 'Watcher',
+                version: '1.3.0',
+                folder_name: 'Watcher-v1.3.0',
+                mod_id: 'Watcher',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: ['Legacy'],
+              },
+              {
+                mod_version_id: 'watcher-120',
+                name: 'Watcher',
+                version: '1.2.0',
+                folder_name: 'Watcher-v1.2.0',
+                mod_id: 'Watcher',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: [],
+              },
+            ],
+            profiles: [{ profile_id: 'Legacy', profile_name: 'Legacy', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      registerInvokeHandler('preview_library_mod_version_removal', () => ({
+        target: {
+          mod_version_id: 'watcher-130',
+          name: 'Watcher',
+          version: '1.3.0',
+          folder_name: 'Watcher-v1.3.0',
+          mod_id: 'Watcher',
+          installed: false,
+          installed_enabled: false,
+          cached: true,
+          pinned: false,
+          used_by_profiles: ['Legacy'],
+        },
+        affected_profiles: [{ profile_id: 'Legacy', profile_name: 'Legacy' }],
+        replacement_candidates: [],
+        active: false,
+        installed: false,
+        cached: true,
+        pinned: false,
+        can_delete_directly: false,
+      }));
+      registerInvokeHandler('remove_library_mod_version_manual', () => ({
+        removed_mod_version_id: 'watcher-130',
+        mode: 'remove_from_packs',
+        remapped_profiles: [],
+        removed_profiles: [{ profile_id: 'Legacy', profile_name: 'Legacy' }],
+        switched_active: false,
+        deleted_disk: false,
+        deleted_cache: true,
+        removed_record: true,
+      }));
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Legacy" />);
+
+      await user.click(await screen.findByRole('button', { name: /Manage stored versions/i }));
+      const storedItem = screen.getByText('v1.3.0').closest('li') as HTMLElement;
+      await user.click(within(storedItem).getByRole('button', { name: /^Remove$/i }));
+      expect(await screen.findByText(/No replacement version is available/i)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /Remove from packs and delete/i }));
+
+      await waitFor(() => {
+        expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+          cmd: 'remove_library_mod_version_manual',
+          args: expect.objectContaining({
+            modVersionId: 'watcher-130',
+            mode: 'remove_from_packs',
+            profileReplacements: [],
+            activeReplacementModVersionId: null,
           }),
         }));
       });
@@ -1958,7 +2986,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           },
         ],
       }));
-      registerInvokeHandler('select_profile_mod_version', () => {
+      registerInvokeHandler('select_library_mod_version', () => {
         throw new Error('disk switch failed');
       });
       const user = userEvent.setup();
@@ -1993,7 +3021,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           },
         ],
       }));
-      registerInvokeHandler('select_profile_mod_version', () => {
+      registerInvokeHandler('select_library_mod_version', () => {
         throw 'string failure';
       });
       const user = userEvent.setup();
@@ -2033,6 +3061,7 @@ describe('<LibraryTable modpackName={null}>', () => {
   describe('coupleActiveStorage', () => {
     function seedInPackActive() {
       registerInvokeHandler('get_active_profile', () => 'Stable');
+      registerInvokeHandler('get_active_profile_id', () => 'Stable');
       registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
       registerInvokeHandler('get_profile_memberships', () => ({
         profiles: [{ name: 'Stable', editable: true }],
@@ -2055,7 +3084,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       ]);
     }
 
-    it('removing from the ACTIVE pack also disables the mod in-game', async () => {
+    it('removing from the active pack leaves the installed mod in the library', async () => {
       const modInfoByKey = seedInPackActive();
       const user = userEvent.setup();
       render(<Wrap modpackName="Stable" coupleActiveStorage modInfoByKey={modInfoByKey} />);
@@ -2068,9 +3097,9 @@ describe('<LibraryTable modpackName={null}>', () => {
       await waitFor(() => {
         expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership' && c.args?.included === false)).toBe(true);
       });
-      // Coupling: the active loadout is updated too.
-      const toggleCall = getInvokeCalls().find((c) => c.cmd === 'toggle_mod');
-      expect(toggleCall?.args).toMatchObject({ name: 'PackMod', folderName: 'PackMod', enable: false });
+      // Removal edits only the pack manifest. The storage switch owns whether
+      // the installed library copy moves to mods_disabled/.
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(false);
     });
 
     it('does NOT couple when coupleActiveStorage is off (default)', async () => {
@@ -2402,6 +3431,25 @@ describe('<LibraryTable modpackName={null}>', () => {
       expect(screen.getByText('Plain')).toBeInTheDocument();
       expect(screen.queryByText('Apple')).toBeNull();
       expect(screen.queryByText('Zeta')).toBeNull();
+    });
+
+    it('uses name-keyed tag metadata and trims blank tags before ordering', async () => {
+      registerInvokeHandler('get_installed_mods', () => [
+        mkModInfo({ name: 'Apple', folder_name: 'AppleFolder', mod_id: 'AppleMod' }),
+        mkModInfo({ name: 'Zeta', folder_name: 'ZetaFolder', mod_id: 'ZetaMod' }),
+        mkModInfo({ name: 'Plain', folder_name: 'PlainFolder', mod_id: 'PlainMod' }),
+      ]);
+      const modInfoByKey = new Map([
+        ['Apple', mkModInfo({ name: 'Apple', folder_name: 'AppleFolder', tags: ['  ', 'UI'] })],
+        ['Zeta', mkModInfo({ name: 'Zeta', folder_name: 'ZetaFolder', tags: ['combat'] })],
+        ['Plain', mkModInfo({ name: 'Plain', folder_name: 'PlainFolder', tags: ['  '] })],
+      ]);
+      render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} priorityTag="ui" />);
+      await screen.findByTestId('library-table');
+
+      const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+      const order = titles.filter((tt) => ['Apple', 'Zeta', 'Plain'].includes(tt ?? ''));
+      expect(order).toEqual(['Apple', 'Zeta', 'Plain']);
     });
 
     it('with no priorityTag, uses the normal sort (no tag reordering)', async () => {

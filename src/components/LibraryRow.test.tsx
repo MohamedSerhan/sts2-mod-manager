@@ -343,7 +343,7 @@ describe('<LibraryRow> "In N modpacks" indicator', () => {
     const chip = screen.getByText(/In 2 modpacks/i);
     expect(chip).toBeInTheDocument();
     // Tooltip lists the modpacks the mod is actually in (not Gamma).
-    expect(chip).toHaveAttribute('title', 'Alpha, Beta');
+    expect(chip).toHaveAttribute('title', 'Alpha: v1.2.3, Beta: v1.2.3');
   });
 
   it('shows "Not in a modpack" for an orphan mod', () => {
@@ -352,7 +352,7 @@ describe('<LibraryRow> "In N modpacks" indicator', () => {
       packScoped: false,
       row: baseMod({ profiles: [baseState({ profile_name: 'Alpha', included: false })] }),
     });
-    expect(screen.getByText(/Not in a modpack/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Not in a modpack/i)).toBeNull();
   });
 
   it('hides the count in the pack-scoped modpack view', () => {
@@ -665,6 +665,23 @@ describe('<LibraryRow> kebab + audit pills', () => {
       screen.getByRole('menuitem', { name: /add to "testpack"/i }),
     );
     expect(onToggleMembership).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses modpackLabel instead of a UUID modpackName in membership labels', async () => {
+    const uuid = '731aeaec-7f3d-4859-baec-16219701e2e7';
+    const user = userEvent.setup();
+    const { container } = renderRow({
+      mod: baseModInfo(),
+      modpackName: uuid,
+      modpackLabel: 'TesterW',
+      state: baseState({ profile_id: uuid, profile_name: 'TesterW', included: false, enabled: false }),
+    });
+
+    expect(container.querySelector('.gf-row-inpack')?.getAttribute('title')).toMatch(/TesterW/);
+    expect(container.querySelector('.gf-row-inpack')?.getAttribute('title')).not.toContain(uuid);
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    expect(screen.getByRole('menuitem', { name: /add to "TesterW"/i })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(uuid);
   });
 
   it('kebab Skip update is shown only when an audit update is pending', async () => {

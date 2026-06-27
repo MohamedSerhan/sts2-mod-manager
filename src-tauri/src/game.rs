@@ -1138,9 +1138,19 @@ pub fn launch_game(state: tauri::State<'_, AppState>) -> std::result::Result<boo
 
     let mode = s.launch_mode;
     let game_path = s.game_path.clone();
+    let config_path = s.config_path.clone();
+    let active_profile = s.active_profile.clone();
+    let game_version = s.game_version.clone();
     drop(s);
 
     spawn_game(mode, game_path.as_deref())?;
+    if let Err(err) = crate::launch_diagnostics::record_successful_modded_launch(
+        &config_path,
+        active_profile.as_deref(),
+        game_version.as_deref(),
+    ) {
+        log::warn!("Failed to record launch health state: {}", err);
+    }
     Ok(true)
 }
 

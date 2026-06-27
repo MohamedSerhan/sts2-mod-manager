@@ -792,6 +792,39 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('drift Repair toast uses the display name when the active profile is stored by id', async () => {
+    const profileId = '731aeaec-7f3d-4859-baec-16219701e2e7';
+    seedProfiles([baseProfile({ id: profileId, name: 'TesterW' })]);
+    registerInvokeHandler('get_active_profile', () => profileId);
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: [],
+      removed: ['Alice Defect Skin'],
+      toggled: [],
+      version_changed: [],
+      has_drift: true,
+    }));
+    registerInvokeHandler('repair_profile', () => ({
+      applied: true,
+      downloaded: 1,
+      missing_mods: ['Alice Defect Skin'],
+      failed_downloads: [],
+      disabled_orphans: [],
+      deleted_orphans: [],
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await waitFor(() => { expect(screen.getByText('TesterW')).toBeInTheDocument(); });
+    const repairBanner = await screen.findByTitle('Restore saved modpack and move extra active mods to storage');
+    await user.click(repairBanner);
+    const modal = await confirmModal();
+    await user.click(modal.getByRole('button', { name: 'Repair' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Repaired "TesterW"/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(new RegExp(profileId))).toBeNull();
+  });
+
   it('switch toast lists replaced + kept-old mod names (Bug 4)', async () => {
     seedProfiles([baseProfile({ name: 'A' }), baseProfile({ name: 'B' })]);
     registerInvokeHandler('get_active_profile', () => 'A');

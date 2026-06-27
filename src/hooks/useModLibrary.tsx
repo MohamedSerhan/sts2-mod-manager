@@ -32,6 +32,7 @@ import { AutoDetectModal } from '../components/AutoDetectModal';
 import { nexusFilesUrl } from '../lib/nexusUrl';
 import { loadAutoAddInstallsToModpack } from '../lib/installPolicy';
 import { auditEntryKeys, auditTargetForMod } from '../lib/auditState';
+import { profileDisplayName } from '../lib/profileDisplay';
 import type { ModAuditEntry, ModInfo } from '../types';
 import {
   deleteMod,
@@ -112,8 +113,8 @@ export interface UseModLibraryOptions {
 
 export function useModLibrary(opts: UseModLibraryOptions = {}) {
   const { targetPack, targetPackLabel, onTargetPackChanged, auditScope } = opts;
-  const targetPackDisplay = targetPackLabel ?? targetPack;
   const { t } = useTranslation();
+  const targetPackDisplay = profileDisplayName(targetPackLabel ?? targetPack, t('quickAdd.unknown'));
   const {
     mods,
     refreshMods,

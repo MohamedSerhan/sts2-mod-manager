@@ -1,12 +1,13 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getActiveProfileId, getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions, updateAllMods } from '../hooks/useTauri';
+import { getActiveProfileId, getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions, updateAllMods, listProfiles } from '../hooks/useTauri';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { GameInfo, ModInfo, ModAuditEntry, ModAuditTarget, SubscriptionUpdate } from '../types';
 import { useToast } from './ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { auditEntryKeys, auditTargetForMod, auditTargetKeys, type AuditRefreshTarget } from '../lib/auditState';
+import { findProfileForIdentifier, isProfileUuid, safeProfileDisplayName } from '../lib/profileDisplay';
 
 interface AppContextType {
   gameInfo: GameInfo | null;
@@ -262,14 +263,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
         invoke<string | null>('get_active_profile'),
         getActiveProfileId().catch(() => null),
       ]);
-      setActiveProfileState(profile);
-      setActiveProfileIdState(profileId);
+      const resolvedProfileId = profileId ?? (isProfileUuid(profile) ? profile : null);
+      let displayName = safeProfileDisplayName(profile);
+      if (!displayName && resolvedProfileId) {
+        try {
+          const profiles = await listProfiles();
+          displayName = findProfileForIdentifier(profiles, resolvedProfileId)?.name ?? null;
+        } catch {
+          // Keep the backend id available even if the profile list is temporarily unavailable.
+        }
+      }
+      setActiveProfileState(displayName);
+      setActiveProfileIdState(resolvedProfileId);
     } catch { /* ignore */ }
     setLoading(false);
   }, [refreshGameInfo, refreshMods]);
 
   const setActiveProfile = useCallback((profileId: string | null, displayName?: string | null) => {
-    setActiveProfileState(displayName ?? null);
+    setActiveProfileState(safeProfileDisplayName(displayName ?? profileId));
     setActiveProfileIdState(profileId);
     invoke('set_active_profile', { name: profileId }).catch(() => {});
   }, []);

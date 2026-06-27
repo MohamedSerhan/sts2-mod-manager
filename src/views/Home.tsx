@@ -33,6 +33,7 @@ import {
 import { buildShareMessage, buildShareLink, importShareCodeSmart } from '../lib/shareImport';
 import { switchResultDetails, switchResultHasProblems } from '../lib/switchResultSummary';
 import { getModpackLastLaunch, recordModpackLaunch } from '../lib/modpackUsage';
+import { findProfileForIdentifier, profileDisplayName, safeProfileDisplayName } from '../lib/profileDisplay';
 import type { ShareResult, Profile } from '../types';
 import { PublishModal } from '../components/PublishModal';
 import type { SubscriptionUpdate, Subscription } from '../types';
@@ -186,6 +187,10 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   const [recentSwitching, setRecentSwitching] = useState<string | null>(null);
   const activeProfileKey = activeProfileId ?? activeProfile;
   const profileKey = (profile: Profile) => profile.id || profile.name;
+  const activeProfileObject =
+    findProfileForIdentifier(profiles, activeProfileId)
+    ?? findProfileForIdentifier(profiles, activeProfile);
+  const activeProfileDisplayName = activeProfileObject?.name ?? safeProfileDisplayName(activeProfile);
 
   useEffect(() => {
     loadSubscriptions();
@@ -261,13 +266,13 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   async function handleQuickSwitch(key: string) {
     if (recentSwitching) return;
     const target = profiles.find((profile) => profileKey(profile) === key || profile.name === key);
-    const targetName = target?.name ?? key;
-    if (activeProfile && activeProfileKey) {
+    const targetName = target?.name ?? profileDisplayName(key, t('quickAdd.unknown'));
+    if (activeProfileKey) {
       try {
         const drift = await getProfileDrift(activeProfileKey);
         if (drift?.has_drift) {
           const ok = await confirm({
-            title: t('profiles.confirm.switch.title', { name: activeProfile }),
+            title: t('profiles.confirm.switch.title', { name: activeProfileDisplayName ?? t('quickAdd.unknown') }),
             body: t('profiles.confirm.switch.body'),
             warning: t('profiles.confirm.switch.warning'),
             confirmLabel: t('profiles.confirm.switch.confirmLabel'),
@@ -364,7 +369,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
       const outcome = await importShareCodeSmart(code, {
         confirm,
         subscriptions: subs,
-        activeProfile,
+        activeProfile: activeProfileDisplayName,
         activeProfileId,
         subUpdates,
         t,
@@ -404,13 +409,15 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
 
   const enabledMods = mods.filter((m) => m.enabled);
   const activeSub = subscriptions.find((s) =>
-    s.profile_id === activeProfileKey || s.profile_name === activeProfile
+    s.profile_id === activeProfileKey || s.profile_name === activeProfileDisplayName
   );
   const activeUpdate = subUpdates.find((s) =>
-    s.profile_id === activeProfileKey || s.profile_name === activeProfile
+    s.profile_id === activeProfileKey || s.profile_name === activeProfileDisplayName
   );
 
-  const heroName = activeProfile || t('home.heroNameVanilla');
+  const heroName = activeProfileKey
+    ? activeProfileDisplayName ?? t('quickAdd.unknown')
+    : t('home.heroNameVanilla');
   // Share code source: prefer activeSub (a pack imported FROM someone),
   // fall back to activeProfileShare (the curator's own published pack
   // — sidecar on disk, no subscription record). Used to display "yep,
@@ -424,7 +431,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
   // True if the active profile is locally owned (the user's own) and
   // hasn't been published yet — drives the "Share this pack" CTA and
   // the "Not yet shared" pill.
-  const canShareActive = !!activeProfile && !activeSub && !activeProfileShare;
+  const canShareActive = !!activeProfileKey && !activeSub && !activeProfileShare;
 
   return (
     <div className="gf-body">
@@ -460,7 +467,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
           Quick-Add code paste, Other Packs list, and About Card all
           left Home in 1.7 v7. Home is the launcher; Modpacks is where
           you manage modpacks. */}
-      {activeProfile ? (
+      {activeProfileKey ? (
         <div className="gf-hero gf-hero-active">
           <div className="gf-hero-eyebrow">{t('home.continueWith')}</div>
           <div className="gf-hero-active-row">
@@ -596,7 +603,7 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
           shows readiness + secondary actions, not just the play button).
           Only for an active modpack — the empty-state hero already guides
           a first-time user toward Modpacks. */}
-      {activeProfile && (
+      {activeProfileKey && (
         <div className="gf-home-secondary">
           <div className="gf-home-secondary-actions">
             <button

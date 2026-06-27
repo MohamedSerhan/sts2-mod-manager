@@ -1,8 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
-use crate::mod_versions::LocalModVersionOption;
+use crate::error::{AppError, Result};
+use crate::mod_versions::{
+    LocalModVersionAffectedProfile, LocalModVersionOption, LocalModVersionRemovalPreview,
+};
 use crate::state::AppState;
 
 // ── Submodules ─────────────────────────────────────────────────────────────
@@ -31,17 +35,18 @@ mod membership;
 // codebase reaches via the same paths it used pre-split.
 pub use apply::{
     apply_profile_with_pins, snapshot_current_with_paths, snapshot_current_with_sources,
-    SwitchProfileResult,
+    ApplyProfileResult, SwitchProfileResult,
 };
 pub(crate) use apply::{profile_mod_matches_pin, should_skip_pinned_profile_mod_download};
+pub(crate) use crud::{
+    collapse_equivalent_profile_mods, migrate_profile_identity_storage, profile_file_stem,
+    profile_mod_artifact_id_matches, profile_mod_from_installed,
+    profile_mod_matches_installed_with_registry, profile_mod_matches_installed_with_version_db,
+    profile_name_exists, unique_profile_name,
+};
 pub use crud::{
     export_profile, import_profile, list_profiles, load_profile, persist_profile_mod_sources,
     save_profile,
-};
-pub(crate) use crud::{
-    migrate_profile_identity_storage, profile_file_stem, profile_mod_artifact_id_matches,
-    profile_mod_from_installed, profile_mod_matches_installed_with_registry, profile_name_exists,
-    unique_profile_name,
 };
 pub use drift::{ProfileDrift, RepairProfileResult, VersionMismatch};
 pub use membership::SetProfileModsEnabledResult;
@@ -50,11 +55,39 @@ use apply::switch_profile_from_paths;
 use crud::delete_profile;
 use membership::{
     profile_membership_matrix, select_library_mod_version_from_paths,
-    set_profile_load_order_from_paths, set_profile_mod_membership_from_paths,
-    set_profile_mods_enabled_from_paths, sync_profile_load_order_to_settings,
+    select_profile_mod_version_from_paths, set_profile_load_order_from_paths,
+    set_profile_mod_membership_from_paths, set_profile_mods_enabled_from_paths,
+    sync_profile_load_order_to_settings,
 };
 
 pub(super) const APP_CREATED_BY: &str = "sts2-mod-manager";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ManualModVersionRemovalMode {
+    Remap,
+    RemoveFromPacks,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManualModVersionProfileReplacement {
+    pub profile_id: String,
+    pub mod_version_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ManualModVersionRemovalResult {
+    pub removed_mod_version_id: String,
+    pub mode: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remapped_profiles: Vec<LocalModVersionAffectedProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_profiles: Vec<LocalModVersionAffectedProfile>,
+    pub switched_active: bool,
+    pub deleted_disk: bool,
+    pub deleted_cache: bool,
+    pub removed_record: bool,
+}
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -188,10 +221,18 @@ pub struct ProfileMembershipMod {
     pub bundle_members: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bundle_member_ids: Vec<String>,
+    #[serde(default = "default_true")]
+    pub installed: bool,
+    #[serde(default)]
+    pub cached: bool,
     pub installed_enabled: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub version_options: Vec<LocalModVersionOption>,
     pub profiles: Vec<ProfileMembershipState>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -288,6 +329,303 @@ pub fn get_library_version_options(
             &s.cache_path,
         ),
     )
+}
+
+fn scan_library_mods_with_versions(
+    mods_path: &Path,
+    disabled_path: &Path,
+    config_path: &Path,
+) -> Vec<crate::mods::ModInfo> {
+    let mut installed_mods = crate::mods::merge_active_disabled_mods(
+        crate::mods::scan_mods(mods_path),
+        crate::mods::scan_disabled_mods(disabled_path),
+    );
+    crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
+    installed_mods
+}
+
+#[tauri::command]
+pub fn preview_library_mod_version_removal(
+    mod_version_id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<LocalModVersionRemovalPreview, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    let installed_mods = scan_library_mods_with_versions(mods_path, disabled_path, &s.config_path);
+    let profiles = list_profiles(&s.profiles_path);
+    crate::mod_versions::preview_local_mod_version_removal(
+        &s.config_path,
+        &s.cache_path,
+        &installed_mods,
+        &profiles,
+        &mod_version_id,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn remove_library_mod_version(
+    mod_version_id: String,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<bool, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    let mut installed_mods = crate::mods::merge_active_disabled_mods(
+        crate::mods::scan_mods(mods_path),
+        crate::mods::scan_disabled_mods(disabled_path),
+    );
+    crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, &s.config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, &s.config_path);
+    let profiles = list_profiles(&s.profiles_path);
+    crate::mod_versions::remove_local_mod_version(
+        &s.config_path,
+        &s.cache_path,
+        disabled_path,
+        &installed_mods,
+        &profiles,
+        &mod_version_id,
+    )
+    .map(|()| true)
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn remove_library_mod_version_manual(
+    mod_version_id: String,
+    mode: ManualModVersionRemovalMode,
+    profile_replacements: Vec<ManualModVersionProfileReplacement>,
+    active_replacement_mod_version_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<ManualModVersionRemovalResult, String> {
+    crate::game::ensure_game_not_running()?;
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    remove_library_mod_version_manual_from_paths(
+        &mod_version_id,
+        mode,
+        &profile_replacements,
+        active_replacement_mod_version_id.as_deref(),
+        mods_path,
+        disabled_path,
+        &s.profiles_path,
+        &s.config_path,
+        &s.cache_path,
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub(crate) fn remove_library_mod_version_manual_from_paths(
+    mod_version_id: &str,
+    mode: ManualModVersionRemovalMode,
+    profile_replacements: &[ManualModVersionProfileReplacement],
+    active_replacement_mod_version_id: Option<&str>,
+    mods_path: &Path,
+    disabled_path: &Path,
+    profiles_path: &Path,
+    config_path: &Path,
+    cache_path: &Path,
+) -> Result<ManualModVersionRemovalResult> {
+    let installed_mods = scan_library_mods_with_versions(mods_path, disabled_path, config_path);
+    let profiles = list_profiles(profiles_path);
+    let preview = crate::mod_versions::preview_local_mod_version_removal(
+        config_path,
+        cache_path,
+        &installed_mods,
+        &profiles,
+        mod_version_id,
+    )?;
+    if preview.pinned {
+        return Err(AppError::Other(
+            "Unfreeze this mod before removing one of its stored versions.".into(),
+        ));
+    }
+
+    let target = preview.target.clone();
+    let target_id = target.mod_version_id.clone();
+    let mut result = ManualModVersionRemovalResult {
+        removed_mod_version_id: target_id.clone(),
+        mode: match mode {
+            ManualModVersionRemovalMode::Remap => "remap",
+            ManualModVersionRemovalMode::RemoveFromPacks => "remove_from_packs",
+        }
+        .into(),
+        ..ManualModVersionRemovalResult::default()
+    };
+
+    match mode {
+        ManualModVersionRemovalMode::Remap => {
+            if preview.replacement_candidates.is_empty() {
+                return Err(AppError::Other(
+                    "No replacement version is available. Remove this mod from affected modpacks instead."
+                        .into(),
+                ));
+            }
+            validate_profile_replacements(&preview, profile_replacements)?;
+            let active_replacement_id = if preview.active {
+                let id = active_replacement_mod_version_id
+                    .or_else(|| {
+                        profile_replacements
+                            .iter()
+                            .find(|replacement| !replacement.mod_version_id.trim().is_empty())
+                            .map(|replacement| replacement.mod_version_id.as_str())
+                    })
+                    .unwrap_or_else(|| preview.replacement_candidates[0].mod_version_id.as_str());
+                removal_replacement_option(&preview, id)?;
+                Some(id.to_string())
+            } else {
+                None
+            };
+            for affected in &preview.affected_profiles {
+                let replacement_id = profile_replacements
+                    .iter()
+                    .find(|replacement| {
+                        replacement.profile_id == affected.profile_id
+                            || replacement.profile_id == affected.profile_name
+                    })
+                    .map(|replacement| replacement.mod_version_id.as_str())
+                    .ok_or_else(|| {
+                        AppError::Other(format!(
+                            "Choose a replacement for \"{}\" before removing this version.",
+                            affected.profile_name
+                        ))
+                    })?;
+                let replacement = removal_replacement_option(&preview, replacement_id)?;
+                select_profile_mod_version_from_paths(
+                    &affected.profile_id,
+                    &target.name,
+                    Some(&target.mod_version_id),
+                    target.folder_name.as_deref(),
+                    target.mod_id.as_deref(),
+                    &replacement.name,
+                    Some(&replacement.mod_version_id),
+                    replacement.folder_name.as_deref(),
+                    replacement.mod_id.as_deref(),
+                    mods_path,
+                    disabled_path,
+                    profiles_path,
+                    config_path,
+                    cache_path,
+                    false,
+                )?;
+                result.remapped_profiles.push(affected.clone());
+            }
+
+            if let Some(active_replacement_id) = active_replacement_id {
+                let replacement = removal_replacement_option(&preview, &active_replacement_id)?;
+                select_library_mod_version_from_paths(
+                    &target.name,
+                    Some(&target.mod_version_id),
+                    target.folder_name.as_deref(),
+                    target.mod_id.as_deref(),
+                    &replacement.name,
+                    Some(&replacement.mod_version_id),
+                    replacement.folder_name.as_deref(),
+                    replacement.mod_id.as_deref(),
+                    mods_path,
+                    disabled_path,
+                    profiles_path,
+                    config_path,
+                    cache_path,
+                )?;
+                result.switched_active = true;
+            }
+        }
+        ManualModVersionRemovalMode::RemoveFromPacks => {
+            for affected in &preview.affected_profiles {
+                set_profile_mod_membership_from_paths(
+                    &affected.profile_id,
+                    &target.name,
+                    Some(&target.mod_version_id),
+                    target.folder_name.as_deref(),
+                    target.mod_id.as_deref(),
+                    false,
+                    None,
+                    mods_path,
+                    disabled_path,
+                    profiles_path,
+                    config_path,
+                )?;
+                result.removed_profiles.push(affected.clone());
+            }
+        }
+    }
+
+    let installed_mods = scan_library_mods_with_versions(mods_path, disabled_path, config_path);
+    let profiles = list_profiles(profiles_path);
+    let delete_summary = if crate::mod_versions::record_by_id(config_path, &target_id).is_some() {
+        crate::mod_versions::remove_local_mod_version_with_policy(
+            config_path,
+            cache_path,
+            Some(mods_path),
+            disabled_path,
+            &installed_mods,
+            &profiles,
+            &target_id,
+            mode == ManualModVersionRemovalMode::RemoveFromPacks,
+        )?
+    } else {
+        crate::mod_versions::LocalModVersionDeleteSummary {
+            removed_record: true,
+            deleted_cache: preview.cached,
+            deleted_disk: preview.installed,
+        }
+    };
+    result.deleted_disk = delete_summary.deleted_disk;
+    result.deleted_cache = delete_summary.deleted_cache;
+    result.removed_record = delete_summary.removed_record;
+    Ok(result)
+}
+
+fn validate_profile_replacements(
+    preview: &LocalModVersionRemovalPreview,
+    profile_replacements: &[ManualModVersionProfileReplacement],
+) -> Result<()> {
+    for affected in &preview.affected_profiles {
+        let Some(replacement) = profile_replacements.iter().find(|replacement| {
+            replacement.profile_id == affected.profile_id
+                || replacement.profile_id == affected.profile_name
+        }) else {
+            return Err(AppError::Other(format!(
+                "Choose a replacement for \"{}\" before removing this version.",
+                affected.profile_name
+            )));
+        };
+        if replacement.mod_version_id.trim().is_empty() {
+            return Err(AppError::Other(format!(
+                "Choose a replacement for \"{}\" before removing this version.",
+                affected.profile_name
+            )));
+        }
+    }
+    for replacement in profile_replacements {
+        if replacement.mod_version_id == preview.target.mod_version_id {
+            return Err(AppError::Other(
+                "Choose a replacement version other than the one being removed.".into(),
+            ));
+        }
+        removal_replacement_option(preview, &replacement.mod_version_id)?;
+    }
+    Ok(())
+}
+
+fn removal_replacement_option<'a>(
+    preview: &'a LocalModVersionRemovalPreview,
+    mod_version_id: &str,
+) -> Result<&'a LocalModVersionOption> {
+    preview
+        .replacement_candidates
+        .iter()
+        .find(|option| option.mod_version_id == mod_version_id)
+        .ok_or_else(|| {
+            AppError::Other(
+                "That replacement version is no longer available. Refresh the mod list and try again."
+                    .into(),
+            )
+        })
 }
 
 #[tauri::command]
@@ -814,6 +1152,7 @@ pub fn get_profile_drift(
         disabled_path,
         &s.profiles_path,
         &s.config_path,
+        &s.cache_path,
     )
 }
 
@@ -1022,5 +1361,195 @@ mod active_profile_clear_tests {
         assert!(was_active);
         assert_eq!(active, None);
         assert!(!config.join("active_profile.txt").exists());
+    }
+}
+
+#[cfg(test)]
+mod manual_version_removal_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn write_mod(root: &Path, folder: &str, id: &str, display: &str, version: &str) {
+        let dir = root.join(folder);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(format!("{folder}.json")),
+            format!(r#"{{"id":"{id}","name":"{display}","version":"{version}","author":"QA"}}"#),
+        )
+        .unwrap();
+        fs::write(dir.join(format!("{folder}.dll")), b"dll").unwrap();
+    }
+
+    fn profile(name: &str, mods: Vec<ProfileMod>) -> Profile {
+        Profile {
+            id: name.into(),
+            name: name.into(),
+            game_version: None,
+            created_by: None,
+            mods,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        }
+    }
+
+    fn cache_single_mod(
+        config_path: &Path,
+        cache_path: &Path,
+        folder: &str,
+        version: &str,
+    ) -> (String, tempfile::TempDir) {
+        let source = tempdir().unwrap();
+        write_mod(source.path(), folder, "Watcher", "Watcher", version);
+        let mut scanned = crate::mods::scan_mods(source.path())
+            .into_iter()
+            .next()
+            .expect("cached test mod should scan");
+        crate::mod_versions::cache_mod_version_by_id(
+            &mut scanned,
+            source.path(),
+            cache_path,
+            config_path,
+        )
+        .expect("cached archive should be written");
+        (
+            scanned
+                .mod_version_id
+                .clone()
+                .expect("cached mod should have a version id"),
+            source,
+        )
+    }
+
+    #[test]
+    fn preview_lists_attached_modpacks_and_replacements() {
+        let game = tempdir().unwrap();
+        let config = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let mods_path = game.path().join("mods");
+        let disabled_path = game.path().join("mods_disabled");
+        let profiles_path = config.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+        write_mod(&mods_path, "Watcher", "Watcher", "Watcher", "1.4.3");
+        let installed = scan_library_mods_with_versions(&mods_path, &disabled_path, config.path());
+        let target = installed[0].clone();
+        let target_id = target.mod_version_id.clone().unwrap();
+        let (replacement_id, _source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-new", "1.5.0");
+        save_profile(
+            &profile("Stable", vec![profile_mod_from_installed(&target)]),
+            &profiles_path,
+        )
+        .unwrap();
+
+        let profiles = list_profiles(&profiles_path);
+        let preview = crate::mod_versions::preview_local_mod_version_removal(
+            config.path(),
+            cache.path(),
+            &installed,
+            &profiles,
+            &target_id,
+        )
+        .unwrap();
+
+        assert!(preview.active);
+        assert_eq!(preview.affected_profiles[0].profile_name, "Stable");
+        assert!(preview
+            .replacement_candidates
+            .iter()
+            .any(|option| option.mod_version_id == replacement_id));
+    }
+
+    #[test]
+    fn manual_remap_updates_profile_and_switches_active_disk_copy() {
+        let game = tempdir().unwrap();
+        let config = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let mods_path = game.path().join("mods");
+        let disabled_path = game.path().join("mods_disabled");
+        let profiles_path = config.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+        write_mod(&mods_path, "Watcher", "Watcher", "Watcher", "1.4.3");
+        let installed = scan_library_mods_with_versions(&mods_path, &disabled_path, config.path());
+        let target = installed[0].clone();
+        let target_id = target.mod_version_id.clone().unwrap();
+        let (replacement_id, _source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-new", "1.5.0");
+        save_profile(
+            &profile("Stable", vec![profile_mod_from_installed(&target)]),
+            &profiles_path,
+        )
+        .unwrap();
+
+        let result = remove_library_mod_version_manual_from_paths(
+            &target_id,
+            ManualModVersionRemovalMode::Remap,
+            &[ManualModVersionProfileReplacement {
+                profile_id: "Stable".into(),
+                mod_version_id: replacement_id.clone(),
+            }],
+            Some(&replacement_id),
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config.path(),
+            cache.path(),
+        )
+        .unwrap();
+
+        let updated = load_profile("Stable", &profiles_path).unwrap();
+        assert_eq!(
+            updated.mods[0].mod_version_id.as_deref(),
+            Some(replacement_id.as_str())
+        );
+        assert!(result.switched_active);
+        assert!(mods_path.join("Watcher-new").is_dir());
+        assert!(!mods_path.join("Watcher").exists());
+        assert!(crate::mod_versions::record_by_id(config.path(), &target_id).is_none());
+    }
+
+    #[test]
+    fn manual_remove_from_packs_deletes_profile_entries_and_cached_record() {
+        let game = tempdir().unwrap();
+        let config = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let mods_path = game.path().join("mods");
+        let disabled_path = game.path().join("mods_disabled");
+        let profiles_path = config.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+        let (target_id, _source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-old", "1.3.0");
+        let profile_mod =
+            crate::mod_versions::profile_mod_from_record(&target_id, cache.path(), config.path())
+                .unwrap();
+        save_profile(&profile("Legacy", vec![profile_mod]), &profiles_path).unwrap();
+
+        let result = remove_library_mod_version_manual_from_paths(
+            &target_id,
+            ManualModVersionRemovalMode::RemoveFromPacks,
+            &[],
+            None,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config.path(),
+            cache.path(),
+        )
+        .unwrap();
+
+        let updated = load_profile("Legacy", &profiles_path).unwrap();
+        assert!(updated.mods.is_empty());
+        assert_eq!(result.removed_profiles[0].profile_name, "Legacy");
+        assert!(result.deleted_cache);
+        assert!(crate::mod_versions::record_by_id(config.path(), &target_id).is_none());
+        assert!(!crate::mod_versions::cache_path_for_id(cache.path(), &target_id).exists());
     }
 }

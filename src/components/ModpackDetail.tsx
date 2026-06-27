@@ -66,10 +66,23 @@ import { useConfirm } from './ConfirmDialog';
 import { useModLibrary } from '../hooks/useModLibrary';
 import { Select } from './Select';
 import { usePinScroll } from '../hooks/usePinScroll';
-import { deleteMod, selectProfileModVersion, setProfileModMembership, setProfileModsEnabled, toggleMod } from '../hooks/useTauri';
+import {
+  deleteMod,
+  selectProfileModVersion,
+  setProfileModMembership,
+  setProfileModsEnabled,
+  toggleMod,
+} from '../hooks/useTauri';
 import { identitiesMatch } from '../lib/modIdentity';
+import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
 import { auditEntryKeys, isGithubBulkUpdate } from '../lib/auditState';
-import type { LocalModVersionOption, ModInfo, Profile, ProfileMembershipMod, ShareResult } from '../types';
+import type {
+  LocalModVersionOption,
+  ModInfo,
+  Profile,
+  ProfileMembershipMod,
+  ShareResult,
+} from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
 export interface ModpackDetailProps {
@@ -112,8 +125,78 @@ export interface ModpackDetailProps {
 
 /** Identity key for a profile mod / installed mod. Matches the convention
  *  used across the membership grid. */
-function modKey(mod: { mod_version_id?: string | null; folder_name: string | null; mod_id?: string | null; name: string }): string {
+function modKey(mod: {
+  mod_version_id?: string | null;
+  folder_name: string | null;
+  mod_id?: string | null;
+  name: string;
+}): string {
   return mod.mod_version_id ?? mod.folder_name ?? mod.mod_id ?? mod.name;
+}
+
+function missingNameKey(name: string): string {
+  return name.trim().toLocaleLowerCase();
+}
+
+function missingProfileModKey(mod: Profile['mods'][number]): string {
+  return [
+    mod.mod_version_id ?? '',
+    mod.folder_name ?? '',
+    mod.mod_id ?? '',
+    mod.name,
+    mod.version,
+    mod.hash ?? '',
+    mod.bundle_url ?? '',
+  ]
+    .map((part) => part.trim().toLocaleLowerCase())
+    .join('\u0000');
+}
+
+function uniqueMissingNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  return names.filter((name) => {
+    const key = missingNameKey(name);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function displayNameForMod(mod: Pick<ModInfo, 'display_name' | 'name'>) {
+  return mod.display_name?.trim() || mod.name;
+}
+
+function compareAvailableModCandidates(a: ModInfo, b: ModInfo): number {
+  if (a.enabled !== b.enabled) return Number(b.enabled) - Number(a.enabled);
+  const byVersion = modVersionSortValue(b.version).localeCompare(
+    modVersionSortValue(a.version),
+    undefined,
+    { sensitivity: 'base', numeric: true },
+  );
+  if (byVersion !== 0) return byVersion;
+  return (
+    displayNameForMod(a).localeCompare(displayNameForMod(b), undefined, {
+      sensitivity: 'base',
+      numeric: true,
+    }) ||
+    (a.folder_name ?? '').localeCompare(b.folder_name ?? '', undefined, {
+      sensitivity: 'base',
+      numeric: true,
+    })
+  );
+}
+
+function collapseAvailableMods(candidates: ModInfo[]): ModInfo[] {
+  const groups = new Map<string, ModInfo[]>();
+  for (const mod of candidates) {
+    const groupKey = logicalModKey(mod, mod);
+    const group = groups.get(groupKey);
+    if (group) group.push(mod);
+    else groups.set(groupKey, [mod]);
+  }
+  return [...groups.values()].map(
+    (group) => [...group].sort(compareAvailableModCandidates)[0],
+  );
 }
 
 /** Source badges for a row, derived from the matching installed
@@ -156,11 +239,19 @@ export function ModpackDetail({
   renameExistingNames,
 }: ModpackDetailProps) {
   const { t } = useTranslation();
-  const { activeProfile, activeProfileId, auditResults, mods, refreshAll, gameRunning } = useApp();
+  const {
+    activeProfile,
+    activeProfileId,
+    auditResults,
+    mods,
+    refreshAll,
+    gameRunning,
+  } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const profileKey = profile.id || profile.name;
-  const isActive = activeProfileId === profileKey || activeProfile === profile.name;
+  const isActive =
+    activeProfileId === profileKey || activeProfile === profile.name;
   const isShared = !!shareInfo;
   const isOutOfSync = !!shareInfo?.out_of_sync || localOutOfSync;
   const markSharedLocalEdit = () => {
@@ -199,11 +290,61 @@ export function ModpackDetail({
   // "(N missing)" makes the header agree with the scan instead of silently
   // over-counting. (Empty folders are deliberately not scanned as mods, so we
   // never go the other way.)
-  const missingMods = drift?.removed ?? [];
-  const missingCount = missingMods.length;
-  const switchingProfileKey = typeof switchingProfile === 'string' ? switchingProfile : switchingProfile?.key;
-  const switchingProfileName = typeof switchingProfile === 'string' ? switchingProfile : switchingProfile?.name;
-  const switchingThis = switchingProfileKey === profileKey || switchingProfileName === profile.name;
+  const rawMissingMods = drift?.removed ?? [];
+  const missingProfileRows = useMemo<ProfileMembershipMod[]>(() => {
+    const missingNames = new Set(rawMissingMods.map(missingNameKey));
+    const seen = new Set<string>();
+    return profile.mods.flatMap((pm, index) => {
+      if (!missingNames.has(missingNameKey(pm.name))) return [];
+      const key = missingProfileModKey(pm);
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [
+        {
+          mod_version_id: pm.mod_version_id ?? null,
+          name: pm.name,
+          version: pm.version,
+          folder_name: pm.folder_name ?? null,
+          mod_id: pm.mod_id ?? null,
+          installed: false,
+          cached: false,
+          missing: true,
+          installed_enabled: false,
+          profiles: [
+            {
+              profile_id: profileKey,
+              profile_name: profile.name,
+              included: true,
+              enabled: pm.enabled,
+              editable: true,
+              order_index: index,
+            },
+          ],
+        },
+      ];
+    });
+  }, [profile.mods, profile.name, profileKey, rawMissingMods]);
+  const missingMods = useMemo(() => {
+    const names = missingProfileRows.map(
+      (row) => row.display_name?.trim() || row.name,
+    );
+    for (const name of rawMissingMods) names.push(name);
+    return uniqueMissingNames(names);
+  }, [missingProfileRows, rawMissingMods]);
+  const missingCount =
+    missingProfileRows.length > 0
+      ? missingProfileRows.length
+      : missingMods.length;
+  const switchingProfileKey =
+    typeof switchingProfile === 'string'
+      ? switchingProfile
+      : switchingProfile?.key;
+  const switchingProfileName =
+    typeof switchingProfile === 'string'
+      ? switchingProfile
+      : switchingProfile?.name;
+  const switchingThis =
+    switchingProfileKey === profileKey || switchingProfileName === profile.name;
   const switchingOther = !!switchingProfile && !switchingThis;
 
   // Per-row in-flight keys so a double-click can't double-fire the
@@ -212,6 +353,7 @@ export function ModpackDetail({
   // Search for the "Add from your Library" section only — the in-pack
   // LibraryTable owns its own search (same as the All Mods view).
   const [availableQuery, setAvailableQuery] = useState('');
+  const [visualSortEnabled, setVisualSortEnabled] = useState(false);
   // Tag filter for the in-pack LibraryTable (packScoped mode).
   // Options are derived from the tags on this pack's mods via lib.modInfoByKey.
   const [tagFilter, setTagFilter] = useState('');
@@ -238,11 +380,17 @@ export function ModpackDetail({
   // among the pack's mods (e.g. after removing the last mod that carried it).
   useEffect(() => {
     if (
-      tagFilter
-      && tagFilter !== NO_TAGS_FILTER_VALUE
-      && !packTagOptions.includes(tagFilter)
-    ) setTagFilter('');
+      tagFilter &&
+      tagFilter !== NO_TAGS_FILTER_VALUE &&
+      !packTagOptions.includes(tagFilter)
+    )
+      setTagFilter('');
   }, [packTagOptions, tagFilter]);
+
+  function handleVisualSortEnabled(next: boolean) {
+    setVisualSortEnabled(next);
+    if (!next) setTagFilter('');
+  }
 
   // How many of THIS pack's mods are currently active (enabled) in the game.
   // The status line is scoped to the pack — it must not report the whole
@@ -256,38 +404,48 @@ export function ModpackDetail({
     // header agrees with the row list, which resolves membership the same
     // way (issue #174).
     const enabledMods = mods.filter((m) => m.enabled);
-    return profile.mods.filter((pm) => enabledMods.some((m) => identitiesMatch(pm, m))).length;
+    return profile.mods.filter((pm) =>
+      enabledMods.some((m) => identitiesMatch(pm, m)),
+    ).length;
   }, [mods, profile.mods]);
   // GitHub-updatable mods in THIS pack (drives the "N updates available"
   // pill + the update-all action).
-  const packUpdateNames = useMemo(
-    () => {
-      const packKeys = new Set(
-        profile.mods.flatMap((m) => [
+  const packUpdateNames = useMemo(() => {
+    const packKeys = new Set(
+      profile.mods
+        .flatMap((m) => [
           m.mod_version_id ?? '',
           m.folder_name ?? '',
           m.mod_id ?? '',
           m.name,
-        ]).filter(Boolean),
-      );
-      return (auditResults ?? [])
-        .filter((r) =>
-          isGithubBulkUpdate(r)
-          && (auditEntryKeys(r).some((key) => packKeys.has(key)) || packKeys.has(r.mod_name))
-        )
-        .map((r) => r.mod_name);
-    },
-    [auditResults, profile.mods],
-  );
+        ])
+        .filter(Boolean),
+    );
+    return (auditResults ?? [])
+      .filter(
+        (r) =>
+          isGithubBulkUpdate(r) &&
+          (auditEntryKeys(r).some((key) => packKeys.has(key)) ||
+            packKeys.has(r.mod_name)),
+      )
+      .map((r) => r.mod_name);
+  }, [auditResults, profile.mods]);
   const updatesCount = packUpdateNames.length;
 
   // Available = installed mods NOT already in the pack. Drift-tolerant
   // (issue #174): a reinstalled mod whose folder_name changed but whose
   // mod_id/name still matches a pack entry must NOT show up here as
   // "available to add" — it's already in the pack, just under a new
-  // folder. Mirrors activeInPack's matching so the two sections agree.
+  // folder. Then collapse saved/local versions by the same logical-mod key
+  // as LibraryTable so this drawer does not show duplicates hidden by the
+  // main Mod Library row.
   const availableMods = useMemo(
-    () => mods.filter((m) => !profile.mods.some((pm) => identitiesMatch(pm, m))),
+    () =>
+      collapseAvailableMods(
+        mods.filter(
+          (m) => !profile.mods.some((pm) => identitiesMatch(pm, m)),
+        ),
+      ),
     [mods, profile.mods],
   );
 
@@ -310,10 +468,10 @@ export function ModpackDetail({
     return availableMods.filter((m) => {
       const name = (m.display_name?.trim() || m.name).toLowerCase();
       return (
-        name.includes(q)
-        || (m.folder_name?.toLowerCase().includes(q) ?? false)
-        || m.version.toLowerCase().includes(q)
-        || (m.tags ?? []).some((tag) => tag.toLowerCase().includes(q))
+        name.includes(q) ||
+        (m.folder_name?.toLowerCase().includes(q) ?? false) ||
+        m.version.toLowerCase().includes(q) ||
+        (m.tags ?? []).some((tag) => tag.toLowerCase().includes(q))
       );
     });
   }, [availableMods, availableQuery]);
@@ -380,7 +538,10 @@ export function ModpackDetail({
   const handleDeleteAllInPack = async () => {
     if (profile.mods.length === 0 || deletingAll) return;
     const ok = await confirm({
-      title: t('modpack.detail.deleteAllTitle', { count: profile.mods.length, name: profile.name }),
+      title: t('modpack.detail.deleteAllTitle', {
+        count: profile.mods.length,
+        name: profile.name,
+      }),
       body: t('modpack.detail.deleteAllBody'),
       warning: t('modpack.detail.deleteAllWarning'),
       confirmLabel: t('modpack.detail.deleteAllConfirm'),
@@ -398,11 +559,21 @@ export function ModpackDetail({
       }));
       for (const m of targets) {
         await deleteMod(m.name, m.folder_name);
-        await setProfileModMembership(profileKey, m.name, m.mod_version_id, m.folder_name, null, false);
+        await setProfileModMembership(
+          profileKey,
+          m.name,
+          m.mod_version_id,
+          m.folder_name,
+          null,
+          false,
+        );
       }
       await refreshAfterMutation();
       toast.success(
-        t('modpack.detail.deleteAllDone', { count: targets.length, name: profile.name }),
+        t('modpack.detail.deleteAllDone', {
+          count: targets.length,
+          name: profile.name,
+        }),
       );
     } catch (e) {
       toast.error(
@@ -466,16 +637,20 @@ export function ModpackDetail({
         : t('modpack.detail.disabledAllInPack', { pack: profile.name });
       const issues: string[] = [];
       if (result.missing.length > 0) {
-        issues.push(t('modpack.detail.toggleAllMissing', {
-          count: result.missing.length,
-          list: result.missing.join(', '),
-        }));
+        issues.push(
+          t('modpack.detail.toggleAllMissing', {
+            count: result.missing.length,
+            list: result.missing.join(', '),
+          }),
+        );
       }
       if (result.failed.length > 0) {
-        issues.push(t('modpack.detail.toggleAllSomeFailed', {
-          count: result.failed.length,
-          list: result.failed.join(', '),
-        }));
+        issues.push(
+          t('modpack.detail.toggleAllSomeFailed', {
+            count: result.failed.length,
+            list: result.failed.join(', '),
+          }),
+        );
       }
       if (issues.length > 0) {
         toast.error(`${base} ${issues.join(' ')}`);
@@ -498,7 +673,7 @@ export function ModpackDetail({
   // methods are consolidated into the one dropdown to keep the row calm.
   const packToolbarActions = (
     <>
-      {profile.mods.length > 0 && (
+      {profile.mods.length > 0 && visualSortEnabled && (
         <label className="gf-sort-control">
           <span>{t('mods.tags.label')}</span>
           <Select
@@ -542,39 +717,40 @@ export function ModpackDetail({
   // (search + Add mods / Edit / Load order), so they never crowd the search
   // row or clip on a narrow window. "Open mods folder" sits next to Enable /
   // Disable all (it was removed from each mod's kebab to declutter).
-  const packBulkBar = profile.mods.length > 0 ? (
-    <>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={lib.handleOpenFolder}
-        title={t('mods.openModsFolder')}
-      >
-        <FolderOpen size={14} />
-        {t('mods.openModsFolder')}
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => handleToggleAllInPack(true)}
-        disabled={gameRunning || bulkToggling}
-        title={gameRunning ? t('mods.closeSts2First') : t('mods.enableAll')}
-      >
-        <ToggleRight size={14} />
-        {t('mods.enableAll')}
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => handleToggleAllInPack(false)}
-        disabled={gameRunning || bulkToggling}
-        title={gameRunning ? t('mods.closeSts2First') : t('mods.disableAll')}
-      >
-        <ToggleLeft size={14} />
-        {t('mods.disableAll')}
-      </Button>
-    </>
-  ) : null;
+  const packBulkBar =
+    profile.mods.length > 0 ? (
+      <>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={lib.handleOpenFolder}
+          title={t('mods.openModsFolder')}
+        >
+          <FolderOpen size={14} />
+          {t('mods.openModsFolder')}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleToggleAllInPack(true)}
+          disabled={gameRunning || bulkToggling}
+          title={gameRunning ? t('mods.closeSts2First') : t('mods.enableAll')}
+        >
+          <ToggleRight size={14} />
+          {t('mods.enableAll')}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleToggleAllInPack(false)}
+          disabled={gameRunning || bulkToggling}
+          title={gameRunning ? t('mods.closeSts2First') : t('mods.disableAll')}
+        >
+          <ToggleLeft size={14} />
+          {t('mods.disableAll')}
+        </Button>
+      </>
+    ) : null;
 
   // Updates affordance shown beside the section title. Mirrors the audit
   // button's states but scoped to this pack: not-yet-checked → "Check for
@@ -586,7 +762,8 @@ export function ModpackDetail({
     </span>
   ) : lib.updatingAll ? (
     <span className="gf-pill gf-pill-update gf-pill-toolbar">
-      <RefreshCw size={12} className="animate-spin" /> {t('mods.updatingCount', { count: updatesCount })}
+      <RefreshCw size={12} className="animate-spin" />{' '}
+      {t('mods.updatingCount', { count: updatesCount })}
     </span>
   ) : auditResults === null ? (
     <button
@@ -604,7 +781,8 @@ export function ModpackDetail({
       onClick={() => lib.updateAllGithub(packUpdateNames)}
       title={t('mods.updateAllTitle')}
     >
-      <Download size={12} /> {t('modpack.detail.updatesAvailable', { count: updatesCount })}
+      <Download size={12} />{' '}
+      {t('modpack.detail.updatesAvailable', { count: updatesCount })}
     </button>
   ) : (
     <button
@@ -618,7 +796,11 @@ export function ModpackDetail({
   );
 
   return (
-    <div className="gf-modpack-detail" data-testid="modpack-detail" ref={rootRef}>
+    <div
+      className="gf-modpack-detail"
+      data-testid="modpack-detail"
+      ref={rootRef}
+    >
       <div className="gf-modpack-detail-head">
         <Button
           variant="ghost"
@@ -674,9 +856,7 @@ export function ModpackDetail({
               }
             >
               <Share2 size={14} />
-              {isShared
-                ? t('profiles.card.reShare')
-                : t('profiles.card.share')}
+              {isShared ? t('profiles.card.reShare') : t('profiles.card.share')}
             </Button>
           )}
           {/* Advanced / power-user actions live in a header kebab so the
@@ -685,7 +865,10 @@ export function ModpackDetail({
           <KebabMenu title={t('modpack.advancedActions')} size="sm">
             <KebabSection head={t('modpack.advanced')}>
               {onDuplicate && (
-                <KebabItem icon={<Files size={12} />} onClick={() => onDuplicate(profile.name)}>
+                <KebabItem
+                  icon={<Files size={12} />}
+                  onClick={() => onDuplicate(profile.name)}
+                >
                   {t('profiles.kebab.duplicate')}
                 </KebabItem>
               )}
@@ -694,12 +877,18 @@ export function ModpackDetail({
                   with no local manifest to load — doesn't offer an action that
                   would only fail. */}
               {onRenamed && (
-                <KebabItem icon={<SquarePen size={12} />} onClick={() => setRenaming(true)}>
+                <KebabItem
+                  icon={<SquarePen size={12} />}
+                  onClick={() => setRenaming(true)}
+                >
                   {t('profiles.kebab.rename')}
                 </KebabItem>
               )}
               {onExportFile && (
-                <KebabItem icon={<Download size={12} />} onClick={() => onExportFile(profile.name)}>
+                <KebabItem
+                  icon={<Download size={12} />}
+                  onClick={() => onExportFile(profile.name)}
+                >
                   {t('profiles.kebab.exportSts2pack')}
                 </KebabItem>
               )}
@@ -716,11 +905,19 @@ export function ModpackDetail({
                   {t('modpack.detail.repair')}
                 </KebabItem>
               )}
-              <KebabItem icon={<Search size={12} />} onClick={() => lib.setShowAutoDetect(true)}>
+              <KebabItem
+                icon={<Search size={12} />}
+                onClick={() => lib.setShowAutoDetect(true)}
+              >
                 {t('mods.autoDetectSources')}
               </KebabItem>
               <KebabItem
-                icon={<RefreshCw size={12} className={lib.refreshing ? 'animate-spin' : undefined} />}
+                icon={
+                  <RefreshCw
+                    size={12}
+                    className={lib.refreshing ? 'animate-spin' : undefined}
+                  />
+                }
                 onClick={lib.handleRefresh}
                 disabled={lib.refreshing}
               >
@@ -780,11 +977,16 @@ export function ModpackDetail({
 
       {/* Status line — a quick read of what's loaded + game state. */}
       <div className="gf-modpack-detail-status">
-        {t('modpack.detail.statusCounts', { active: activeInPack, total: profile.mods.length })}
+        {t('modpack.detail.statusCounts', {
+          active: activeInPack,
+          total: profile.mods.length,
+        })}
         {isActive && gameRunning && (
           <>
             {' · '}
-            <span className="gf-modpack-detail-running">{t('modpack.detail.runningNow')}</span>
+            <span className="gf-modpack-detail-running">
+              {t('modpack.detail.runningNow')}
+            </span>
           </>
         )}
       </div>
@@ -848,7 +1050,10 @@ export function ModpackDetail({
                     {t('modpack.detail.missingTipHead')}
                   </span>
                   {missingMods.map((name) => (
-                    <span key={name} className="gf-modpack-detail-missing-tip-item">
+                    <span
+                      key={name}
+                      className="gf-modpack-detail-missing-tip-item"
+                    >
                       {name}
                     </span>
                   ))}
@@ -862,9 +1067,22 @@ export function ModpackDetail({
         </div>
 
         {profile.mods.length > 0 && (
-          <p className="gf-modpack-detail-section-note">
-            {t('modpack.detail.inPackOrderNote')}
-          </p>
+          <div className="gf-modpack-detail-sort-setting">
+            <p className="gf-modpack-detail-section-note">
+              {visualSortEnabled
+                ? t('modpack.detail.visualSortOnNote')
+                : t('modpack.detail.inPackOrderNote')}
+            </p>
+            <button
+              type="button"
+              className="gf-link-button gf-modpack-detail-sort-link"
+              onClick={() => handleVisualSortEnabled(!visualSortEnabled)}
+            >
+              {visualSortEnabled
+                ? t('modpack.detail.visualSortHide')
+                : t('modpack.detail.visualSortShow')}
+            </button>
+          </div>
         )}
 
         {/* The pack's mods render with the SAME rich rows as the All Mods
@@ -878,27 +1096,18 @@ export function ModpackDetail({
           modpackName={profileKey}
           modpackLabel={profile.name}
           packScoped
+          packVisualSortEnabled={visualSortEnabled}
+          priorityTag={visualSortEnabled ? tagFilter : ''}
           coupleActiveStorage
           reloadToken={`${membershipSignature}|active:${activeProfile ?? ''}|bulk:${bulkReloadNonce}|versions:${lib.versionOptionsReloadToken}`}
           toolbarActions={packToolbarActions}
           bulkActionsBar={packBulkBar}
           filterRow={(row) => {
             const included = !!row.profiles.find(
-              (p) => p.profile_id === profileKey || p.profile_name === profile.name,
+              (p) =>
+                p.profile_id === profileKey || p.profile_name === profile.name,
             )?.included;
-            if (!included) return false;
-            if (!tagFilter) return true;
-            const info =
-              lib.modInfoByKey.get(row.mod_version_id ?? '') ??
-              lib.modInfoByKey.get(row.folder_name ?? row.name) ??
-              lib.modInfoByKey.get(row.mod_id ?? '') ??
-              lib.modInfoByKey.get(row.name);
-            if (tagFilter === NO_TAGS_FILTER_VALUE) {
-              return !(info?.tags ?? []).some((tg) => tg.trim().length > 0);
-            }
-            return (info?.tags ?? []).some(
-              (tg) => tg.toLocaleLowerCase() === tagFilter.toLocaleLowerCase(),
-            );
+            return included;
           }}
           onMembershipChanged={refreshAfterMutation}
           onLoadOrderChanged={refreshAfterMutation}
@@ -910,6 +1119,7 @@ export function ModpackDetail({
             setAvailableQuery(q);
             if (q.trim()) setLibraryOpen(true);
           }}
+          extraRows={missingProfileRows}
           {...lib.tableActionProps}
         />
       </section>
@@ -935,10 +1145,14 @@ export function ModpackDetail({
               aria-hidden
             />
             <span className="gf-modpack-detail-section-title">
-              {t('modpack.detail.availableCount', { count: availableMods.length })}
+              {t('modpack.detail.availableCount', {
+                count: availableMods.length,
+              })}
             </span>
             <span className="gf-modpack-detail-library-hint">
-              {libraryOpen ? t('modpack.detail.libraryHide') : t('modpack.detail.libraryShow')}
+              {libraryOpen
+                ? t('modpack.detail.libraryHide')
+                : t('modpack.detail.libraryShow')}
             </span>
           </button>
           {libraryOpen && (
@@ -1003,7 +1217,10 @@ export function ModpackDetail({
       )}
 
       {availableMods.length === 0 && profile.mods.length > 0 && (
-        <p className="gf-modpack-detail-empty" data-testid="modpack-detail-all-in-pack">
+        <p
+          className="gf-modpack-detail-empty"
+          data-testid="modpack-detail-all-in-pack"
+        >
           {t('modpack.detail.allInPack')}
         </p>
       )}

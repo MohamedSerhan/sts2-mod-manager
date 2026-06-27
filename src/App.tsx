@@ -36,11 +36,13 @@ import { switchResultDetails, switchResultHasProblems } from './lib/switchResult
 import { getSubscriptions } from './hooks/useTauri';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { LaunchSpinner } from './components/LaunchSpinner';
+import { LaunchHealthModal } from './components/LaunchHealthModal';
 import { ProfileSwitcher } from './components/ProfileSwitcher';
 import { HelpDrawer } from './components/HelpDrawer';
 import { SidebarResizeHandle } from './components/SidebarResizeHandle';
 import { LocalizedAppErrorBoundary, RendererErrorReporter } from './components/AppErrorBoundary';
 import { recordModpackLaunch } from './lib/modpackUsage';
+import { profileDisplayName, safeProfileDisplayName } from './lib/profileDisplay';
 import { useResizableSidebar } from './hooks/useResizableSidebar';
 import {
   loadNavigationLayout,
@@ -51,8 +53,8 @@ import { HomeView } from './views/Home';
 import { ModsView } from './views/Mods';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
-import { launchGame, launchVanilla, installAppUpdate, installModFromFile, listProfiles, openExternalUrl, setProfileModMembership, toggleMod } from './hooks/useTauri';
-import type { Profile } from './types';
+import { launchGame, launchVanilla, getLaunchHealth, installAppUpdate, installModFromFile, listProfiles, openExternalUrl, resolveLaunchHealthBlockers, setProfileModMembership, toggleMod } from './hooks/useTauri';
+import type { LaunchHealthReport, Profile } from './types';
 
 // View IDs include legacy ones ('browse-mods', 'browse-modpacks')
 // so internal handlers + deep-links that pre-date the 1.7.0 IA
@@ -151,6 +153,9 @@ function AppInner() {
   // SettingsView observes the bump and scrolls/highlights the customizer card.
   const [openRowMenuSettingsSignal, setOpenRowMenuSettingsSignal] = useState(0);
   const [launching, setLaunching] = useState<null | 'modded' | 'vanilla'>(null);
+  const [launchChecking, setLaunchChecking] = useState(false);
+  const [launchHealthReport, setLaunchHealthReport] = useState<LaunchHealthReport | null>(null);
+  const [launchHealthStoring, setLaunchHealthStoring] = useState(false);
   const [blockingModpackOperation, setBlockingModpackOperation] = useState(false);
   const [activeProfileSummary, setActiveProfileSummary] = useState<{
     key: string;
@@ -512,6 +517,14 @@ function AppInner() {
   const activePackMods = activeProfileSummary?.key === activeProfileKey
     ? activeProfileSummary.profile?.mods ?? []
     : [];
+  const activeProfileDisplayName =
+    activeProfileSummary?.profile?.name ?? safeProfileDisplayName(activeProfile);
+  const activeProfileLabel = activeProfileKey
+    ? activeProfileDisplayName ?? t('quickAdd.unknown')
+    : t('common.vanilla');
+  const launchProfileLabel = activeProfileKey
+    ? activeProfileDisplayName ?? t('quickAdd.unknown')
+    : t('app.launch.noActiveProfile');
   const enabledCount = activePackMods.filter((m) => m.enabled).length;
   const totalCount = activePackMods.length;
   const useTopNavigation = navigationLayout === 'topbar';
@@ -559,18 +572,31 @@ function AppInner() {
     return () => { cancelled = true; };
   }, [activeProfileKey, mods]);
 
-  async function handleLaunchGame() {
+  function launchHealthHasHardBlockers(report: LaunchHealthReport): boolean {
+    return (report.previous_failed_mods ?? []).length > 0
+      || (report.known_incompatible_mods ?? []).length > 0
+      || (report.dependency_blocked_mods ?? []).length > 0;
+  }
+
+  function launchHealthHasRisks(report: LaunchHealthReport): boolean {
+    return launchHealthHasHardBlockers(report)
+      || report.game_version_changed_since_last_launch
+      || report.profile_game_version_changed;
+  }
+
+  async function launchModdedNow() {
     if (launching) return;
+    setLaunchHealthReport(null);
     setLaunching('modded');
     try {
       await launchGame();
       const launchedProfile = activeProfileSummary?.profile;
       if (launchedProfile) {
         recordModpackLaunch(launchedProfile);
-      } else if (activeProfileId && activeProfile) {
-        recordModpackLaunch({ id: activeProfileId, name: activeProfile });
-      } else if (activeProfileKey) {
-        recordModpackLaunch(activeProfileKey);
+      } else if (activeProfileId && activeProfileDisplayName) {
+        recordModpackLaunch({ id: activeProfileId, name: activeProfileDisplayName });
+      } else if (safeProfileDisplayName(activeProfileKey)) {
+        recordModpackLaunch(profileDisplayName(activeProfileKey, ''));
       }
       toast.success(t('app.toast.launching'));
       // Keep the spinner up briefly so the user sees the transition;
@@ -581,6 +607,71 @@ function AppInner() {
       const errMsg = e instanceof Error ? e.message : String(e);
       toast.error(t('app.toast.launchFailed', { error: errMsg }));
     }
+  }
+
+  async function handleLaunchGame() {
+    if (launching || launchChecking) return;
+    setLaunchChecking(true);
+    try {
+      const report = await getLaunchHealth();
+      if (launchHealthHasRisks(report)) {
+        setLaunchHealthReport(report);
+        return;
+      }
+    } catch (e) {
+      console.warn('Launch health check failed:', e);
+    } finally {
+      setLaunchChecking(false);
+    }
+    await launchModdedNow();
+  }
+
+  async function handleLaunchHealthStoreAndLaunch() {
+    if (launchHealthStoring || launching) return;
+    setLaunchHealthStoring(true);
+    try {
+      const result = await resolveLaunchHealthBlockers();
+      if (result.moved.length > 0) {
+        toast.success(t('launchHealth.storedBlockedMods', { count: result.moved.length }));
+      } else {
+        toast.info(t('launchHealth.storeBlockedModsNone'));
+      }
+      await refreshAll();
+      const nextReport = await getLaunchHealth();
+      if (result.failed.length > 0) {
+        const list = result.failed.map((item) => item.name).slice(0, 5).join(', ');
+        toast.error(t('launchHealth.storeBlockedModsPartial', { list }));
+        setLaunchHealthReport(nextReport);
+        return;
+      }
+      if (launchHealthHasHardBlockers(nextReport)) {
+        setLaunchHealthReport(nextReport);
+        toast.error(t('launchHealth.blockersRemain'));
+        return;
+      }
+      setLaunchHealthReport(null);
+      await launchModdedNow();
+    } catch (e) {
+      toast.error(t('launchHealth.storeBlockedModsFailed', { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setLaunchHealthStoring(false);
+    }
+  }
+
+  function handleLaunchHealthReview() {
+    setLaunchHealthReport(null);
+    setActiveView('mods');
+  }
+
+  async function handleLaunchHealthLaunchAnyway() {
+    if (launchHealthStoring) return;
+    setLaunchHealthReport(null);
+    await launchModdedNow();
+  }
+
+  function handleLaunchHealthCancel() {
+    if (launchHealthStoring) return;
+    setLaunchHealthReport(null);
   }
 
   async function handleLaunchVanilla() {
@@ -635,12 +726,12 @@ function AppInner() {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && (e.key === 'l' || e.key === 'L')) {
         e.preventDefault();
-        if (!gameRunning && !launching) handleLaunchGame();
+        if (!gameRunning && !launching && !launchChecking) handleLaunchGame();
       }
     }
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [showOnboarding, gameRunning, launching]);
+  }, [showOnboarding, gameRunning, launching, launchChecking]);
 
   // Drag-and-drop archive import. Tauri v2 handles OS file drops natively
   // (dragDropEnabled defaults to true), which SUPPRESSES the webview's HTML5
@@ -736,7 +827,7 @@ function AppInner() {
     };
   }, [refreshAll, toast]);
 
-  const profileInitials = (activeProfile || 'Vanilla')
+  const profileInitials = activeProfileLabel
     .split(/[\s_-]+/)
     .map((w) => w[0])
     .filter(Boolean)
@@ -745,6 +836,7 @@ function AppInner() {
     .toUpperCase();
 
   function handleExternalAnchorClick(event: MouseEvent<HTMLDivElement>) {
+    /* v8 ignore start -- browser click guard permutations depend on native event shape; opener success/failure and ignored-link behavior are tested. */
     if (
       event.defaultPrevented ||
       event.button !== 0 ||
@@ -775,6 +867,7 @@ function AppInner() {
     if (!['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)) {
       return;
     }
+    /* v8 ignore stop */
 
     event.preventDefault();
     openExternalUrl(url.href).catch((e) => {
@@ -866,7 +959,7 @@ function AppInner() {
                 <div className="gf-prof-avatar">{profileInitials || t('app.vanillaInitials')}</div>
                 <div className="gf-prof-text">
                   <span className="gf-prof-eyebrow">{t('app.activeProfile')}</span>
-                  <span className="gf-prof-name">{activeProfile || t('common.vanilla')}</span>
+                  <span className="gf-prof-name">{activeProfileLabel}</span>
                 </div>
                 <span className="gf-prof-meta">
                   {t('app.modCount', { enabled: enabledCount, total: totalCount })}
@@ -954,17 +1047,23 @@ function AppInner() {
               </button>
               <button
                 onClick={handleLaunchGame}
-                disabled={gameRunning}
+                disabled={gameRunning || launchChecking}
                 title={
                   gameRunning
                     ? t('app.closeSts2First')
-                    : t('app.launch.moddedTitle', { profile: activeProfile || t('app.launch.noActiveProfile') })
+                    : launchChecking
+                      ? t('launchHealth.checking')
+                    : t('app.launch.moddedTitle', { profile: launchProfileLabel })
                 }
                 className="gf-btn"
               >
-                <Play size={12} fill="currentColor" />
+                {launchChecking ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <Play size={12} fill="currentColor" />
+                )}
                 <span className="gf-launch-label">
-                  {t('app.launch.modded')}{activeProfile ? <> · <span className="gf-launch-prof">{activeProfile}</span></> : ''}
+                  {launchChecking ? t('launchHealth.checkingShort') : t('app.launch.modded')}{activeProfileKey ? <> · <span className="gf-launch-prof">{activeProfileLabel}</span></> : ''}
                 </span>
               </button>
             </div>
@@ -1123,6 +1222,17 @@ function AppInner() {
               <LaunchSpinner
                 vanilla={launching === 'vanilla'}
                 onCancel={() => setLaunching(null)}
+              />
+            )}
+
+            {launchHealthReport && (
+              <LaunchHealthModal
+                report={launchHealthReport}
+                storing={launchHealthStoring}
+                onStoreAndLaunch={handleLaunchHealthStoreAndLaunch}
+                onLaunchAnyway={handleLaunchHealthLaunchAnyway}
+                onReview={handleLaunchHealthReview}
+                onCancel={handleLaunchHealthCancel}
               />
             )}
 

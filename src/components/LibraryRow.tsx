@@ -19,7 +19,7 @@
  * so the modpack-focused call sites that only care about
  * membership / storage / drag don't have to wire them.
  */
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -47,12 +47,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Badge } from './Badge';
 import { Card } from './Card';
-import {
-  KebabDivider,
-  KebabItem,
-  KebabMenu,
-  KebabSection,
-} from './KebabMenu';
+import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { Toggle } from './Toggle';
 import { Select } from './Select';
 import { useRowMenu } from '../contexts/RowMenuContext';
@@ -62,6 +57,7 @@ import {
   ROW_MENU_OPEN_EVENT,
   type RowMenuItemId,
 } from '../lib/rowMenuConfig';
+import { profileDisplayName } from '../lib/profileDisplay';
 import type {
   ModAuditEntry,
   ModInfo,
@@ -95,13 +91,30 @@ function gameVersionSatisfies(
 ): boolean {
   if (!current || !required) return true;
   const parse = (v: string) =>
-    v.trim().replace(/^v/i, '').split('.').slice(0, 3).map((n) => Number.parseInt(n, 10));
+    v
+      .trim()
+      .replace(/^v/i, '')
+      .split('.')
+      .slice(0, 3)
+      .map((n) => Number.parseInt(n, 10));
   const [cMaj, cMin, cPatch] = parse(current);
   const [rMaj, rMin, rPatch] = parse(required);
-  if ([cMaj, cMin, cPatch, rMaj, rMin, rPatch].some((n) => Number.isNaN(n))) return true;
+  if ([cMaj, cMin, cPatch, rMaj, rMin, rPatch].some((n) => Number.isNaN(n)))
+    return true;
   if (cMaj !== rMaj) return cMaj > rMaj;
   if (cMin !== rMin) return cMin > rMin;
   return cPatch >= rPatch;
+}
+
+export interface LibraryRowVersionOption {
+  key: string;
+  version: string;
+  label: string;
+  installed?: boolean;
+  installedEnabled?: boolean;
+  cached?: boolean;
+  pinned?: boolean;
+  usedByProfiles?: string[];
 }
 
 export interface LibraryRowProps {
@@ -111,6 +124,8 @@ export interface LibraryRowProps {
    *  When null, the row hides the per-modpack checkbox and drag handle
    *  (Library view uses this mode). */
   modpackName: string | null;
+  /** Display name for the focused modpack. Backend ids stay in modpackName. */
+  modpackLabel?: string | null;
   /** Focused-profile state row pulled out of `row.profiles` by the
    *  parent (kept hoisted so the table can compute counts in one pass).
    *  Undefined when modpackName is null. */
@@ -179,8 +194,11 @@ export interface LibraryRowProps {
   gameRunning?: boolean;
   /** Current STS2 game version, drives the min_game_version warning. */
   gameVersion?: string | null;
-  versionOptions?: Array<{ key: string; version: string; label: string }>;
+  versionOptions?: LibraryRowVersionOption[];
+  selectedVersionKey?: string;
   onSelectVersion?: (key: string) => void;
+  onRemoveVersion?: (option: LibraryRowVersionOption) => void | Promise<void>;
+  removingVersionKey?: string | null;
   /** Whether THIS row's update is in flight (per-row spinner). */
   isUpdating?: boolean;
   /** Whether THIS row's repair is in flight. */
@@ -216,6 +234,7 @@ const noop = () => {};
 export function LibraryRow({
   row,
   modpackName,
+  modpackLabel,
   state,
   inPack,
   inPackIndex,
@@ -239,7 +258,10 @@ export function LibraryRow({
   gameRunning = false,
   gameVersion,
   versionOptions = [],
+  selectedVersionKey,
   onSelectVersion = noop,
+  onRemoveVersion = noop,
+  removingVersionKey = null,
   isUpdating = false,
   isRepairing = false,
   isRollingBack = false,
@@ -261,6 +283,11 @@ export function LibraryRow({
   sourceEditorSlot,
 }: LibraryRowProps) {
   const { t } = useTranslation();
+  const [versionManagerOpen, setVersionManagerOpen] = useState(false);
+  const modpackDisplayName = profileDisplayName(
+    modpackLabel ?? modpackName,
+    t('quickAdd.unknown'),
+  );
   const membershipKey = modpackName
     ? `${membershipRowKey(row)}::${modpackName}`
     : null;
@@ -275,16 +302,47 @@ export function LibraryRow({
   // the drag handle, the `draggable` attribute, and the rank chip stay
   // hidden there even though rows can be "in pack".
   const reorderable = enableReorder && inPack && inPackIndex >= 0;
+  const rowInstalled = row.installed ?? true;
+  const cleanVersion = (value: string | null | undefined) =>
+    (value ?? '').trim().replace(/^v/i, '');
   // "In N modpacks" — how many of the user's modpacks include this mod. Only
   // meaningful in the All Mods view (the focused membership grid carries every
   // profile's state); the synthesized no-focus grid leaves profiles empty, so
   // the indicator hides there and in the pack-scoped modpack view.
   const includedProfiles = row.profiles.filter((p) => p.included);
+  const profileVersionUses = new Map<
+    string,
+    { profile: string; version: string }
+  >();
+  for (const option of versionOptions) {
+    for (const profile of option.usedByProfiles ?? []) {
+      if (!profileVersionUses.has(profile)) {
+        profileVersionUses.set(profile, { profile, version: option.version });
+      }
+    }
+  }
+  if (profileVersionUses.size === 0) {
+    for (const profile of includedProfiles) {
+      profileVersionUses.set(profile.profile_name, {
+        profile: profile.profile_name,
+        version: row.version,
+      });
+    }
+  }
+  const profileVersionSummary = [...profileVersionUses.values()];
+  const modpackUsageTitle =
+    profileVersionSummary.length > 0
+      ? profileVersionSummary
+          .map((use) => `${use.profile}: v${cleanVersion(use.version) || '?'}`)
+          .join(', ')
+      : t('libraryTable.inNoModpacks');
   // Audit pill flags. We surface exactly one of: update / blocked /
   // frozen / snoozed at a time, mirroring ModRow's drawer logic, but in
   // an inline chip-row so the user doesn't have to expand anything.
   const compatibleTag =
-    audit?.latest_compatible_tag ?? audit?.latest_release_with_assets_tag ?? null;
+    audit?.latest_compatible_tag ??
+    audit?.latest_release_with_assets_tag ??
+    null;
   // Version to display in the update pill. GitHub updates use the release
   // tag (compatibleTag); Nexus-only updates fall back to nexus_version so
   // the pill shows a real version string rather than undefined.
@@ -294,473 +352,674 @@ export function LibraryRow({
   // and Nexus-only mods have no github_url, so gating on github_url alone
   // was silently hiding their "update available" state.
   const showUpdatePill =
-    !!audit
-    && audit.needs_update
-    && !audit.pinned
-    && !audit.snoozed
-    && !audit.game_version_too_old
-    && !audit.latest_release_blocked_by_game_version
-    && (!!compatibleTag || !!audit.nexus_update_available);
+    !!audit &&
+    audit.needs_update &&
+    !audit.pinned &&
+    !audit.snoozed &&
+    !audit.game_version_too_old &&
+    !audit.latest_release_blocked_by_game_version &&
+    (!!compatibleTag || !!audit.nexus_update_available);
   const showBlockedPill =
     !!audit?.latest_release_blocked_by_game_version && !audit.pinned;
   const showFrozenPill = !!mod?.pinned;
   const showSnoozedPill = !!audit?.snoozed;
   const auditError = audit?.error ?? null;
   const minGameViolated =
-    !!mod?.min_game_version && !gameVersionSatisfies(gameVersion, mod.min_game_version);
-  const cleanVersion = (value: string | null | undefined) =>
-    (value ?? '').trim().replace(/^v/i, '');
-  const manifestVersion = cleanVersion(audit?.manifest_version ?? mod?.version ?? row.version);
+    !!mod?.min_game_version &&
+    !gameVersionSatisfies(gameVersion, mod.min_game_version);
+  const manifestVersion = cleanVersion(
+    audit?.manifest_version ?? mod?.version ?? row.version,
+  );
   const installedSourceVersion = cleanVersion(audit?.installed_source_version);
   const hasConfirmedGithub = !!mod?.github_url && !mod.github_auto_detected;
   const sourceVersionLabel =
     hasConfirmedGithub || (!!audit?.github_repo && !audit.github_auto_detected)
       ? t('mods.gitHub')
-      : (audit?.nexus_url || mod?.nexus_url)
+      : audit?.nexus_url || mod?.nexus_url
         ? t('mods.nexus')
         : 'installed';
   const showInstalledSourceVersion =
-    !!installedSourceVersion
-    && installedSourceVersion !== manifestVersion;
+    !!installedSourceVersion && installedSourceVersion !== manifestVersion;
+
+  const versionStateLabel = (option: LibraryRowVersionOption) => {
+    if (option.installedEnabled) return t('mods.versionActiveStatus');
+    if (option.installed) return t('mods.versionStoredOnDiskStatus');
+    if (option.cached) return t('mods.versionSavedStatus');
+    return t('mods.versionStoredStatus');
+  };
+  const versionRemoveBlockReason = (option: LibraryRowVersionOption) => {
+    const usedByProfiles = option.usedByProfiles ?? [];
+    if (option.installedEnabled) return t('mods.versionRemoveActiveReason');
+    if (option.pinned) return t('mods.versionRemovePinnedReason');
+    if (usedByProfiles.length > 0) {
+      return t('mods.versionRemoveProfileReason', {
+        profiles: usedByProfiles.join(', '),
+      });
+    }
+    return null;
+  };
 
   return (
-    <Card
-      className={`gf-profile-library-row${(!packScoped || packActive) && row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${isDragging ? ' dragging' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${mod ? ' is-clickable' : ''}`}
-      draggable={reorderable && !loadOrderSaving}
-      onDragStart={(event) => onDragStart(event, inPackIndex)}
-      onDragOver={(event) => onDragOver(event, inPackIndex)}
-      onDragLeave={() => onDragLeave(inPackIndex)}
-      onDrop={(event) => onDrop(event, inPackIndex)}
-      onDragEnd={onDragEnd}
-      // 4.4 — clicking the row opens its inline Edit-sources editor.
-      // Interactive children (toggle, kebab, source links) stop
-      // propagation so they don't also trigger this.
-      onClick={mod ? () => onEditSources() : undefined}
-      onKeyDown={
-        mod
-          ? (event) => {
-              // Only the row itself should activate on Enter/Space. A keydown
-              // from a focused child control (toggle, kebab, source link)
-              // bubbles up here too; without this guard it would fire the
-              // row's Edit-sources action alongside the child's own.
-              if (
-                event.target === event.currentTarget &&
-                (event.key === 'Enter' || event.key === ' ')
-              ) {
-                event.preventDefault();
-                onEditSources();
+    <>
+      <Card
+        className={`gf-profile-library-row${(!packScoped || packActive) && row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${isDragging ? ' dragging' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${mod ? ' is-clickable' : ''}`}
+        draggable={reorderable && !loadOrderSaving}
+        onDragStart={(event) => onDragStart(event, inPackIndex)}
+        onDragOver={(event) => onDragOver(event, inPackIndex)}
+        onDragLeave={() => onDragLeave(inPackIndex)}
+        onDrop={(event) => onDrop(event, inPackIndex)}
+        onDragEnd={onDragEnd}
+        // 4.4 — clicking the row opens its inline Edit-sources editor.
+        // Interactive children (toggle, kebab, source links) stop
+        // propagation so they don't also trigger this.
+        onClick={mod ? () => onEditSources() : undefined}
+        onKeyDown={
+          mod
+            ? (event) => {
+                // Only the row itself should activate on Enter/Space. A keydown
+                // from a focused child control (toggle, kebab, source link)
+                // bubbles up here too; without this guard it would fire the
+                // row's Edit-sources action alongside the child's own.
+                if (
+                  event.target === event.currentTarget &&
+                  (event.key === 'Enter' || event.key === ' ')
+                ) {
+                  event.preventDefault();
+                  onEditSources();
+                }
               }
-            }
-          : undefined
-      }
-      role={mod ? 'button' : undefined}
-      tabIndex={mod ? 0 : undefined}
-      // Explicit accessible name so the row-button doesn't absorb its
-      // children's text (which would make every inner pill/badge match a
-      // getByRole('button', { name }) lookup for the row too).
-      aria-label={mod ? t('mods.rowEditSourcesAria', { mod: displayName }) : undefined}
-      title={mod ? t('mods.rowClickEditSources') : undefined}
-      data-testid="library-row"
-    >
-      <div className="gf-profile-library-main">
-        {reorderable && (
-          <div
-            className="gf-load-order-drag"
-            title={t('profiles.loadOrder.dragHandle')}
-            aria-label={t('profiles.loadOrder.dragHandle')}
-          >
-            <GripVertical size={14} />
-          </div>
-        )}
-        {/* 4.1 — active/stored switch, leftmost. The card's green left
+            : undefined
+        }
+        role={mod ? 'button' : undefined}
+        tabIndex={mod ? 0 : undefined}
+        // Explicit accessible name so the row-button doesn't absorb its
+        // children's text (which would make every inner pill/badge match a
+        // getByRole('button', { name }) lookup for the row too).
+        aria-label={
+          mod ? t('mods.rowEditSourcesAria', { mod: displayName }) : undefined
+        }
+        title={mod ? t('mods.rowClickEditSources') : undefined}
+        data-testid="library-row"
+      >
+        <div className="gf-profile-library-main">
+          {reorderable && (
+            <div
+              className="gf-load-order-drag"
+              title={t('profiles.loadOrder.dragHandle')}
+              aria-label={t('profiles.loadOrder.dragHandle')}
+            >
+              <GripVertical size={14} />
+            </div>
+          )}
+          {/* 4.1 — active/stored switch, leftmost. The card's green left
             border mirrors this (on = active in game, off = stored).
             stopPropagation so flipping it doesn't open Edit-sources. */}
-        {/* Active/stored toggle — only where in-game state is meaningful:
+          {/* Active/stored toggle — only where in-game state is meaningful:
             the All Mods view, or the ACTIVE pack's rows. A non-active pack's
             members aren't loaded, so showing a toggle there is misleading. */}
-        {(!packScoped || packActive) && (
-          <div
-            className="gf-row-status"
-            role="presentation"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <Toggle
-              checked={row.installed_enabled}
-              onChange={() => onToggleStorage(row)}
-              // Only gate on the game running. We deliberately do NOT disable
-              // while a save is in flight: disabling the just-clicked control
-              // rips keyboard focus off it (it falls to <body>), and some
-              // WebViews react to that focus loss by scrolling the list — so
-              // the user gets yanked to the top on every toggle. Re-entrancy /
-              // double-clicks are already guarded inside handleToggleStorage
-              // (`if (storageSaving || membershipSaving) return`), so the
-              // disabled attribute was only ever redundant insurance.
-              disabled={gameRunning}
-              ariaLabel={t('modpack.storage.toggleAria', { mod: displayName })}
-              title={
-                row.installed_enabled
-                  ? t('modpack.storage.active')
-                  : t('modpack.storage.storedHint')
-              }
-            />
-            <span className="gf-row-status-label">
-              {row.installed_enabled
-                ? t('modpack.storage.active')
-                : t('modpack.storage.stored')}
-            </span>
-            {storageBusy && (
-              <RefreshCw size={11} className="animate-spin" aria-hidden />
-            )}
-          </div>
-        )}
-        <div className="gf-profile-library-identity min-w-0">
-          <div className="gf-profile-library-titlerow">
-            <h3 className="gf-profile-library-title">
-              {displayName}
-            </h3>
-            {displayName !== row.name && (
-              <span className="gf-profile-library-rawname">{row.name}</span>
-            )}
-            {/* Tags, source badges and audit pills all cluster to the
-                right of the name — there's more room here than mid-row, so
-                they read as one group instead of scattered bits. */}
-            <span className="gf-row-tagcluster">
-              {mod?.tags?.slice(0, 5).map((tag) => (
-                <span key={tag} className="gf-row-tag">{tag}</span>
-              ))}
-              {mod?.github_url && (
-                <a
-                  href={mod.github_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="gf-source-link"
-                  title={t('mods.viewOnGitHub', { url: mod.github_url })}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Badge variant="github"><GitBranch size={10} className="mr-1" />{t('mods.gitHub')}</Badge>
-                </a>
-              )}
-              {mod?.nexus_url && (
-                <a
-                  href={mod.nexus_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="gf-source-link"
-                  title={t('mods.viewOnNexus', { url: mod.nexus_url })}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Badge variant="nexus">{t('mods.nexus')}</Badge>
-                </a>
-              )}
-              {mod?.custom_url && (
-                <a
-                  href={mod.custom_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="gf-source-link"
-                  title={t('mods.openLink', { url: mod.custom_url })}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Badge variant="default"><ExternalLink size={10} className="mr-1" />{t('mods.link')}</Badge>
-                </a>
-              )}
-              {mod && !mod.github_url && !mod.nexus_url && !mod.custom_url && (
-                <Badge variant={mod.source ? 'local' : 'default'}>
-                  {mod.source ? t('mods.local') : t('mods.unlinked')}
-                </Badge>
-              )}
-              {/* Bundle member-count badge — shown when this mod is a
-                  bundle container (bundle_members is non-empty). */}
-              {(mod?.bundle_members?.length ?? 0) > 0 && (
-                <span className="gf-pill gf-pill-github">
-                  {t('bundle.memberCount', { count: mod!.bundle_members!.length })}
-                </span>
-              )}
-              {/* Audit pills — one at a time. Update fires onUpdate; the
-                  rest are informational. */}
-              {audit && isUpToDate(audit) && !showUpdatePill && !showBlockedPill && !showFrozenPill && !showSnoozedPill && (
-                <span className="gf-pill gf-pill-ok" title={t('mods.latestTitle')}>
-                  <Check size={9} /> {t('mods.latest')}
-                </span>
-              )}
-              {showUpdatePill && (
-                <button
-                  type="button"
-                  className="gf-pill gf-pill-update"
-                  onClick={(e) => { e.stopPropagation(); onUpdate(); }}
-                  disabled={gameRunning || isUpdating || anyUpdating}
-                  title={
-                    gameRunning
-                      ? t('mods.closeSts2FirstDot')
-                      : t('mods.updateClickTitle', {
-                          current: mod!.version,
-                          target: updateDisplayVersion?.replace(/^v/, ''),
-                        })
-                  }
-                >
-                  {isUpdating ? (
-                    <><RefreshCw size={9} className="animate-spin" />{t('mods.updating')}</>
-                  ) : (
-                    <><Download size={9} />{t('mods.updateAvailable', { version: updateDisplayVersion?.replace(/^v/, '') })}</>
-                  )}
-                </button>
-              )}
-              {showBlockedPill && (
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
-                  title={t('mods.gameVersionBlockedTitle', { target: audit!.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?' })}
-                >
-                  <AlertTriangle size={9} /> {t('mods.updateBlockedByGameVersion')}
-                </span>
-              )}
-              {showFrozenPill && (
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300"
-                  title={t('mods.pinnedTitle')}
-                >
-                  <Snowflake size={9} /> {t('mods.pinned')}
-                </span>
-              )}
-              {showSnoozedPill && (
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-300"
-                  title={t('mods.snoozedTitle', { version: audit!.latest_release_with_assets_tag?.replace(/^v/, '') ?? '?' })}
-                >
-                  {t('mods.snoozed')}
-                </span>
-              )}
-              {auditError && (
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-500/20 text-red-300"
-                  title={auditError}
-                >
-                  <AlertTriangle size={9} /> {t('mods.auditError')}
-                </span>
-              )}
-              {minGameViolated && (
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
-                  style={{ background: 'color-mix(in oklch, var(--amber-glow) 18%, transparent)', color: 'var(--ember-bright)' }}
-                  title={t('mods.minGameVersionTitle', { minVer: mod!.min_game_version, yourVer: gameVersion ?? 'unknown' })}
-                >
-                  <AlertTriangle size={9} /> {t('mods.needsGameVersion', { version: mod!.min_game_version })}
-                </span>
-              )}
-            </span>
-          </div>
-          <div className="gf-profile-library-meta">
-            {/* 4.5 — version is v-prefixed and the on-disk folder carries
-                a folder glyph + tooltip, so version / folder / description
-                read as distinct things instead of three grey lookalikes. */}
-            <span className="gf-meta-version" title={t('mods.versionLabel')}>
-              {showInstalledSourceVersion
-                ? `${sourceVersionLabel} v${installedSourceVersion}`
-                : t('mods.manifestVersion', { version: manifestVersion })}
-            </span>
-            {showInstalledSourceVersion && (
-              <span
-                className="gf-meta-version"
-                title={t('mods.versionLabel')}
-              >
-                {t('mods.manifestVersion', { version: manifestVersion })}
-              </span>
-            )}
-            {versionOptions.length > 1 && (
-              <label
-                className="gf-version-select"
-                title={t('mods.versionSelectorTitle')}
-              >
-                <span>{t('mods.versionSelectorLabel')}</span>
-                <Select
-                  value={membershipRowKey(row)}
-                  onChange={onSelectVersion}
-                  aria-label={t('mods.versionSelectorTitle')}
-                  onClick={(event) => event.stopPropagation()}
-                  options={versionOptions.map((option) => ({
-                    value: option.key,
-                    label: option.label,
-                  }))}
-                />
-              </label>
-            )}
-            {row.folder_name
-              && (row.folder_name !== row.name || !!row.display_name?.trim())
-              && (
-                <span
-                  className="gf-meta-folder"
-                  title={t('mods.onDiskFolderTitle', { folder: row.folder_name })}
-                >
-                  <FolderOpen size={10} /> {row.folder_name}
-                </span>
-              )}
-            {!packScoped && row.profiles.length > 0 && (
-              <span
-                className="gf-meta-modpacks"
-                title={
-                  includedProfiles.length > 0
-                    ? includedProfiles.map((p) => p.profile_name).join(', ')
-                    : t('libraryTable.inNoModpacks')
-                }
-              >
-                <Layers size={10} />{' '}
-                {includedProfiles.length > 0
-                  ? t('libraryTable.inModpacks', { count: includedProfiles.length })
-                  : t('libraryTable.inNoModpacks')}
-              </span>
-            )}
-            {reorderable && (
-              <span className="gf-load-order-rank-inline">
-                #{inPackIndex + 1}
-              </span>
-            )}
-          </div>
-          {/* Bundle member list — shown in comfortable density when this
-              mod is a bundle container (bundle_members is non-empty). */}
-          {mod && (mod.bundle_members?.length ?? 0) > 0 && (
-            <ul
-              className="gf-bundle-members"
-              aria-label={t('bundle.membersAria', { name: displayName })}
+          {rowInstalled && (!packScoped || packActive) && (
+            <div
+              className="gf-row-status"
+              role="presentation"
+              onClick={(event) => event.stopPropagation()}
             >
-              {mod.bundle_members!.map((memberName) => (
-                <li key={memberName} className="gf-bundle-member-name">
-                  {memberName}
-                </li>
-              ))}
-            </ul>
-          )}
-          {/* Description (manager override or manifest) + free-form
-              note. Both render outside the drawer because they're part
-              of the row's identity. */}
-          {mod && (mod.display_description || mod.description || mod.note) && (
-            <div className="gf-modrow-meta">
-              {(mod.display_description || mod.description) && (
-                <p
-                  className="gf-modrow-desc"
-                  title={mod.display_description?.trim() || mod.description}
-                >
-                  {mod.display_description?.trim() || mod.description}
-                </p>
-              )}
-              {mod.note && (
-                <p className="gf-modrow-note" title={mod.note}>
-                  {t('mods.notePrefix')} {mod.note}
-                </p>
+              <Toggle
+                checked={row.installed_enabled}
+                onChange={() => onToggleStorage(row)}
+                // Only gate on the game running. We deliberately do NOT disable
+                // while a save is in flight: disabling the just-clicked control
+                // rips keyboard focus off it (it falls to <body>), and some
+                // WebViews react to that focus loss by scrolling the list — so
+                // the user gets yanked to the top on every toggle. Re-entrancy /
+                // double-clicks are already guarded inside handleToggleStorage
+                // (`if (storageSaving || membershipSaving) return`), so the
+                // disabled attribute was only ever redundant insurance.
+                disabled={gameRunning}
+                ariaLabel={t('modpack.storage.toggleAria', {
+                  mod: displayName,
+                })}
+                title={
+                  row.installed_enabled
+                    ? t('modpack.storage.active')
+                    : t('modpack.storage.storedHint')
+                }
+              />
+              <span className="gf-row-status-label">
+                {row.installed_enabled
+                  ? t('modpack.storage.active')
+                  : t('modpack.storage.stored')}
+              </span>
+              {storageBusy && (
+                <RefreshCw size={11} className="animate-spin" aria-hidden />
               )}
             </div>
           )}
-        </div>
-        <div className="gf-profile-library-row-actions">
-          {/* In-pack / not-in-pack indicator — only in the All Mods view,
+          <div className="gf-profile-library-identity min-w-0">
+            <div className="gf-profile-library-titlerow">
+              <h3 className="gf-profile-library-title">{displayName}</h3>
+              {displayName !== row.name && (
+                <span className="gf-profile-library-rawname">{row.name}</span>
+              )}
+              {/* Tags, source badges and audit pills all cluster to the
+                right of the name — there's more room here than mid-row, so
+                they read as one group instead of scattered bits. */}
+              <span className="gf-row-tagcluster">
+                {mod?.tags?.slice(0, 5).map((tag) => (
+                  <span key={tag} className="gf-row-tag">
+                    {tag}
+                  </span>
+                ))}
+                {mod?.github_url && (
+                  <a
+                    href={mod.github_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="gf-source-link"
+                    title={t('mods.viewOnGitHub', { url: mod.github_url })}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Badge variant="github">
+                      <GitBranch size={10} className="mr-1" />
+                      {t('mods.gitHub')}
+                    </Badge>
+                  </a>
+                )}
+                {mod?.nexus_url && (
+                  <a
+                    href={mod.nexus_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="gf-source-link"
+                    title={t('mods.viewOnNexus', { url: mod.nexus_url })}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Badge variant="nexus">{t('mods.nexus')}</Badge>
+                  </a>
+                )}
+                {mod?.custom_url && (
+                  <a
+                    href={mod.custom_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="gf-source-link"
+                    title={t('mods.openLink', { url: mod.custom_url })}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Badge variant="default">
+                      <ExternalLink size={10} className="mr-1" />
+                      {t('mods.link')}
+                    </Badge>
+                  </a>
+                )}
+                {mod &&
+                  !mod.github_url &&
+                  !mod.nexus_url &&
+                  !mod.custom_url && (
+                    <Badge variant={mod.source ? 'local' : 'default'}>
+                      {mod.source ? t('mods.local') : t('mods.unlinked')}
+                    </Badge>
+                  )}
+                {/* Bundle member-count badge — shown when this mod is a
+                  bundle container (bundle_members is non-empty). */}
+                {(mod?.bundle_members?.length ?? 0) > 0 && (
+                  <span className="gf-pill gf-pill-github">
+                    {t('bundle.memberCount', {
+                      count: mod!.bundle_members!.length,
+                    })}
+                  </span>
+                )}
+                {/* Audit pills — one at a time. Update fires onUpdate; the
+                  rest are informational. */}
+                {audit &&
+                  isUpToDate(audit) &&
+                  !showUpdatePill &&
+                  !showBlockedPill &&
+                  !showFrozenPill &&
+                  !showSnoozedPill && (
+                    <span
+                      className="gf-pill gf-pill-ok"
+                      title={t('mods.latestTitle')}
+                    >
+                      <Check size={9} /> {t('mods.latest')}
+                    </span>
+                  )}
+                {showUpdatePill && (
+                  <button
+                    type="button"
+                    className="gf-pill gf-pill-update"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdate();
+                    }}
+                    disabled={gameRunning || isUpdating || anyUpdating}
+                    title={
+                      gameRunning
+                        ? t('mods.closeSts2FirstDot')
+                        : t('mods.updateClickTitle', {
+                            current: mod!.version,
+                            target: updateDisplayVersion?.replace(/^v/, ''),
+                          })
+                    }
+                  >
+                    {isUpdating ? (
+                      <>
+                        <RefreshCw size={9} className="animate-spin" />
+                        {t('mods.updating')}
+                      </>
+                    ) : (
+                      <>
+                        <Download size={9} />
+                        {t('mods.updateAvailable', {
+                          version: updateDisplayVersion?.replace(/^v/, ''),
+                        })}
+                      </>
+                    )}
+                  </button>
+                )}
+                {showBlockedPill && (
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
+                    title={t('mods.gameVersionBlockedTitle', {
+                      target:
+                        audit!.latest_release_with_assets_tag?.replace(
+                          /^v/,
+                          '',
+                        ) ?? '?',
+                    })}
+                  >
+                    <AlertTriangle size={9} />{' '}
+                    {t('mods.updateBlockedByGameVersion')}
+                  </span>
+                )}
+                {showFrozenPill && (
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300"
+                    title={t('mods.pinnedTitle')}
+                  >
+                    <Snowflake size={9} /> {t('mods.pinned')}
+                  </span>
+                )}
+                {showSnoozedPill && (
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-300"
+                    title={t('mods.snoozedTitle', {
+                      version:
+                        audit!.latest_release_with_assets_tag?.replace(
+                          /^v/,
+                          '',
+                        ) ?? '?',
+                    })}
+                  >
+                    {t('mods.snoozed')}
+                  </span>
+                )}
+                {auditError && (
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-500/20 text-red-300"
+                    title={auditError}
+                  >
+                    <AlertTriangle size={9} /> {t('mods.auditError')}
+                  </span>
+                )}
+                {minGameViolated && (
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
+                    style={{
+                      background:
+                        'color-mix(in oklch, var(--amber-glow) 18%, transparent)',
+                      color: 'var(--ember-bright)',
+                    }}
+                    title={t('mods.minGameVersionTitle', {
+                      minVer: mod!.min_game_version,
+                      yourVer: gameVersion ?? 'unknown',
+                    })}
+                  >
+                    <AlertTriangle size={9} />{' '}
+                    {t('mods.needsGameVersion', {
+                      version: mod!.min_game_version,
+                    })}
+                  </span>
+                )}
+              </span>
+            </div>
+            <div className="gf-profile-library-meta">
+              {/* 4.5 — version is v-prefixed and the on-disk folder carries
+                a folder glyph + tooltip, so version / folder / description
+                read as distinct things instead of three grey lookalikes. */}
+              <span className="gf-meta-version" title={t('mods.versionLabel')}>
+                {showInstalledSourceVersion
+                  ? `${sourceVersionLabel} v${installedSourceVersion}`
+                  : t('mods.manifestVersion', { version: manifestVersion })}
+              </span>
+              {showInstalledSourceVersion && (
+                <span
+                  className="gf-meta-version"
+                  title={t('mods.versionLabel')}
+                >
+                  {t('mods.manifestVersion', { version: manifestVersion })}
+                </span>
+              )}
+              {!rowInstalled && row.cached && (
+                <span
+                  className="gf-meta-version"
+                  title={t('mods.versionSavedStatus')}
+                >
+                  {t('mods.versionSavedStatus')}
+                </span>
+              )}
+              {!rowInstalled && row.missing && (
+                <span
+                  className="gf-meta-version"
+                  title={t('mods.versionMissingStatus')}
+                >
+                  {t('mods.versionMissingStatus')}
+                </span>
+              )}
+              {versionOptions.length > 1 && (
+                <div
+                  className="gf-version-tools"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <label
+                    className="gf-version-select"
+                    title={t('mods.versionSelectorTitle')}
+                  >
+                    <span>{t('mods.versionSelectorLabel')}</span>
+                    <Select
+                      value={selectedVersionKey ?? membershipRowKey(row)}
+                      onChange={onSelectVersion}
+                      aria-label={t('mods.versionSelectorTitle')}
+                      onClick={(event) => event.stopPropagation()}
+                      options={versionOptions.map((option) => ({
+                        value: option.key,
+                        label: option.label,
+                      }))}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="gf-btn-3 gf-btn-icon gf-version-manage"
+                    title={t('mods.versionManageTitle')}
+                    aria-label={t('mods.versionManageTitle')}
+                    onClick={() => setVersionManagerOpen(true)}
+                  >
+                    <SlidersHorizontal size={13} />
+                  </button>
+                </div>
+              )}
+              {row.folder_name &&
+                (row.folder_name !== row.name ||
+                  !!row.display_name?.trim()) && (
+                  <span
+                    className="gf-meta-folder"
+                    title={t('mods.onDiskFolderTitle', {
+                      folder: row.folder_name,
+                    })}
+                  >
+                    <FolderOpen size={10} /> {row.folder_name}
+                  </span>
+                )}
+              {!packScoped && profileVersionSummary.length > 0 && (
+                <span className="gf-meta-modpacks" title={modpackUsageTitle}>
+                  <Layers size={10} />{' '}
+                  {profileVersionSummary.length > 0
+                    ? t('libraryTable.inModpacks', {
+                        count: profileVersionSummary.length,
+                      })
+                    : t('libraryTable.inNoModpacks')}
+                </span>
+              )}
+              {reorderable && (
+                <span className="gf-load-order-rank-inline">
+                  #{inPackIndex + 1}
+                </span>
+              )}
+            </div>
+            {/* Bundle member list — shown in comfortable density when this
+              mod is a bundle container (bundle_members is non-empty). */}
+            {mod && (mod.bundle_members?.length ?? 0) > 0 && (
+              <ul
+                className="gf-bundle-members"
+                aria-label={t('bundle.membersAria', { name: displayName })}
+              >
+                {mod.bundle_members!.map((memberName) => (
+                  <li key={memberName} className="gf-bundle-member-name">
+                    {memberName}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {/* Description (manager override or manifest) + free-form
+              note. Both render outside the drawer because they're part
+              of the row's identity. */}
+            {mod &&
+              (mod.display_description || mod.description || mod.note) && (
+                <div className="gf-modrow-meta">
+                  {(mod.display_description || mod.description) && (
+                    <p
+                      className="gf-modrow-desc"
+                      title={mod.display_description?.trim() || mod.description}
+                    >
+                      {mod.display_description?.trim() || mod.description}
+                    </p>
+                  )}
+                  {mod.note && (
+                    <p className="gf-modrow-note" title={mod.note}>
+                      {t('mods.notePrefix')} {mod.note}
+                    </p>
+                  )}
+                </div>
+              )}
+          </div>
+          <div className="gf-profile-library-row-actions">
+            {/* In-pack / not-in-pack indicator — only in the All Mods view,
               where membership against the active pack is informative. In the
               dedicated modpack view every row is already in the pack, so it
               would be redundant and is hidden. */}
-          {modpackName != null && !packScoped && (
-            state ? (
-              <span
-                className={`gf-row-inpack${state.included ? ' is-in' : ''}`}
-                title={
-                  state.included
-                    ? t('libraryTable.inPackTitle', { modpack: modpackName })
-                    : t('libraryTable.notInPackTitle', { modpack: modpackName })
-                }
-              >
-                {state.included ? <Check size={12} /> : <X size={12} />}
-                <span className="gf-row-inpack-label">
-                  {state.included
-                    ? t('libraryTable.inPack')
-                    : t('libraryTable.notInPack')}
+            {modpackName != null &&
+              !packScoped &&
+              (state ? (
+                <span
+                  className={`gf-row-inpack${state.included ? ' is-in' : ''}`}
+                  title={
+                    state.included
+                      ? t('libraryTable.inPackTitle', {
+                          modpack: modpackDisplayName,
+                        })
+                      : t('libraryTable.notInPackTitle', {
+                          modpack: modpackDisplayName,
+                        })
+                  }
+                >
+                  {state.included ? <Check size={12} /> : <X size={12} />}
+                  <span className="gf-row-inpack-label">
+                    {state.included
+                      ? t('libraryTable.inPack')
+                      : t('libraryTable.notInPack')}
+                  </span>
+                  {saving && (
+                    <RefreshCw size={11} className="animate-spin" aria-hidden />
+                  )}
                 </span>
-                {saving && (
-                  <RefreshCw size={11} className="animate-spin" aria-hidden />
-                )}
-              </span>
-            ) : (
-              <span className="gf-profile-library-muted">
-                {t('libraryTable.modpackMissing')}
-              </span>
-            )
-          )}
-          {/* Primary visible row action. Modpack view → "Remove from pack"
-              (membership remove; on the active pack it also unloads the mod).
+              ) : (
+                <span className="gf-profile-library-muted">
+                  {t('libraryTable.modpackMissing')}
+                </span>
+              ))}
+            {/* Primary visible row action. Modpack view → "Remove from pack"
+              (membership remove only; storage stays under the row switch).
               All Mods view → the disk-delete trash. Delete-from-disk for the
               modpack view lives in the kebab. */}
-          {packScoped ? (
-            <button
-              type="button"
-              className="gf-row-remove"
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggleMembership(row);
-              }}
-              disabled={saving || (!!state && !state.editable)}
-              title={t('modpack.detail.removeFromPackTitle')}
-              aria-label={t('modpack.detail.removeFromPackAria', { mod: displayName })}
-            >
-              {saving ? (
-                <RefreshCw size={13} className="animate-spin" />
-              ) : (
-                <X size={13} />
-              )}
-              {t('modpack.detail.remove')}
-            </button>
-          ) : (
-            mod && onDelete !== noop && (
+            {packScoped ? (
               <button
                 type="button"
-                className="gf-row-delete"
+                className="gf-row-remove"
                 onClick={(event) => {
                   event.stopPropagation();
-                  onDelete();
+                  onToggleMembership(row);
                 }}
-                disabled={gameRunning}
-                title={gameRunning ? t('mods.closeSts2FirstDot') : t('mods.removeMod')}
-                aria-label={t('mods.removeModNamed', { mod: displayName })}
+                disabled={saving || (!!state && !state.editable)}
+                title={t('modpack.detail.removeFromPackTitle')}
+                aria-label={t('modpack.detail.removeFromPackAria', {
+                  mod: displayName,
+                })}
               >
-                <Trash2 size={14} />
+                {saving ? (
+                  <RefreshCw size={13} className="animate-spin" />
+                ) : (
+                  <X size={13} />
+                )}
+                {t('modpack.detail.remove')}
               </button>
-            )
-          )}
-          {mod && <LibraryRowKebab
-            mod={mod}
-            audit={audit}
-            modpackName={modpackName}
-            state={state}
-            packScoped={packScoped}
-            isUpdating={isUpdating}
-            isRepairing={isRepairing}
-            isRollingBack={isRollingBack}
-            anyRecoveryInFlight={anyRecoveryInFlight}
-            membershipSaving={!!membershipSaving}
-            gameRunning={gameRunning}
-            onToggleMembership={() => onToggleMembership(row)}
-            onTogglePin={onTogglePin}
-            onSnooze={onSnooze}
-            onUnsnooze={onUnsnooze}
-            onCopyVersion={onCopyVersion}
-            onOpenThisModFolder={onOpenThisModFolder}
-            onFindGithubFromNexus={onFindGithubFromNexus}
-            onAutoDetectSource={onAutoDetectSource}
-            onRepair={onRepair}
-            onRollback={onRollback}
-            onDelete={onDelete}
-            onOpenExternalUrl={onOpenExternalUrl}
-          />}
+            ) : (
+              mod &&
+              onDelete !== noop && (
+                <button
+                  type="button"
+                  className="gf-row-delete"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDelete();
+                  }}
+                  disabled={gameRunning}
+                  title={
+                    gameRunning
+                      ? t('mods.closeSts2FirstDot')
+                      : t('mods.removeMod')
+                  }
+                  aria-label={t('mods.removeModNamed', { mod: displayName })}
+                >
+                  <Trash2 size={14} />
+                </button>
+              )
+            )}
+            {mod && (
+              <LibraryRowKebab
+                mod={mod}
+                audit={audit}
+                modpackName={modpackName}
+                modpackLabel={modpackDisplayName}
+                state={state}
+                packScoped={packScoped}
+                isUpdating={isUpdating}
+                isRepairing={isRepairing}
+                isRollingBack={isRollingBack}
+                anyRecoveryInFlight={anyRecoveryInFlight}
+                membershipSaving={!!membershipSaving}
+                gameRunning={gameRunning}
+                onToggleMembership={() => onToggleMembership(row)}
+                onTogglePin={onTogglePin}
+                onSnooze={onSnooze}
+                onUnsnooze={onUnsnooze}
+                onCopyVersion={onCopyVersion}
+                onOpenThisModFolder={onOpenThisModFolder}
+                onFindGithubFromNexus={onFindGithubFromNexus}
+                onAutoDetectSource={onAutoDetectSource}
+                onRepair={onRepair}
+                onRollback={onRollback}
+                onDelete={onDelete}
+                onOpenExternalUrl={onOpenExternalUrl}
+              />
+            )}
+          </div>
         </div>
-      </div>
-      {sourceEditorSlot && (
-        // The editor lives inside the clickable row — stop clicks/keys
-        // from bubbling to the row's onClick (which would re-open the
-        // editor the moment the user clicks Cancel/X inside it).
+        {sourceEditorSlot && (
+          // The editor lives inside the clickable row — stop clicks/keys
+          // from bubbling to the row's onClick (which would re-open the
+          // editor the moment the user clicks Cancel/X inside it).
+          <div
+            className="gf-profile-library-source-editor"
+            data-testid="library-row-source-editor"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            {sourceEditorSlot}
+          </div>
+        )}
+      </Card>
+      {versionManagerOpen && (
         <div
-          className="gf-profile-library-source-editor"
-          data-testid="library-row-source-editor"
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
+          className="gf-modal-back"
+          onClick={() => setVersionManagerOpen(false)}
         >
-          {sourceEditorSlot}
+          <div
+            className="gf-modal gf-version-manager"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`version-manager-${membershipRowKey(row)}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="gf-modal-head">
+              <div>
+                <div
+                  id={`version-manager-${membershipRowKey(row)}`}
+                  className="gf-modal-title"
+                >
+                  {t('mods.versionManageHeading', { mod: displayName })}
+                </div>
+                <div className="gf-modal-sub">{t('mods.versionManageSub')}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVersionManagerOpen(false)}
+                className="gf-btn-3 gf-btn-icon"
+                title={t('common.close')}
+                aria-label={t('common.close')}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="gf-modal-body">
+              <ul className="gf-version-manager-list">
+                {versionOptions.map((option) => {
+                  const reason = versionRemoveBlockReason(option);
+                  const removing = removingVersionKey === option.key;
+                  return (
+                    <li key={option.key} className="gf-version-manager-item">
+                      <div className="gf-version-manager-copy">
+                        <span className="gf-version-manager-version">
+                          {t('mods.versionOptionVersion', {
+                            version:
+                              option.version.trim().replace(/^v/i, '') || '?',
+                          })}
+                        </span>
+                        <span className="gf-version-manager-state">
+                          {versionStateLabel(option)}
+                        </span>
+                        {reason && (
+                          <span className="gf-version-manager-reason">
+                            {reason}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="gf-btn-3 gf-btn-danger gf-version-manager-remove"
+                        disabled={removing}
+                        onClick={() => onRemoveVersion(option)}
+                      >
+                        {removing
+                          ? t('mods.versionRemoving')
+                          : t('mods.versionRemove')}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+            <div className="gf-modal-foot">
+              <button
+                type="button"
+                className="gf-btn-3"
+                onClick={() => setVersionManagerOpen(false)}
+              >
+                {t('common.close')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
-    </Card>
+    </>
   );
 }
 
@@ -774,6 +1033,7 @@ interface LibraryRowKebabProps {
   mod: ModInfo;
   audit: ModAuditEntry | undefined;
   modpackName: string | null;
+  modpackLabel?: string | null;
   state: ProfileMembershipState | undefined;
   /** Dedicated modpack view: the membership toggle moves to the visible
    *  "Remove from pack" button, and the kebab instead offers
@@ -806,6 +1066,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     mod,
     audit,
     modpackName,
+    modpackLabel,
     state,
     packScoped,
     isUpdating,
@@ -827,6 +1088,10 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     onDelete,
     onOpenExternalUrl,
   } = props;
+  const modpackDisplayName = profileDisplayName(
+    modpackLabel ?? modpackName,
+    t('quickAdd.unknown'),
+  );
 
   // Membership classification (in / includedOff / notIn) — null hides the item.
   let membershipChip: 'in' | 'includedOff' | 'notIn' | null = null;
@@ -839,37 +1104,51 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
   const snoozeTargetVersion =
     audit?.latest_release_with_assets_tag ?? audit?.nexus_version ?? null;
   const canSnooze =
-    !!audit?.snoozed ||
-    (!!audit?.needs_update && !!snoozeTargetVersion);
+    !!audit?.snoozed || (!!audit?.needs_update && !!snoozeTargetVersion);
   const hasUserConfirmedGithub = !!mod.github_url && !mod.github_auto_detected;
 
   // Rebuilt per render — cheap, and the menu only mounts/opens on demand. Don't memoize (it would force listing every closure capture as a dep).
   // One descriptor per customizable id: contextual availability + how to render.
-  const descriptors: Record<RowMenuItemId, { available: boolean; render: () => ReactNode }> = {
+  const descriptors: Record<
+    RowMenuItemId,
+    { available: boolean; render: () => ReactNode }
+  > = {
     membership: {
       available: !packScoped && !!modpackName && !!membershipChip,
       render: () => (
         <KebabItem
           key="membership"
-          icon={membershipChip === 'notIn' ? <ToggleRight size={12} /> : <ToggleLeft size={12} />}
+          icon={
+            membershipChip === 'notIn' ? (
+              <ToggleRight size={12} />
+            ) : (
+              <ToggleLeft size={12} />
+            )
+          }
           onClick={onToggleMembership}
           disabled={membershipSaving || !state?.editable}
           description={
             membershipChip === 'notIn'
-              ? t('mods.kebab.addToModpackDesc', { pack: modpackName })
-              : t('mods.kebab.removeFromModpackDesc', { pack: modpackName })
+              ? t('mods.kebab.addToModpackDesc', { pack: modpackDisplayName })
+              : t('mods.kebab.removeFromModpackDesc', {
+                  pack: modpackDisplayName,
+                })
           }
         >
           {membershipChip === 'notIn'
-            ? t('mods.kebab.addToModpack', { pack: modpackName })
-            : t('mods.kebab.removeFromModpack', { pack: modpackName })}
+            ? t('mods.kebab.addToModpack', { pack: modpackDisplayName })
+            : t('mods.kebab.removeFromModpack', { pack: modpackDisplayName })}
         </KebabItem>
       ),
     },
     copyVersion: {
       available: true,
       render: () => (
-        <KebabItem key="copyVersion" icon={<Copy size={12} />} onClick={onCopyVersion}>
+        <KebabItem
+          key="copyVersion"
+          icon={<Copy size={12} />}
+          onClick={onCopyVersion}
+        >
           {t('mods.copyVersion', { version: mod.version.replace(/^v/i, '') })}
         </KebabItem>
       ),
@@ -877,7 +1156,11 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     openFolder: {
       available: true,
       render: () => (
-        <KebabItem key="openFolder" icon={<FolderOpen size={12} />} onClick={onOpenThisModFolder}>
+        <KebabItem
+          key="openFolder"
+          icon={<FolderOpen size={12} />}
+          onClick={onOpenThisModFolder}
+        >
           {t('mods.openThisModFolder')}
         </KebabItem>
       ),
@@ -910,7 +1193,11 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     autoDetect: {
       available: true,
       render: () => (
-        <KebabItem key="autoDetect" icon={<Search size={12} />} onClick={onAutoDetectSource}>
+        <KebabItem
+          key="autoDetect"
+          icon={<Search size={12} />}
+          onClick={onAutoDetectSource}
+        >
           {t('mods.autoDetectSourceOne')}
         </KebabItem>
       ),
@@ -942,7 +1229,11 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
     findGithub: {
       available: !!mod.nexus_url && !mod.github_url,
       render: () => (
-        <KebabItem key="findGithub" icon={<GitBranch size={12} />} onClick={onFindGithubFromNexus}>
+        <KebabItem
+          key="findGithub"
+          icon={<GitBranch size={12} />}
+          onClick={onFindGithubFromNexus}
+        >
           {t('mods.findGitHubFromNexus')}
         </KebabItem>
       ),
@@ -965,10 +1256,25 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
       render: () => (
         <KebabItem
           key="repair"
-          icon={isRepairing ? <RefreshCw size={12} className="animate-spin" /> : <Wrench size={12} />}
+          icon={
+            isRepairing ? (
+              <RefreshCw size={12} className="animate-spin" />
+            ) : (
+              <Wrench size={12} />
+            )
+          }
           onClick={onRepair}
-          disabled={gameRunning || anyRecoveryInFlight || !hasUserConfirmedGithub || isUpdating}
-          description={hasUserConfirmedGithub ? t('mods.repairDesc') : t('mods.repairNeedSource')}
+          disabled={
+            gameRunning ||
+            anyRecoveryInFlight ||
+            !hasUserConfirmedGithub ||
+            isUpdating
+          }
+          description={
+            hasUserConfirmedGithub
+              ? t('mods.repairDesc')
+              : t('mods.repairNeedSource')
+          }
         >
           {isRepairing ? t('mods.repairing') : t('mods.repairThisMod')}
         </KebabItem>
@@ -979,10 +1285,25 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
       render: () => (
         <KebabItem
           key="rollback"
-          icon={isRollingBack ? <RefreshCw size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+          icon={
+            isRollingBack ? (
+              <RefreshCw size={12} className="animate-spin" />
+            ) : (
+              <RotateCcw size={12} />
+            )
+          }
           onClick={onRollback}
-          disabled={gameRunning || anyRecoveryInFlight || !hasUserConfirmedGithub || isUpdating}
-          description={hasUserConfirmedGithub ? t('mods.rollbackDesc') : t('mods.rollbackNeedSource')}
+          disabled={
+            gameRunning ||
+            anyRecoveryInFlight ||
+            !hasUserConfirmedGithub ||
+            isUpdating
+          }
+          description={
+            hasUserConfirmedGithub
+              ? t('mods.rollbackDesc')
+              : t('mods.rollbackNeedSource')
+          }
         >
           {isRollingBack ? t('mods.rollingBack') : t('mods.rollBackOneVersion')}
         </KebabItem>
@@ -991,14 +1312,18 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
   };
 
   const availableIds = new Set<RowMenuItemId>(
-    (Object.keys(descriptors) as RowMenuItemId[]).filter((id) => descriptors[id].available),
+    (Object.keys(descriptors) as RowMenuItemId[]).filter(
+      (id) => descriptors[id].available,
+    ),
   );
   const orderedIds = resolveRowMenuOrder(config, availableIds);
 
   return (
     <div onClick={(e) => e.stopPropagation()}>
       <KebabMenu title={t('mods.modActions')}>
-        <KebabSection>{orderedIds.map((id) => descriptors[id].render())}</KebabSection>
+        <KebabSection>
+          {orderedIds.map((id) => descriptors[id].render())}
+        </KebabSection>
         {/* Locked danger item — disk delete, modpack view only, pinned bottom. */}
         {packScoped && (
           <>
@@ -1023,7 +1348,9 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
             <KebabSection>
               <KebabItem
                 icon={<SlidersHorizontal size={12} />}
-                onClick={() => window.dispatchEvent(new CustomEvent(ROW_MENU_OPEN_EVENT))}
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent(ROW_MENU_OPEN_EVENT))
+                }
                 description={t('mods.customizeMenuDesc')}
               >
                 {t('mods.customizeMenu')}

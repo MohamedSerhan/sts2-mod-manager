@@ -3253,6 +3253,49 @@ describe('<ModsView>', () => {
       expect(within(row).getByText(/^In Modpack$/i)).toBeInTheDocument();
     });
 
+    it('uses the active profile display name when the membership key is a UUID', async () => {
+      const uuid = '731aeaec-7f3d-4859-baec-16219701e2e7';
+      seedMods([
+        baseMod({ name: 'TargetMod', folder_name: 'TargetMod', enabled: true }),
+      ]);
+      registerInvokeHandler('get_active_profile', () => uuid);
+      registerInvokeHandler('get_active_profile_id', () => uuid);
+      registerInvokeHandler('list_profiles_cmd', () => [
+        {
+          id: uuid,
+          name: 'TesterW',
+          game_version: null,
+          created_by: null,
+          mods: [],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          public: null,
+          mod_extras: {},
+        },
+      ]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ profile_id: uuid, profile_name: 'TesterW', editable: true }],
+        mods: [
+          {
+            name: 'TargetMod',
+            version: '3.1.2',
+            folder_name: 'TargetMod',
+            mod_id: 'targetmod',
+            installed_enabled: true,
+            profiles: [
+              { profile_id: uuid, profile_name: 'TesterW', included: true, enabled: true, editable: true },
+            ],
+          },
+        ],
+      }));
+
+      const { container } = render(<Wrap />);
+      const row = await getModRow('TargetMod');
+      const indicator = await waitForMembershipStatus(row, true);
+      expect(indicator).toHaveAttribute('title', expect.stringContaining('TesterW'));
+      expect(container.innerHTML).not.toContain(uuid);
+    });
+
     it('hides the membership column entirely when no active modpack', async () => {
       setupRow(true, 'noActive');
       render(<Wrap />);

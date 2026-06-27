@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption, LaunchDiagnostics, LaunchQuarantineResult } from '../types';
+import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption, LocalModVersionRemovalPreview, ManualModVersionRemovalMode, ManualModVersionProfileReplacement, ManualModVersionRemovalResult, LaunchDiagnostics, LaunchHealthReport, LaunchQuarantineResult } from '../types';
 
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
@@ -35,6 +35,10 @@ export async function openExternalUrl(url: string): Promise<boolean> {
 
 export async function launchGame(): Promise<boolean> {
   return invoke('launch_game');
+}
+
+export async function getLaunchHealth(): Promise<LaunchHealthReport> {
+  return invoke('get_launch_health');
 }
 
 export async function setGithubToken(token: string): Promise<boolean> {
@@ -213,6 +217,28 @@ export async function getProfileMemberships(): Promise<ProfileMembershipGrid> {
 
 export async function getLibraryVersionOptions(): Promise<Record<string, LocalModVersionOption[]>> {
   return invoke('get_library_version_options');
+}
+
+export async function previewLibraryModVersionRemoval(modVersionId: string): Promise<LocalModVersionRemovalPreview> {
+  return invoke('preview_library_mod_version_removal', { modVersionId });
+}
+
+export async function removeLibraryModVersion(modVersionId: string): Promise<boolean> {
+  return invoke('remove_library_mod_version', { modVersionId });
+}
+
+export async function removeLibraryModVersionManual(
+  modVersionId: string,
+  mode: ManualModVersionRemovalMode,
+  profileReplacements: ManualModVersionProfileReplacement[],
+  activeReplacementModVersionId: string | null = null,
+): Promise<ManualModVersionRemovalResult> {
+  return invoke('remove_library_mod_version_manual', {
+    modVersionId,
+    mode,
+    profileReplacements,
+    activeReplacementModVersionId,
+  });
 }
 
 export async function setProfileModMembership(
@@ -669,6 +695,11 @@ export async function getLaunchDiagnostics(): Promise<LaunchDiagnostics> {
 /** Move hard-failing mods from the latest STS2 launch into storage. */
 export async function quarantineLaunchFailures(): Promise<LaunchQuarantineResult> {
   return invoke('quarantine_launch_failures');
+}
+
+/** Move concrete launch-health blockers into storage before modded launch. */
+export async function resolveLaunchHealthBlockers(): Promise<LaunchQuarantineResult> {
+  return invoke('resolve_launch_health_blockers');
 }
 
 // ── Dev builds (dev-build-only Settings panel) ───────────────────────────────

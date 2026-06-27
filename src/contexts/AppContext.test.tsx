@@ -73,6 +73,38 @@ describe('<AppProvider>', () => {
     expect(captured?.activeProfile).toBe('My Pack');
   });
 
+  it('refreshAll resolves UUID active profile ids to display names', async () => {
+    const uuid = '731aeaec-7f3d-4859-baec-16219701e2e7';
+    registerInvokeHandler('get_active_profile', () => uuid);
+    registerInvokeHandler('get_active_profile_id', () => uuid);
+    registerInvokeHandler('list_profiles_cmd', () => [
+      {
+        id: uuid,
+        name: 'TesterW',
+        game_version: null,
+        created_by: null,
+        mods: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        public: null,
+        mod_extras: {},
+      },
+    ]);
+
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+
+    await waitFor(() => {
+      expect(captured?.loading).toBe(false);
+    });
+    expect(captured?.activeProfileId).toBe(uuid);
+    expect(captured?.activeProfile).toBe('TesterW');
+  });
+
   it('audit run + result caching', async () => {
     const auditEntry = {
       mod_name: 'BaseLib',

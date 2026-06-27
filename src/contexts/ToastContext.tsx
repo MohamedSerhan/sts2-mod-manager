@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Check, Info, AlertCircle } from 'lucide-react';
+import { redactProfileUuids } from '../lib/profileDisplay';
 
 interface Toast {
   id: number;
@@ -42,9 +43,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     sticky = false,
   ): number => {
     const id = nextId++;
-    setToasts((prev) => [...prev, { id, message, type, sticky }]);
+    const safeMessage = redactProfileUuids(message, t('quickAdd.unknown', { defaultValue: 'Unknown' }));
+    setToasts((prev) => [...prev, { id, message: safeMessage, type, sticky }]);
     return id;
-  }, []);
+  }, [t]);
 
   const removeToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));

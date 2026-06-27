@@ -282,7 +282,10 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 .unwrap_or_default()
                                 .to_string_lossy()
                                 .to_string();
-                            let cache_result: std::result::Result<ModInfo, String> = (|| {
+                            let promote_result: std::result::Result<
+                                crate::updater::PromotionOutcome,
+                                String,
+                            > = (|| {
                                 let staging = tempfile::tempdir().map_err(|e| e.to_string())?;
                                 let mut staged = install_mod_from_archive(path, staging.path())
                                     .map_err(|e| e.to_string())?;
@@ -316,66 +319,41 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                             &state,
                                         )
                                     });
-                                crate::mod_versions::cache_mod_version_by_id_with_source_version(
-                                    &mut staged,
-                                    staging.path(),
+                                let source_hint = staged.source.clone().or_else(|| {
+                                    crate::mod_versions::source_hint_for_mod(existing, &config_path)
+                                });
+                                crate::updater::promote_archive_to_library(
+                                    path,
+                                    existing,
+                                    source_hint,
+                                    source_version.as_deref(),
+                                    "nexus",
+                                    &mods_path,
+                                    disabled_path.as_deref(),
+                                    &profiles_path,
                                     &cache_path,
                                     &config_path,
-                                    source_version.as_deref(),
+                                    game_version.as_deref(),
                                 )
-                                .ok_or_else(|| {
-                                    format!("Failed to cache '{}' v{}", staged.name, staged.version)
-                                })?;
-                                if let Some(id) = staged.mod_version_id.clone() {
-                                    if let Some(version) = source_version.as_deref() {
-                                        let _ = crate::mod_versions::set_record_source_version(
-                                            &config_path,
-                                            &id,
-                                            Some(version),
-                                        );
-                                    }
-                                    let mut installed = scan_mods(&mods_path);
-                                    if let Some(ref disabled_path) = disabled_path {
-                                        installed.extend(scan_disabled_mods(disabled_path));
-                                    }
-                                    crate::mod_sources::enrich_mods_with_sources(
-                                        &mut installed,
-                                        &config_path,
-                                    );
-                                    crate::mod_versions::enrich_mods_with_versions(
-                                        &mut installed,
-                                        &config_path,
-                                    );
-                                    let profiles = crate::profiles::list_profiles(&profiles_path);
-                                    let anchor_ids: Vec<String> =
-                                        [existing.mod_version_id.clone(), Some(id.clone())]
-                                            .into_iter()
-                                            .flatten()
-                                            .collect();
-                                    let _ = crate::mod_versions::prune_cached_versions_around(
-                                        &config_path,
-                                        &cache_path,
-                                        &installed,
-                                        &profiles,
-                                        &anchor_ids,
-                                        &[id],
-                                    );
-                                }
-                                Ok(staged)
-                            })(
-                            );
+                            })();
 
-                            match cache_result {
-                                Ok(mod_info) => {
+                            match promote_result {
+                                Ok(outcome) => {
+                                    let mod_info = outcome.mod_info;
                                     let incompatible = incompatible_install_payload(
                                         &mod_info,
                                         game_version.as_deref(),
                                     );
                                     log::info!(
-                                        "Downloads watcher: cached '{}' from {} as an available version for existing '{}'",
+                                        "Downloads watcher: promoted '{}' from {} as the Library version for existing '{}'",
                                         mod_info.name,
                                         file_name,
                                         existing.name
+                                    );
+                                    crate::mod_sources::emit_configs_lost(
+                                        &app,
+                                        &mod_info.name,
+                                        &outcome.lost_configs,
                                     );
                                     let _ = app.emit(
                                         "mod-auto-installed",
@@ -386,14 +364,14 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                             mod_id: mod_info.mod_id,
                                             file_name,
                                             replaced: Some(existing.name.clone()),
-                                            preserved_configs: Vec::new(),
+                                            preserved_configs: outcome.preserved_configs,
                                             incompatible,
                                         },
                                     );
                                 }
                                 Err(e) => {
                                     log::error!(
-                                        "Downloads watcher: failed to cache {}: {}",
+                                        "Downloads watcher: failed to promote {}: {}",
                                         file_name,
                                         e
                                     );

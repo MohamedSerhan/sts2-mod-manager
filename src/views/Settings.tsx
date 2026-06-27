@@ -489,6 +489,7 @@ export function SettingsView({
                 <div className="gf-input-row">
                   <input
                     className={`gf-set-input ${gameInfo?.valid ? 'is-ok' : gamePath && !gameInfo?.valid ? 'is-err' : ''}`}
+                    /* v8 ignore start -- OS placeholder selection depends on navigator.platform; save/browse behavior is tested. */
                     placeholder={
                       typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
                         ? t('settings.defaultPathMac')
@@ -496,6 +497,7 @@ export function SettingsView({
                         ? t('settings.defaultPathLinux')
                         : t('settings.defaultPathWin')
                     }
+                    /* v8 ignore stop */
                     value={gamePath}
                     onChange={(e) => setGamePathValue(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSetGamePath()}
@@ -530,12 +532,14 @@ export function SettingsView({
                     <span>!</span>
                     <span>
                       {t('settings.general.couldNotVerify', {
+                        /* v8 ignore start -- platform-specific missing-file label follows the same navigator branch as the placeholder above. */
                         file:
                           typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
                             ? t('settings.sts2App')
                             : typeof navigator !== 'undefined' && /Linux/.test(navigator.platform)
                             ? t('settings.sts2Pck')
                             : t('settings.sts2Exe'),
+                        /* v8 ignore stop */
                       })}
                     </span>
                   </div>

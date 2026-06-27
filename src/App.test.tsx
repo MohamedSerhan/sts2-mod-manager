@@ -33,7 +33,8 @@ import App from './App';
 import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from './__test__/setup';
 import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from './lib/installPolicy';
 import { ROW_MENU_OPEN_EVENT } from './lib/rowMenuConfig';
-import { NAVIGATION_LAYOUT_STORAGE_KEY } from './display/navigationLayout';
+import { NAVIGATION_LAYOUT_CHANGE_EVENT, NAVIGATION_LAYOUT_STORAGE_KEY } from './display/navigationLayout';
+import type { LaunchHealthReport } from './types';
 
 // Stub getCurrentWindow used by the top-bar (move/minimize/etc.) so the
 // App shell can mount in jsdom without throwing. The fns are shared
@@ -100,6 +101,30 @@ describe('<App>', () => {
     return nav as HTMLButtonElement;
   }
 
+  function getTopBarLaunchButton(): HTMLButtonElement {
+    const launchBtn = screen.getAllByRole('button').find(
+      (b) => /^Launch/.test(b.textContent?.trim() ?? '') && !/Vanilla/i.test(b.textContent ?? ''),
+    );
+    if (!launchBtn) throw new Error('No top-bar modded launch button found');
+    return launchBtn as HTMLButtonElement;
+  }
+
+  function launchHealthReport(overrides: Partial<LaunchHealthReport> = {}): LaunchHealthReport {
+    return {
+      active_profile_id: null,
+      active_profile_name: null,
+      current_game_version: null,
+      last_launch_game_version: null,
+      profile_game_version: null,
+      game_version_changed_since_last_launch: false,
+      profile_game_version_changed: false,
+      known_incompatible_mods: [],
+      dependency_blocked_mods: [],
+      previous_failed_mods: [],
+      ...overrides,
+    };
+  }
+
   it('renders the four primary nav items (1.7.0 IA collapse)', async () => {
     // 1.7.0 — sidebar shrunk from 7 items to 4. Browse Mods became a
     // tab inside Library; Browse Modpacks became a tab inside Modpacks;
@@ -154,6 +179,34 @@ describe('<App>', () => {
     labels = Array.from(nav!.querySelectorAll('.gf-nav-label'))
       .map((el) => el.textContent?.trim() ?? '');
     expect(labels).toEqual(['Home', 'Modpacks', 'Mod Library', 'Settings']);
+  });
+
+  it('reacts to runtime navigation layout changes from Settings', async () => {
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument();
+    });
+    expect(document.querySelector('.gf-topnav')).not.toBeNull();
+    expect(document.querySelector('.gf-sidebar')).toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(NAVIGATION_LAYOUT_CHANGE_EVENT, {
+        detail: { value: 'sidebar' },
+      }));
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.gf-sidebar')).not.toBeNull();
+    });
+
+    localStorage.setItem(NAVIGATION_LAYOUT_STORAGE_KEY, 'topbar');
+    act(() => {
+      window.dispatchEvent(new CustomEvent(NAVIGATION_LAYOUT_CHANGE_EVENT, {
+        detail: { value: 'not-a-real-layout' },
+      }));
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.gf-topnav')).not.toBeNull();
+    });
   });
 
   it('clicking Library nav swaps the body to the Library (Installed) view', async () => {
@@ -358,6 +411,365 @@ describe('<App>', () => {
     });
   });
 
+  it('Launch opens the health modal and does not launch when failed active mods are reported', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      active_profile_name: 'TesterW',
+      current_game_version: '0.105.0',
+      last_launch_game_version: '0.104.0',
+      game_version_changed_since_last_launch: true,
+      previous_failed_mods: [{
+        name: 'CardsAndRelicsChooser',
+        display_name: 'Cards and Relics Chooser',
+        version: '1.2.3',
+        folder_name: 'CardsAndRelicsChooser',
+        mod_id: null,
+        reasons: ['assembly_init'],
+      }],
+    }));
+    registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+
+    expect(await screen.findByText('Review 1 mod that failed last launch')).toBeInTheDocument();
+    expect(screen.getByText('Cards and Relics Chooser')).toBeInTheDocument();
+    expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(false);
+  });
+
+  it('Launch shows missing dependencies and does not launch when active mods are dependency-blocked', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      dependency_blocked_mods: [{
+        name: 'Miyu_character',
+        display_name: 'Miyu Character',
+        version: '1.0.0',
+        folder_name: 'Miyu_character',
+        mod_id: 'Miyu_character',
+        missing_dependencies: ['STS2-RitsuLib'],
+      }],
+    }));
+    registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+
+    expect(await screen.findByText('Review 1 mod with missing dependencies')).toBeInTheDocument();
+    expect(screen.getByText('Missing dependencies')).toBeInTheDocument();
+    expect(screen.getByText('Miyu Character')).toBeInTheDocument();
+    expect(screen.getByText('missing STS2-RitsuLib')).toBeInTheDocument();
+    expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(false);
+  });
+
+  it('Store blocked mods and launch resolves blockers, refreshes, rechecks, then launches', async () => {
+    let healthChecks = 0;
+    registerInvokeHandler('get_launch_health', () => {
+      healthChecks += 1;
+      return launchHealthReport(healthChecks === 1 ? {
+        previous_failed_mods: [{
+          name: 'BrokenMod',
+          display_name: 'Broken Mod',
+          version: '2.0.0',
+          folder_name: 'BrokenMod',
+          mod_id: 'broken.mod',
+          reasons: ['reflection_type_load'],
+        }],
+      } : {});
+    });
+    registerInvokeHandler('resolve_launch_health_blockers', () => ({
+      active_profile_id: 'profile-1',
+      moved: [{ name: 'BrokenMod', folder_name: 'BrokenMod', mod_id: 'broken.mod', destination: 'mods_disabled/BrokenMod' }],
+      disabled_profile_entries: [{ name: 'BrokenMod', folder_name: 'BrokenMod', mod_id: 'broken.mod', destination: null }],
+      failed: [],
+    }));
+    registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+    await user.click(await screen.findByRole('button', { name: /Store blocked mods and launch/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'resolve_launch_health_blockers')).toBe(true);
+      expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(true);
+    });
+    expect(healthChecks).toBeGreaterThanOrEqual(2);
+  });
+
+  it('Store blocked mods keeps the modal open and does not launch if blockers remain after recovery', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      dependency_blocked_mods: [{
+        name: 'Miyu_character',
+        display_name: 'Miyu Character',
+        version: '1.0.0',
+        folder_name: 'Miyu_character',
+        mod_id: 'Miyu_character',
+        missing_dependencies: ['STS2-RitsuLib'],
+      }],
+    }));
+    registerInvokeHandler('resolve_launch_health_blockers', () => ({
+      active_profile_id: 'profile-1',
+      moved: [],
+      disabled_profile_entries: [],
+      failed: [],
+    }));
+    registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+    await user.click(await screen.findByRole('button', { name: /Store blocked mods and launch/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'resolve_launch_health_blockers')).toBe(true);
+    });
+    expect(screen.getByText('Miyu Character')).toBeInTheDocument();
+    expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(false);
+  });
+
+  it('Launch anyway bypasses a launch-health warning', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      active_profile_name: 'TesterW',
+      current_game_version: '0.105.0',
+      last_launch_game_version: '0.104.0',
+      game_version_changed_since_last_launch: true,
+    }));
+    registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+    await user.click(await screen.findByRole('button', { name: /Launch anyway/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(true);
+    });
+  });
+
+  it('Launch health treats omitted blocker arrays as empty compatibility payloads', async () => {
+    registerInvokeHandler('get_launch_health', () => ({
+      ...launchHealthReport({
+        active_profile_name: 'TesterW',
+        current_game_version: '0.105.0',
+        profile_game_version: '0.104.0',
+        profile_game_version_changed: true,
+      }),
+      previous_failed_mods: undefined,
+      known_incompatible_mods: undefined,
+      dependency_blocked_mods: undefined,
+    }));
+    registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+
+    expect(await screen.findByRole('dialog', { name: /STS2 changed since this pack last launched/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Store blocked mods and launch/i })).toBeNull();
+  });
+
+  it('Launch health Review in Library dismisses the modal and routes to the Library', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      previous_failed_mods: [{
+        name: 'BrokenMod',
+        display_name: null,
+        version: '2.0.0',
+        folder_name: 'BrokenMod',
+        mod_id: 'broken.mod',
+        reasons: ['reflection_type_load'],
+      }],
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+    await user.click(await screen.findByRole('button', { name: /Review in Library/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/All installed mods/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Review 1 mod that failed last launch/i)).not.toBeInTheDocument();
+  });
+
+  it('Launch health Cancel dismisses the modal without launching', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      known_incompatible_mods: [{
+        name: 'FutureMod',
+        display_name: null,
+        version: '1.0.0',
+        folder_name: 'FutureMod',
+        mod_id: null,
+        min_game_version: '0.200.0',
+      }],
+    }));
+    registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+    expect(await screen.findByText(/Review 1 mod that needs a newer STS2 build/i)).toBeInTheDocument();
+    const cancelButton = screen
+      .getAllByRole('button', { name: /^Cancel$/i })
+      .find((button) => button.textContent?.trim() === 'Cancel');
+    expect(cancelButton).toBeDefined();
+    await user.click(cancelButton!);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Review 1 mod that needs a newer STS2 build/i)).not.toBeInTheDocument();
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(false);
+  });
+
+  it('Store blocked mods reports partial recovery failures and keeps the updated modal open', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      dependency_blocked_mods: [{
+        name: 'StillBroken',
+        display_name: null,
+        version: '1.0.0',
+        folder_name: 'StillBroken',
+        mod_id: 'StillBroken',
+        missing_dependencies: ['BaseLib'],
+      }],
+    }));
+    registerInvokeHandler('resolve_launch_health_blockers', () => ({
+      active_profile_id: 'profile-1',
+      moved: [{ name: 'OldBroken', folder_name: 'OldBroken', mod_id: 'OldBroken', destination: 'mods_disabled/OldBroken' }],
+      disabled_profile_entries: [],
+      failed: [{ name: 'StillBroken', folder_name: 'StillBroken', mod_id: 'StillBroken', error: 'locked' }],
+    }));
+    registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+    await user.click(await screen.findByRole('button', { name: /Store blocked mods and launch/i }));
+
+    expect(await screen.findByText(/Some blocked mods could not be stored: StillBroken/i)).toBeInTheDocument();
+    expect(screen.getByText('StillBroken')).toBeInTheDocument();
+    expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(false);
+  });
+
+  it('Store blocked mods surfaces resolver failures without closing the modal', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      previous_failed_mods: [{
+        name: 'BrokenMod',
+        display_name: null,
+        version: '2.0.0',
+        folder_name: 'BrokenMod',
+        mod_id: 'broken.mod',
+        reasons: ['reflection_type_load'],
+      }],
+    }));
+    registerInvokeHandler('resolve_launch_health_blockers', () => {
+      throw new Error('disk locked');
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+    await user.click(await screen.findByRole('button', { name: /Store blocked mods and launch/i }));
+
+    expect(await screen.findByText(/Couldn't store blocked mods: disk locked/i)).toBeInTheDocument();
+    expect(screen.getByText('BrokenMod')).toBeInTheDocument();
+  });
+
+  it('Launch falls back to launching when the health check itself fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    registerInvokeHandler('get_launch_health', () => {
+      throw new Error('health unavailable');
+    });
+    registerInvokeHandler('launch_game', () => true);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(true);
+    });
+    warn.mockRestore();
+  });
+
+  it('Launch health previews long blocker lists and shows hidden counts', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      active_profile_name: 'Big Pack',
+      current_game_version: '0.105.0',
+      profile_game_version: '0.104.0',
+      profile_game_version_changed: true,
+      dependency_blocked_mods: Array.from({ length: 9 }, (_, index) => ({
+        name: `Blocked${index + 1}`,
+        display_name: index === 0 ? 'Display Blocked 1' : null,
+        version: '1.0.0',
+        folder_name: `Blocked${index + 1}`,
+        mod_id: `Blocked${index + 1}`,
+        missing_dependencies: ['BaseLib', 'RitsuLib'],
+      })),
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(getTopBarLaunchButton());
+
+    expect(await screen.findByText(/Review 9 mods with missing dependencies/i)).toBeInTheDocument();
+    expect(screen.getByText('Display Blocked 1')).toBeInTheDocument();
+    expect(screen.queryByText('Blocked9')).not.toBeInTheDocument();
+    expect(screen.getByText('+1 more')).toBeInTheDocument();
+    expect(screen.getByText(/Big Pack was last used with a different STS2 build/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/missing BaseLib, RitsuLib/i).length).toBeGreaterThan(0);
+  });
+
+  it('Ctrl+L uses launch health before modded launch', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      known_incompatible_mods: [{
+        name: 'FutureMod',
+        display_name: 'Future Mod',
+        version: '1.0.0',
+        folder_name: 'FutureMod',
+        mod_id: null,
+        min_game_version: '0.200.0',
+      }],
+    }));
+    registerInvokeHandler('launch_game', () => true);
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true }));
+
+    expect(await screen.findByText('Review 1 mod that needs a newer STS2 build')).toBeInTheDocument();
+    expect(getInvokeCalls().some((c) => c.cmd === 'launch_game')).toBe(false);
+  });
+
+  it('Vanilla launch bypasses launch health', async () => {
+    registerInvokeHandler('get_launch_health', () => launchHealthReport({
+      game_version_changed_since_last_launch: true,
+    }));
+    registerInvokeHandler('launch_vanilla', () => true);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    const vanillaBtn = screen.getAllByRole('button').find((b) => /Vanilla.*no mods/i.test(b.textContent ?? ''));
+    expect(vanillaBtn).toBeDefined();
+
+    await user.click(vanillaBtn!);
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'launch_vanilla')).toBe(true);
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'get_launch_health')).toBe(false);
+  });
+
   it('top-bar modded launch records the active modpack by stable id', async () => {
     registerInvokeHandler('get_active_profile', () => 'Stable');
     registerInvokeHandler('get_active_profile_id', () => 'profile-stable');
@@ -389,6 +801,36 @@ describe('<App>', () => {
       const map = JSON.parse(localStorage.getItem('sts2mm-modpack-launches') ?? '{}');
       expect(map['profile-stable']).toBeGreaterThan(1000);
       expect(map.Stable).toBeUndefined();
+    });
+  });
+
+  it('shows the active modpack display name instead of its UUID in the app chrome and Home hero', async () => {
+    const uuid = '731aeaec-7f3d-4859-baec-16219701e2e7';
+    registerInvokeHandler('get_active_profile', () => uuid);
+    registerInvokeHandler('get_active_profile_id', () => uuid);
+    registerInvokeHandler('list_profiles_cmd', () => [{
+      id: uuid,
+      name: 'TesterW',
+      mods: [{ name: 'BaseLib', enabled: true }],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      created_by: null,
+      game_version: null,
+    }]);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('TesterW').length).toBeGreaterThan(0);
+    });
+    expect(document.body.textContent).not.toContain(uuid);
+    await waitFor(() => {
+      const launchBtn = screen.getAllByRole('button').find(
+        (b) => /^Launch/.test(b.textContent?.trim() ?? '') && !/Vanilla/i.test(b.textContent ?? ''),
+      );
+      expect(launchBtn).toBeDefined();
+      expect(launchBtn).toHaveAttribute('title', expect.stringContaining('TesterW'));
+      expect(launchBtn).not.toHaveAttribute('title', expect.stringContaining(uuid));
     });
   });
 
@@ -619,9 +1061,10 @@ describe('<App>', () => {
     expect(getInvokeCalls().some((c) => c.cmd === 'install_mod_from_file')).toBe(false);
   }, 10000);
 
-  it('dropping a zip when NOT viewing a modpack just installs it (no membership change)', async () => {
-    registerInvokeHandler('install_mod_from_file', () => ({
-      name: 'LooseMod', version: '1.0', description: '', enabled: true, files: [],
+  it('dropping supported archives when NOT viewing a modpack just installs them (no membership change)', async () => {
+    registerInvokeHandler('install_mod_from_file', (args) => ({
+      name: args?.path?.includes('rar') ? 'LooseRar' : args?.path?.includes('7z') ? 'Loose7z' : 'LooseMod',
+      version: '1.0', description: '', enabled: true, files: [],
       source: null, hash: null, dependencies: [], size_bytes: 0,
       folder_name: 'LooseMod', mod_id: 'LooseMod', github_url: null, nexus_url: null,
       pinned: false, min_game_version: null, author: null, tags: [],
@@ -630,13 +1073,22 @@ describe('<App>', () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     // On Home (no modpack open) — drop a zip via Tauri's native event.
-    await fireTauriEvent('tauri://drag-drop', { paths: ['C:/loose.zip'] });
+    await fireTauriEvent('tauri://drag-drop', {
+      paths: ['C:/loose.zip', 'C:/loose.7z', 'C:/loose.rar', 'C:/notes.txt'],
+    });
 
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/loose.zip',
       )).toBe(true);
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/loose.7z',
+      )).toBe(true);
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'install_mod_from_file' && c.args?.path === 'C:/loose.rar',
+      )).toBe(true);
     });
+    expect(screen.getByText(/Unsupported file: notes.txt/i)).toBeInTheDocument();
     // No pack is being viewed, so it must not touch membership.
     expect(getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership')).toBe(false);
   });
@@ -962,7 +1414,7 @@ describe('<App>', () => {
     expect(screen.queryByText(/auto-installed from stats\.zip/i)).toBeNull();
   });
 
-  it('mod-auto-installed event with incompatible cached update warns with a game-version fallback', async () => {
+  it('mod-auto-installed event with incompatible promoted update warns with a game-version fallback', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
     await fireTauriEvent('mod-auto-installed', {
@@ -1343,24 +1795,44 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
 
     const root = container.firstElementChild as HTMLElement;
-    const appendAnchor = (href: string, text: string, configure?: (anchor: HTMLAnchorElement) => void) => {
+    const appendAnchor = (
+      href: string,
+      text: string,
+      configure?: (anchor: HTMLAnchorElement) => void,
+      preventDefault = false,
+    ) => {
       const anchor = document.createElement('a');
       anchor.setAttribute('href', href);
       anchor.textContent = text;
-      anchor.addEventListener('click', (event) => event.preventDefault());
+      if (preventDefault) {
+        anchor.addEventListener('click', (event) => event.preventDefault());
+      }
       configure?.(anchor);
       root.appendChild(anchor);
       return anchor;
     };
 
+    const preventedAnchor = appendAnchor('https://example.test/prevented', 'prevented');
+    const preventedEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+    preventedEvent.preventDefault();
+    preventedAnchor.dispatchEvent(preventedEvent);
     fireEvent.click(appendAnchor('https://example.test/modified', 'modified'), { ctrlKey: true });
+    fireEvent.click(appendAnchor('https://example.test/right-click', 'right-click'), { button: 1 });
     fireEvent.click(appendAnchor('https://example.test/download', 'download', (a) => {
       a.setAttribute('download', '');
     }));
+    fireEvent.click(root);
+    fireEvent.click(appendAnchor('', 'empty'));
     fireEvent.click(appendAnchor('http://[invalid', 'invalid'));
     fireEvent.click(appendAnchor('sts2mm://profile/demo', 'internal'));
 
     expect(openUrl).not.toHaveBeenCalled();
+
+    fireEvent.click(appendAnchor('mailto:tester@example.com', 'mail'));
+    await waitFor(() => {
+      expect(openUrl).toHaveBeenCalledWith('mailto:tester@example.com');
+    });
+    openUrl.mockClear();
 
     openUrl.mockRejectedValueOnce(new Error('no browser'));
     fireEvent.click(appendAnchor('https://example.test/fail', 'fail'));
@@ -2189,6 +2661,77 @@ describe('<App>', () => {
     await user.click(openModpacks);
     await waitFor(() => {
       expect(screen.getByText(/All the modpacks you follow/i)).toBeInTheDocument();
+    });
+  });
+
+  it("Home's empty-state Browse CTA routes to the Modpacks Browse tab", async () => {
+    registerInvokeHandler('get_active_profile', () => null);
+    registerInvokeHandler('get_subscriptions', () => []);
+    registerInvokeHandler('list_profiles_cmd', () => []);
+    registerInvokeHandler('fetch_modpack_browser_page', () => ({
+      cards: [],
+      page: 1,
+      has_next_page: false,
+      stale: false,
+      fetched_at: Math.floor(Date.now() / 1000),
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(await screen.findByRole('button', { name: /^Browse modpacks$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Browse Modpacks' })).toBeInTheDocument();
+    });
+  });
+
+  it("Home's active-pack Create modpack shortcut opens the guided wizard", async () => {
+    registerInvokeHandler('get_active_profile', () => 'Solo Pack');
+    registerInvokeHandler('get_active_profile_id', () => 'solo-id');
+    registerInvokeHandler('get_installed_mods', () => [{
+      name: 'BaseLib',
+      version: '1.0.0',
+      enabled: true,
+      files: [],
+      source: null,
+      hash: null,
+      dependencies: [],
+      size_bytes: 0,
+      folder_name: 'BaseLib',
+      mod_id: 'BaseLib',
+      github_url: null,
+      nexus_url: null,
+      pinned: false,
+      min_game_version: null,
+      author: null,
+      tags: [],
+      display_name: null,
+      display_description: null,
+    }]);
+    registerInvokeHandler('list_profiles_cmd', () => [
+      {
+        id: 'solo-id',
+        name: 'Solo Pack',
+        game_version: null,
+        created_by: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        mods: [],
+      },
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ profile_id: 'solo-id', profile_name: 'Solo Pack', editable: true }],
+      mods: [],
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    await user.click(await screen.findByRole('button', { name: /^Create modpack$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Cancel$/i })).toBeInTheDocument();
     });
   });
 

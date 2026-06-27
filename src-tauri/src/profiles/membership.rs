@@ -17,6 +17,7 @@
 //!   `sync_profile_load_order_to_settings` mirror the chosen order
 //!   into the game's `settings.save` so the engine respects it on
 //!   next launch.
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -32,8 +33,8 @@ use super::apply::disk_mod_matches_pin;
 use super::crud::{
     hide_app_created_by, installed_mod_matches_target, list_profiles, load_profile, mod_key,
     profile_has_json, profile_is_edit_locked, profile_mod_from_installed,
-    profile_mod_matches_installed, profile_mod_matches_installed_with_registry,
-    profile_mod_matches_installed_with_version_db, profile_mod_matches_target, save_profile,
+    profile_mod_matches_installed_with_registry, profile_mod_matches_installed_with_version_db,
+    profile_mod_matches_target, save_profile,
 };
 use super::{
     LoadOrderSettingsStatus, Profile, ProfileMembershipGrid, ProfileMembershipMod,
@@ -75,7 +76,7 @@ pub(crate) fn profile_membership_matrix(
         &version_db,
         cache_path,
     );
-    let mods = installed_mods
+    let mut mods: Vec<ProfileMembershipMod> = installed_mods
         .iter()
         .map(|installed| {
             let states = profiles
@@ -105,6 +106,17 @@ pub(crate) fn profile_membership_matrix(
                 display_name: installed.display_name.clone(),
                 bundle_members: installed.bundle_members.clone(),
                 bundle_member_ids: installed.bundle_member_ids.clone(),
+                installed: true,
+                cached: installed
+                    .mod_version_id
+                    .as_deref()
+                    .and_then(|id| {
+                        version_db
+                            .records
+                            .get(crate::mod_versions::resolve_alias(&version_db, id))
+                    })
+                    .and_then(|record| crate::mod_versions::cached_record_path(cache_path, record))
+                    .is_some(),
                 installed_enabled: installed.enabled,
                 version_options: installed
                     .mod_version_id
@@ -115,6 +127,70 @@ pub(crate) fn profile_membership_matrix(
             }
         })
         .collect();
+
+    let mut installed_match_ids = HashSet::new();
+    for profile in &profiles {
+        for pm in &profile.mods {
+            if installed_mods.iter().any(|installed| {
+                profile_mod_matches_installed_with_version_db(pm, installed, &version_db)
+            }) {
+                continue;
+            }
+            let Some(record) = crate::mod_versions::record_for_profile_mod_in_db(pm, &version_db)
+            else {
+                continue;
+            };
+            if crate::mod_versions::cached_record_path(cache_path, &record).is_some() {
+                installed_match_ids.insert(record.id);
+            }
+        }
+    }
+
+    for record_id in installed_match_ids {
+        let Some(record) = version_db.records.get(&record_id) else {
+            continue;
+        };
+        let states = profiles
+            .iter()
+            .zip(profile_rows.iter())
+            .map(|(profile, profile_row)| {
+                let matched = profile.mods.iter().enumerate().find(|(_, pm)| {
+                    crate::mod_versions::record_for_profile_mod_in_db(pm, &version_db)
+                        .is_some_and(|profile_record| profile_record.id == record_id)
+                });
+                ProfileMembershipState {
+                    profile_id: profile.id.clone(),
+                    profile_name: profile.name.clone(),
+                    included: matched.is_some(),
+                    enabled: matched.map(|(_, pm)| pm.enabled).unwrap_or(false),
+                    editable: profile_row.editable,
+                    order_index: matched.map(|(index, _)| index),
+                }
+            })
+            .collect();
+
+        mods.push(ProfileMembershipMod {
+            mod_version_id: Some(record.id.clone()),
+            name: record.name.clone(),
+            version: record
+                .source_version
+                .clone()
+                .unwrap_or_else(|| record.version.clone()),
+            folder_name: record.folder_name.clone(),
+            mod_id: record.mod_id.clone(),
+            display_name: None,
+            bundle_members: Vec::new(),
+            bundle_member_ids: record.bundle_member_ids.clone(),
+            installed: false,
+            cached: true,
+            installed_enabled: false,
+            version_options: version_options_by_id
+                .get(&record.id)
+                .cloned()
+                .unwrap_or_default(),
+            profiles: states,
+        });
+    }
 
     Ok(ProfileMembershipGrid {
         profiles: profile_rows,
@@ -143,6 +219,7 @@ pub(crate) fn set_profile_mod_membership_from_paths(
     }
 
     let mut profile = load_profile(profile_name, profiles_path)?;
+    let version_db = crate::mod_versions::load(config_path);
 
     if included {
         let source_hint = source_hint.and_then(crate::mod_sources::parse_source_url);
@@ -159,7 +236,14 @@ pub(crate) fn set_profile_mod_membership_from_paths(
         let installed = installed_mods
             .iter()
             .find(|m| {
-                installed_mod_matches_target(m, mod_name, mod_version_id, folder_name, mod_id)
+                installed_mod_matches_target_with_version_db(
+                    m,
+                    mod_name,
+                    mod_version_id,
+                    folder_name,
+                    mod_id,
+                    &version_db,
+                )
             })
             .or_else(|| {
                 if source_match_count != 1 {
@@ -178,36 +262,44 @@ pub(crate) fn set_profile_mod_membership_from_paths(
                 ))
             })?;
         let next_entry = profile_mod_from_installed(installed);
-        let existing_index = profile
-            .mods
-            .iter()
-            .position(|pm| {
-                profile_mod_matches_target(pm, mod_name, mod_version_id, folder_name, mod_id)
-            })
-            .or_else(|| {
-                if source_match_count != 1 {
-                    return None;
-                }
-                source_hint.as_ref().and_then(|hint| {
-                    let matches = profile
-                        .mods
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, pm)| {
-                            crate::mod_sources::profile_source_matches_entry(
-                                pm.source.as_deref(),
-                                hint,
-                            )
-                        })
-                        .map(|(index, _)| index)
-                        .collect::<Vec<_>>();
-                    if matches.len() == 1 {
-                        Some(matches[0])
-                    } else {
-                        None
-                    }
+        let existing_index =
+            profile_mod_target_indexes(&profile, mod_name, mod_version_id, folder_name, mod_id)
+                .into_iter()
+                .next()
+                .or_else(|| {
+                    profile.mods.iter().enumerate().find_map(|(index, pm)| {
+                        if profile_mod_matches_installed_with_version_db(pm, installed, &version_db)
+                        {
+                            Some(index)
+                        } else {
+                            None
+                        }
+                    })
                 })
-            });
+                .or_else(|| {
+                    if source_match_count != 1 {
+                        return None;
+                    }
+                    source_hint.as_ref().and_then(|hint| {
+                        let matches = profile
+                            .mods
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, pm)| {
+                                crate::mod_sources::profile_source_matches_entry(
+                                    pm.source.as_deref(),
+                                    hint,
+                                )
+                            })
+                            .map(|(index, _)| index)
+                            .collect::<Vec<_>>();
+                        if matches.len() == 1 {
+                            Some(matches[0])
+                        } else {
+                            None
+                        }
+                    })
+                });
         if let Some(index) = existing_index {
             let existing = &mut profile.mods[index];
             *existing = next_entry;
@@ -215,14 +307,78 @@ pub(crate) fn set_profile_mod_membership_from_paths(
             profile.mods.push(next_entry);
         }
     } else {
-        profile.mods.retain(|pm| {
-            !profile_mod_matches_target(pm, mod_name, mod_version_id, folder_name, mod_id)
+        let remove_indexes =
+            profile_mod_target_indexes(&profile, mod_name, mod_version_id, folder_name, mod_id);
+        let mut index = 0usize;
+        profile.mods.retain(|_| {
+            let keep = !remove_indexes.contains(&index);
+            index += 1;
+            keep
         });
     }
 
+    crate::profiles::collapse_equivalent_profile_mods(&mut profile, &version_db);
     profile.updated_at = chrono::Utc::now();
     save_profile(&profile, profiles_path)?;
     Ok(hide_app_created_by(profile))
+}
+
+fn installed_mod_matches_target_with_version_db(
+    installed: &ModInfo,
+    name: &str,
+    mod_version_id: Option<&str>,
+    folder_name: Option<&str>,
+    mod_id: Option<&str>,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> bool {
+    if installed_mod_matches_target(installed, name, mod_version_id, folder_name, mod_id) {
+        return true;
+    }
+    let Some(target_id) = mod_version_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return false;
+    };
+    installed
+        .mod_version_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .is_some_and(|installed_id| {
+            crate::mod_versions::ids_equivalent_in_db(version_db, target_id, installed_id)
+        })
+}
+
+fn profile_mod_target_indexes(
+    profile: &Profile,
+    mod_name: &str,
+    mod_version_id: Option<&str>,
+    folder_name: Option<&str>,
+    mod_id: Option<&str>,
+) -> Vec<usize> {
+    let exact = profile
+        .mods
+        .iter()
+        .enumerate()
+        .filter_map(|(index, pm)| {
+            if profile_mod_matches_target(pm, mod_name, mod_version_id, folder_name, mod_id) {
+                Some(index)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if !exact.is_empty() {
+        return exact;
+    }
+
+    unique_profile_mod_index(profile.mods.iter().enumerate().filter_map(|(index, pm)| {
+        if profile_mod_matches_stable_target(pm, mod_name, folder_name, mod_id) {
+            Some(index)
+        } else {
+            None
+        }
+    }))
+    .map(|index| vec![index])
+    .unwrap_or_default()
 }
 
 pub(crate) fn select_profile_mod_version_from_paths(
@@ -254,10 +410,12 @@ pub(crate) fn select_profile_mod_version_from_paths(
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
     crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
+    let version_db = crate::mod_versions::load(config_path);
 
     let index = find_profile_mod_for_version_switch(
         &profile,
         &installed_mods,
+        &version_db,
         current_name,
         current_mod_version_id,
         current_folder_name,
@@ -272,12 +430,13 @@ pub(crate) fn select_profile_mod_version_from_paths(
 
     let enabled = profile.mods[index].enabled;
     let selected_installed = installed_mods.iter().find(|m| {
-        installed_mod_matches_target(
+        installed_mod_matches_target_with_version_db(
             m,
             selected_name,
             selected_mod_version_id,
             selected_folder_name,
             selected_mod_id,
+            &version_db,
         )
     });
     let selected_for_profile = if apply_to_disk {
@@ -299,6 +458,7 @@ pub(crate) fn select_profile_mod_version_from_paths(
         let mut entry = crate::mod_versions::profile_mod_from_record(id, cache_path, config_path)?;
         entry.enabled = enabled;
         profile.mods[index] = entry;
+        crate::profiles::collapse_equivalent_profile_mods(&mut profile, &version_db);
         profile.updated_at = chrono::Utc::now();
         save_profile(&profile, profiles_path)?;
         prune_after_version_selection(
@@ -324,6 +484,7 @@ pub(crate) fn select_profile_mod_version_from_paths(
     let mut next_entry = profile_mod_from_installed(&selected_for_profile);
     next_entry.enabled = enabled;
     profile.mods[index] = next_entry;
+    crate::profiles::collapse_equivalent_profile_mods(&mut profile, &version_db);
     profile.updated_at = chrono::Utc::now();
     save_profile(&profile, profiles_path)?;
     prune_after_version_selection(
@@ -348,6 +509,7 @@ pub(crate) fn select_profile_mod_version_from_paths(
 fn find_profile_mod_for_version_switch(
     profile: &Profile,
     installed_mods: &[ModInfo],
+    version_db: &crate::mod_versions::ModVersionsDb,
     current_name: &str,
     current_mod_version_id: Option<&str>,
     current_folder_name: Option<&str>,
@@ -387,6 +549,18 @@ fn find_profile_mod_for_version_switch(
             })
             .or_else(|| {
                 installed_mods.iter().find(|m| {
+                    installed_mod_matches_target_with_version_db(
+                        m,
+                        current_name,
+                        current_mod_version_id,
+                        current_folder_name,
+                        current_mod_id,
+                        version_db,
+                    )
+                })
+            })
+            .or_else(|| {
+                installed_mods.iter().find(|m| {
                     installed_mod_matches_stable_target(
                         m,
                         current_name,
@@ -397,7 +571,7 @@ fn find_profile_mod_for_version_switch(
             })?;
 
         unique_profile_mod_index(profile.mods.iter().enumerate().filter_map(|(index, pm)| {
-            if profile_mod_matches_installed(pm, current_installed) {
+            if profile_mod_matches_installed_with_version_db(pm, current_installed, version_db) {
                 Some(index)
             } else {
                 None
@@ -1315,6 +1489,68 @@ mod profile_membership_tests {
     }
 
     #[test]
+    fn set_profile_mod_membership_replaces_alias_equivalent_profile_entry() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = game_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod_with_id(
+            &mods_path,
+            "RitsuLib",
+            "STS2-RitsuLib",
+            "RitsuLib (STS2 0.103.2 compat)",
+            "0.4.24",
+        );
+        let mut installed = scan_mods(&mods_path).into_iter().next().unwrap();
+        let canonical_id =
+            crate::mod_versions::ensure_mod_info_id(&mut installed, config_tmp.path()).unwrap();
+        crate::mod_versions::alias_shared_id("ritsu-alias", &mut installed, config_tmp.path())
+            .unwrap();
+
+        let mut profile = empty_profile("Pack");
+        let mut stale_alias =
+            profile_mod_entry("RitsuLib (STS2 0.103.2 compat)", "RitsuLib", "0.4.24", true);
+        stale_alias.mod_id = Some("STS2-RitsuLib".into());
+        stale_alias.mod_version_id = Some("ritsu-alias".into());
+        stale_alias.bundle_url = Some("https://example.test/stale.zip".into());
+        profile.mods.push(stale_alias);
+        save_profile(&profile, &profiles_path).unwrap();
+
+        let updated = set_profile_mod_membership_from_paths(
+            "Pack",
+            "RitsuLib (STS2 0.103.2 compat)",
+            Some(&canonical_id),
+            Some("RitsuLib"),
+            Some("STS2-RitsuLib"),
+            true,
+            None,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        assert_eq!(updated.mods.len(), 1);
+        assert_eq!(
+            updated.mods[0].mod_version_id.as_deref(),
+            Some(canonical_id.as_str())
+        );
+        assert_eq!(updated.mods[0].mod_id.as_deref(), Some("STS2-RitsuLib"));
+        let saved = load_profile("Pack", &profiles_path).unwrap();
+        assert_eq!(saved.mods.len(), 1);
+        assert_eq!(
+            saved.mods[0].mod_version_id.as_deref(),
+            Some(canonical_id.as_str())
+        );
+    }
+
+    #[test]
     fn selecting_bundle_version_moves_active_duplicate_member_ids_to_storage() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
@@ -1977,6 +2213,112 @@ mod profile_membership_tests {
     }
 
     #[test]
+    fn membership_matrix_lists_cached_profile_version_after_library_promotion() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "BaseLib", "BaseLib", "3.2.1");
+        let mut old_info = scan_mods(&mods_path)
+            .into_iter()
+            .find(|info| info.folder_name.as_deref() == Some("BaseLib"))
+            .unwrap();
+        let old_id = crate::mod_versions::ensure_mod_info_id(&mut old_info, config_tmp.path())
+            .expect("old version should get an artifact id");
+        assert!(
+            crate::mod_versions::cache_mod_version_by_id(
+                &mut old_info,
+                &mods_path,
+                cache_tmp.path(),
+                config_tmp.path(),
+            )
+            .is_some(),
+            "old promoted-away version must be cached"
+        );
+        let alias_id = "legacy-regent-source-version-id".to_string();
+        fs::rename(
+            crate::mod_versions::cache_path_for_id(cache_tmp.path(), &old_id),
+            crate::mod_versions::cache_path_for_id(cache_tmp.path(), &alias_id),
+        )
+        .unwrap();
+        let mut version_db = crate::mod_versions::load(config_tmp.path());
+        version_db
+            .records
+            .get_mut(&old_id)
+            .unwrap()
+            .aliases
+            .push(alias_id.clone());
+        version_db.aliases.insert(alias_id, old_id.clone());
+        crate::mod_versions::save(&version_db, config_tmp.path()).unwrap();
+        fs::remove_dir_all(mods_path.join("BaseLib")).unwrap();
+        write_mod(&mods_path, "BaseLib", "BaseLib", "3.3.1");
+
+        let mut profile = empty_profile("TesterW");
+        profile.mods.push(ProfileMod {
+            mod_version_id: Some(old_id.clone()),
+            name: "BaseLib".into(),
+            version: "3.2.1".into(),
+            source: None,
+            hash: old_info.hash.clone(),
+            files: old_info.files.clone(),
+            folder_name: Some("BaseLib".into()),
+            mod_id: Some("BaseLib".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        });
+        save_profile(&profile, &profiles_path).unwrap();
+
+        let grid = profile_membership_matrix(
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .unwrap();
+
+        let current_row = grid
+            .mods
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("BaseLib") && m.version == "3.3.1")
+            .unwrap();
+        assert!(current_row.installed);
+        assert!(current_row
+            .profiles
+            .iter()
+            .any(|p| p.profile_name == "TesterW" && !p.included));
+
+        let cached_row = grid
+            .mods
+            .iter()
+            .find(|m| m.mod_version_id.as_deref() == Some(old_id.as_str()))
+            .unwrap();
+        assert!(!cached_row.installed);
+        assert!(cached_row.cached);
+        assert_eq!(cached_row.version, "3.2.1");
+        assert!(cached_row
+            .profiles
+            .iter()
+            .any(|p| p.profile_name == "TesterW" && p.included));
+        assert!(
+            cached_row
+                .version_options
+                .iter()
+                .any(|option| option.version == "3.3.1"),
+            "cached profile row should still offer the promoted library version"
+        );
+    }
+
+    #[test]
     fn set_profile_mod_membership_removes_matching_folder_only() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
@@ -2036,6 +2378,56 @@ mod profile_membership_tests {
             .join("card_art_editor_v2")
             .join("card_art_editor_v2.dll")
             .exists());
+    }
+
+    #[test]
+    fn set_profile_mod_membership_removes_unique_stable_match_when_artifact_id_drifted() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut profile = empty_profile("Beta");
+        profile.mods.push(ProfileMod {
+            mod_version_id: Some("old-hellbandgirls-artifact".into()),
+            name: "HellBandGirls".into(),
+            version: "0.2.1".into(),
+            source: None,
+            hash: None,
+            files: vec!["HellBand/HellBandGirls.dll".into()],
+            folder_name: Some("HellBand".into()),
+            mod_id: Some("HellBand".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        });
+        save_profile(&profile, &profiles_path).unwrap();
+
+        let updated = set_profile_mod_membership_from_paths(
+            "Beta",
+            "HellBandGirls",
+            Some("new-hellbandgirls-artifact"),
+            Some("HellBand"),
+            Some("HellBand"),
+            false,
+            None,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        assert!(
+            updated.mods.is_empty(),
+            "removal must fall back to the unique folder/mod id when the installed artifact id changed"
+        );
     }
 
     #[test]

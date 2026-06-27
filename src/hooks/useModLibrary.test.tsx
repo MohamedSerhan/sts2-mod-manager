@@ -471,7 +471,7 @@ describe('useModLibrary', () => {
     expect(updateModCalls()).toHaveLength(1);
   });
 
-  it('handleInlineUpdate downloads a targeted modpack update without changing the manifest', async () => {
+  it('handleInlineUpdate promotes the Library update without changing the target pack manifest', async () => {
     const githubMod = makeMod({
       name: 'RelicsReminder',
       folder_name: 'RelicsReminder',
@@ -501,7 +501,7 @@ describe('useModLibrary', () => {
     expect(onTargetPackChanged).not.toHaveBeenCalled();
   });
 
-  it('bulk GitHub updates download versions, refresh version options, and leave the target pack manifest alone', async () => {
+  it('bulk GitHub updates promote Library versions, refresh version options, and leave the target pack manifest alone', async () => {
     registerInvokeHandler('update_all_mods', () => [
       makeMod({
         name: 'PackMod',

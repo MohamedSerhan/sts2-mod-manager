@@ -17,6 +17,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { HelpHint } from '../components/HelpHint';
 import { Select } from '../components/Select';
 import { BrowseView } from './Browse';
+import { profileDisplayName } from '../lib/profileDisplay';
 import {
   deleteAllMods,
   enableAllMods,
@@ -54,7 +55,7 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
   // installs here just land on disk (the All Mods list isn't pack-scoped).
   const lib = useModLibrary();
   const { mods, gameRunning, tableActionProps } = lib;
-  const { refreshMods, activeProfile } = useApp();
+  const { refreshMods, activeProfile, activeProfileId } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const [priorityTag, setPriorityTag] = useState('');
@@ -129,6 +130,10 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
   const totalCount = mods.length;
   const enabledCount = mods.filter((m) => m.enabled).length;
   const disabledCount = mods.filter((m) => !m.enabled).length;
+  const activeProfileKey = activeProfileId ?? activeProfile;
+  const activeProfileLabel = activeProfileKey
+    ? profileDisplayName(activeProfile, t('quickAdd.unknown'))
+    : null;
 
   return (
     <div className="gf-body">
@@ -241,13 +246,14 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
       )}
 
       {/* Library table — same row component the ModpackDetail view
-          uses. Pass `modpackName={activeProfile}` so when there's an
+          uses. Pass the active profile key so when there's an
           active modpack, the per-row checkbox column appears for
           quick add-to / remove-from membership editing; when no
           modpack is active, the table runs in no-focus mode (no
           checkboxes, no drag). */}
       <LibraryTable
-        modpackName={activeProfile}
+        modpackName={activeProfileKey}
+        modpackLabel={activeProfileLabel}
         priorityTag={priorityTag}
         reloadToken={`bulk:${bulkReloadNonce}|versions:${lib.versionOptionsReloadToken}`}
         {...tableActionProps}

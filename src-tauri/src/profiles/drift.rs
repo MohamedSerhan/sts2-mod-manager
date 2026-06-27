@@ -80,6 +80,7 @@ pub(super) fn compute_drift_for_profile(
     disabled_path: &Path,
     profiles_path: &Path,
     config_path: &Path,
+    cache_path: &Path,
 ) -> std::result::Result<ProfileDrift, String> {
     let profile = load_profile(name, profiles_path).map_err(|e| e.to_string())?;
     Ok(compute_profile_drift_with_registry(
@@ -87,6 +88,7 @@ pub(super) fn compute_drift_for_profile(
         mods_path,
         disabled_path,
         config_path,
+        Some(cache_path),
     ))
 }
 
@@ -99,7 +101,7 @@ pub(super) fn compute_profile_drift(
     let enabled_mods = crate::mods::scan_mods(mods_path);
     let disabled_mods = crate::mods::scan_disabled_mods(disabled_path);
 
-    compute_profile_drift_from_mods(profile, &enabled_mods, &disabled_mods, None)
+    compute_profile_drift_from_mods(profile, &enabled_mods, &disabled_mods, None, None)
 }
 
 fn compute_profile_drift_with_registry(
@@ -107,6 +109,7 @@ fn compute_profile_drift_with_registry(
     mods_path: &Path,
     disabled_path: &Path,
     config_path: &Path,
+    cache_path: Option<&Path>,
 ) -> ProfileDrift {
     let mut all_mods = crate::mods::scan_mods(mods_path);
     let enabled_count = all_mods.len();
@@ -116,7 +119,13 @@ fn compute_profile_drift_with_registry(
     let version_db = crate::mod_versions::load(config_path);
     let (enabled_mods, disabled_mods) = all_mods.split_at(enabled_count);
 
-    compute_profile_drift_from_mods(profile, enabled_mods, disabled_mods, Some(&version_db))
+    compute_profile_drift_from_mods(
+        profile,
+        enabled_mods,
+        disabled_mods,
+        Some(&version_db),
+        cache_path,
+    )
 }
 
 fn profile_mod_matches_disk(
@@ -149,17 +158,49 @@ fn find_disk_mod_for_profile<'a>(
         })
 }
 
+fn profile_mod_has_cached_record(
+    pm: &ProfileMod,
+    version_db: Option<&crate::mod_versions::ModVersionsDb>,
+    cache_path: Option<&Path>,
+) -> bool {
+    let (Some(version_db), Some(cache_path)) = (version_db, cache_path) else {
+        return false;
+    };
+    crate::mod_versions::record_for_profile_mod_in_db(pm, version_db)
+        .and_then(|record| crate::mod_versions::cached_record_path(cache_path, &record))
+        .is_some()
+}
+
+fn find_family_disk_mod_for_profile<'a>(
+    pm: &ProfileMod,
+    enabled_mods: &'a [ModInfo],
+    disabled_mods: &'a [ModInfo],
+) -> Option<(&'a ModInfo, bool)> {
+    enabled_mods
+        .iter()
+        .find(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
+        .map(|disk_mod| (disk_mod, true))
+        .or_else(|| {
+            disabled_mods
+                .iter()
+                .find(|disk_mod| profile_mod_matches_installed(pm, disk_mod))
+                .map(|disk_mod| (disk_mod, false))
+        })
+}
+
 fn compute_profile_drift_from_mods(
     profile: &Profile,
     enabled_mods: &[ModInfo],
     disabled_mods: &[ModInfo],
     version_db: Option<&crate::mod_versions::ModVersionsDb>,
+    cache_path: Option<&Path>,
 ) -> ProfileDrift {
     let profile_contains_disk_mod = |disk_mod: &ModInfo| {
-        profile
-            .mods
-            .iter()
-            .any(|pm| profile_mod_matches_disk(pm, disk_mod, version_db))
+        profile.mods.iter().any(|pm| {
+            profile_mod_matches_disk(pm, disk_mod, version_db)
+                || (profile_mod_has_cached_record(pm, version_db, cache_path)
+                    && profile_mod_matches_installed(pm, disk_mod))
+        })
     };
 
     let mut added = Vec::new();
@@ -180,6 +221,29 @@ fn compute_profile_drift_from_mods(
         let Some((disk_mod, installed_enabled)) =
             find_disk_mod_for_profile(pm, enabled_mods, disabled_mods, version_db)
         else {
+            if profile_mod_has_cached_record(pm, version_db, cache_path) {
+                if let Some((disk_mod, installed_enabled)) =
+                    find_family_disk_mod_for_profile(pm, enabled_mods, disabled_mods)
+                {
+                    if pm.enabled != installed_enabled {
+                        toggled.push(disk_mod.name.clone());
+                    }
+                    if !versions_match(&pm.version, &disk_mod.version)
+                        && !contents_match(pm.hash.as_deref(), disk_mod.hash.as_deref())
+                    {
+                        version_changed.push(VersionMismatch {
+                            name: if disk_mod.name.is_empty() {
+                                pm.name.clone()
+                            } else {
+                                disk_mod.name.clone()
+                            },
+                            profile_version: pm.version.clone(),
+                            disk_version: disk_mod.version.clone(),
+                        });
+                    }
+                    continue;
+                }
+            }
             removed.push(pm.name.clone());
             continue;
         };
@@ -353,7 +417,24 @@ pub(super) async fn repair_profile_from_paths(
     cache_path: &Path,
     token: Option<&str>,
 ) -> std::result::Result<RepairProfileResult, String> {
-    let profile = load_profile(name, profiles_path).map_err(|e| e.to_string())?;
+    let mut profile = load_profile(name, profiles_path).map_err(|e| e.to_string())?;
+    let version_db = crate::mod_versions::load(config_path);
+    let removed_duplicates =
+        crate::profiles::collapse_equivalent_profile_mods(&mut profile, &version_db);
+    if removed_duplicates > 0 {
+        log::info!(
+            "Collapsed {} duplicate mod entry(s) before repairing profile '{}'",
+            removed_duplicates,
+            profile.name
+        );
+        if let Err(e) = save_profile(&profile, profiles_path) {
+            log::warn!(
+                "Could not persist duplicate cleanup for profile '{}': {}",
+                profile.name,
+                e
+            );
+        }
+    }
     let pinned_set = crate::mod_sources::load_pinned_set(config_path);
     let mut profile_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
     for pm in &profile.mods {
@@ -508,6 +589,75 @@ mod reconcile_tests {
     }
 
     #[test]
+    fn cached_profile_artifact_with_newer_disk_sibling_is_version_drift_not_missing() {
+        let game = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let mods = game.path().join("mods");
+        let disabled = game.path().join("mods_disabled");
+        fs::create_dir_all(&mods).unwrap();
+        fs::create_dir_all(&disabled).unwrap();
+
+        write_mod(&mods, "BaseLib", "BaseLib", "3.2.1");
+        let mut old_info = crate::mods::scan_mods(&mods)
+            .into_iter()
+            .find(|info| info.folder_name.as_deref() == Some("BaseLib"))
+            .unwrap();
+        let old_id = crate::mod_versions::ensure_mod_info_id(&mut old_info, config.path())
+            .expect("old version should get an artifact id");
+        crate::mod_versions::cache_mod_version_by_id(
+            &mut old_info,
+            &mods,
+            cache.path(),
+            config.path(),
+        )
+        .expect("old version should be cached");
+        let alias_id = "legacy-regent-source-version-id".to_string();
+        fs::rename(
+            crate::mod_versions::cache_path_for_id(cache.path(), &old_id),
+            crate::mod_versions::cache_path_for_id(cache.path(), &alias_id),
+        )
+        .unwrap();
+        let mut version_db = crate::mod_versions::load(config.path());
+        version_db
+            .records
+            .get_mut(&old_id)
+            .unwrap()
+            .aliases
+            .push(alias_id.clone());
+        version_db.aliases.insert(alias_id, old_id.clone());
+        crate::mod_versions::save(&version_db, config.path()).unwrap();
+        fs::remove_dir_all(mods.join("BaseLib")).unwrap();
+        write_mod(&mods, "BaseLib", "BaseLib", "3.3.1");
+        fs::write(mods.join("BaseLib").join("BaseLib.dll"), b"new-dll").unwrap();
+
+        let mut pm = pack_mod("BaseLib", "BaseLib", "3.2.1", true);
+        pm.mod_version_id = Some(old_id);
+        pm.hash = old_info.hash.clone();
+        let profile = base_profile("TesterW", vec![pm]);
+
+        let drift = compute_profile_drift_with_registry(
+            &profile,
+            &mods,
+            &disabled,
+            config.path(),
+            Some(cache.path()),
+        );
+
+        assert!(
+            drift.added.is_empty(),
+            "new sibling must not look like an extra: {drift:?}"
+        );
+        assert!(
+            drift.removed.is_empty(),
+            "cached pinned profile version must not look missing: {drift:?}"
+        );
+        assert_eq!(drift.version_changed.len(), 1);
+        assert_eq!(drift.version_changed[0].profile_version, "3.2.1");
+        assert_eq!(drift.version_changed[0].disk_version, "3.3.1");
+    }
+
+    #[test]
     fn registry_drift_matches_added_library_mod_by_artifact_id_when_identity_fields_drift() {
         let game = tempfile::tempdir().unwrap();
         let config = tempfile::tempdir().unwrap();
@@ -543,7 +693,8 @@ mod reconcile_tests {
         pm.hash = disk_mod.hash.clone();
         let profile = base_profile("TesterW", vec![pm]);
 
-        let drift = compute_profile_drift_with_registry(&profile, &mods, &disabled, config.path());
+        let drift =
+            compute_profile_drift_with_registry(&profile, &mods, &disabled, config.path(), None);
 
         assert!(drift.added.is_empty(), "no false active extras: {drift:?}");
         assert!(drift.removed.is_empty(), "saved artifact must match disk");

@@ -47,6 +47,7 @@ import {
   getSubscriptions,
 } from '../hooks/useTauri';
 import { importShareCodeSmart, buildShareLink, buildShareMessage } from '../lib/shareImport';
+import { profileDisplayName, safeProfileDisplayName } from '../lib/profileDisplay';
 import {
   getModpackUsage,
   getModpackLastLaunch,
@@ -265,7 +266,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     [activeProfile, activeProfileId, findProfileByKey],
   );
   const activeProfileKey = activeProfileObject ? profileKey(activeProfileObject) : activeProfileId ?? activeProfile;
-  const activeProfileName = activeProfileObject?.name ?? activeProfile;
+  const activeProfileName = activeProfileObject?.name ?? safeProfileDisplayName(activeProfile);
 
   async function handleApplySub(shareId: string) {
     if (applyingSubId) return;
@@ -300,7 +301,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   ): Promise<void> {
     const profile = findProfileByKey(profileKeyOrName);
     const key = profile ? profileKey(profile) : profileKeyOrName;
-    const profileName = profile?.name ?? profileKeyOrName;
+    const profileName = profile?.name ?? profileDisplayName(profileKeyOrName, t('quickAdd.unknown'));
     const info = shareInfoMap[key];
     if (!info) return;
     const codeStr = `${info.owner}/${info.code}`;
@@ -625,10 +626,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   async function handleSwitch(name: string) {
     const target = findProfileByKey(name);
     const targetKey = target ? profileKey(target) : name;
-    const targetName = target?.name ?? name;
+    const targetName = target?.name ?? profileDisplayName(name, t('quickAdd.unknown'));
     if (activeProfileKey && activeProfileKey !== targetKey && driftMap[activeProfileKey]?.has_drift) {
       const ok = await confirm({
-        title: t('profiles.confirm.switch.title', { name: activeProfileName ?? activeProfileKey }),
+        title: t('profiles.confirm.switch.title', { name: activeProfileName ?? t('quickAdd.unknown') }),
         body: t('profiles.confirm.switch.body'),
         warning: t('profiles.confirm.switch.warning'),
         confirmLabel: t('profiles.confirm.switch.confirmLabel'),
@@ -674,7 +675,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (switchingProfile) return;
     const target = findProfileByKey(name);
     const targetKey = target ? profileKey(target) : name;
-    const targetName = target?.name ?? name;
+    const targetName = target?.name ?? profileDisplayName(name, t('quickAdd.unknown'));
     const drift = driftMap[targetKey];
     const orphanCount = drift?.added.length ?? 0;
     const orphans = drift?.added ?? [];
@@ -741,7 +742,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         || (result.replace_failures?.length ?? 0) > 0;
       (repairHasProblems ? toastCtx.error : toastCtx.success)(
         summary.length > 0
-          ? t('profiles.toast.repairedWithDetails', { name, details: summary.join(', ') })
+          ? t('profiles.toast.repairedWithDetails', { name: targetName, details: summary.join(', ') })
           : t('profiles.toast.repaired', { name: targetName }),
       );
     } catch (e) {
@@ -755,7 +756,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
     if (savingProfile) return;
     const target = findProfileByKey(name);
     const targetKey = target ? profileKey(target) : name;
-    const targetName = target?.name ?? name;
+    const targetName = target?.name ?? profileDisplayName(name, t('quickAdd.unknown'));
     // Capture the drift BEFORE the save clears it, so the toast can name what
     // changed (FB-C: "I can't see what Save removed"). added = mods folded into
     // the manifest; removed = manifest entries dropped because they're missing
@@ -807,7 +808,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   async function handleExport(name: string) {
     const target = findProfileByKey(name);
     const targetKey = target ? profileKey(target) : name;
-    const targetName = target?.name ?? name;
+    const targetName = target?.name ?? profileDisplayName(name, t('quickAdd.unknown'));
     try {
       const safeName = targetName.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
       const path = await save({
@@ -825,7 +826,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   async function handleDelete(name: string) {
     const target = findProfileByKey(name);
     const targetKey = target ? profileKey(target) : name;
-    const targetName = target?.name ?? name;
+    const targetName = target?.name ?? profileDisplayName(name, t('quickAdd.unknown'));
     const ok = await confirm({
       title: t('profiles.confirm.delete.title', { name: targetName }),
       body: t('profiles.confirm.delete.body'),
@@ -856,7 +857,7 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
   async function handleDuplicate(name: string) {
     const target = findProfileByKey(name);
     const targetKey = target ? profileKey(target) : name;
-    const targetName = target?.name ?? name;
+    const targetName = target?.name ?? profileDisplayName(name, t('quickAdd.unknown'));
     const newName = prompt(t('profiles.prompt.duplicateAs', { name: targetName }), t('profiles.prompt.duplicateDefault', { name: targetName }));
     if (!newName?.trim()) return;
     try {

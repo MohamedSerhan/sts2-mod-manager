@@ -37,6 +37,8 @@ use code::{code_to_filename, format_code, generate_code, parse_share_code};
 // Low-level GitHub plumbing — the release-asset upload retry/recovery
 // layer and the orchestration helpers used by share/reshare/install.
 pub(crate) use github::build_client;
+#[cfg(test)]
+pub(crate) use github::release_upload_tests::ENV_LOCK as TEST_GITHUB_ENV_LOCK;
 use github::{
     cleanup_orphan_bundle_assets as github_cleanup_orphan_bundle_assets,
     download_bundle as github_download_bundle, ensure_profiles_repo as github_ensure_profiles_repo,
@@ -180,6 +182,89 @@ pub struct ShareResult {
     /// Only set by `get_share_info`; fresh share/reshare leaves it false.
     #[serde(default)]
     pub out_of_sync: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum PublishIssueKind {
+    MissingUnrecoverable,
+    UploadFailed,
+}
+
+impl PublishIssueKind {
+    fn marker(&self) -> &'static str {
+        match self {
+            Self::MissingUnrecoverable => "missing_unrecoverable",
+            Self::UploadFailed => "upload_failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct PublishIssue {
+    name: String,
+    kind: PublishIssueKind,
+    reason: String,
+}
+
+impl PublishIssue {
+    fn missing_unrecoverable(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            kind: PublishIssueKind::MissingUnrecoverable,
+            reason: "This mod is in the modpack but is not installed locally.".to_string(),
+        }
+    }
+
+    fn upload_failed(name: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            kind: PublishIssueKind::UploadFailed,
+            reason: reason.into(),
+        }
+    }
+
+    fn marked_reason(&self) -> String {
+        format!("[publish_issue:{}] {}", self.kind.marker(), self.reason)
+    }
+}
+
+fn publish_issue_display_key(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
+fn publish_issue_priority(kind: &PublishIssueKind) -> u8 {
+    match kind {
+        PublishIssueKind::MissingUnrecoverable => 1,
+        PublishIssueKind::UploadFailed => 2,
+    }
+}
+
+fn publish_issue_priority_from_marked_reason(reason: &str) -> u8 {
+    if reason.contains("[publish_issue:upload_failed]") {
+        publish_issue_priority(&PublishIssueKind::UploadFailed)
+    } else {
+        publish_issue_priority(&PublishIssueKind::MissingUnrecoverable)
+    }
+}
+
+fn dedupe_publish_issues(issues: Vec<PublishIssue>) -> Vec<PublishIssue> {
+    let mut deduped: Vec<PublishIssue> = Vec::new();
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for issue in issues {
+        let key = publish_issue_display_key(&issue.name);
+        if key.is_empty() {
+            continue;
+        }
+        if let Some(&index) = seen.get(&key) {
+            if publish_issue_priority(&issue.kind) > publish_issue_priority(&deduped[index].kind) {
+                deduped[index] = issue;
+            }
+        } else {
+            seen.insert(key, deduped.len());
+            deduped.push(issue);
+        }
+    }
+    deduped
 }
 
 pub(crate) fn attribute_profile_to_owner(mut profile: Profile, owner: &str) -> Profile {
@@ -389,13 +474,12 @@ pub async fn restore_profile_mod_from_share(
 
     let share_info = load_share_info_for_profile(&profile, &profiles_path);
     if let Some(info) = share_info {
+        let version_db = crate::mod_versions::load(&config_path);
         let filename = code_to_filename(&info.code);
         if let Ok(remote) = fetch_shared_profile(&info.owner, &filename, token.as_deref()).await {
-            if let Some(remote_mod) = remote
-                .mods
-                .iter()
-                .find(|pm| publish_profile_mods_match(pm, &target))
-                .or_else(|| remote.mods.iter().find(|pm| pm.name == target.name))
+            if let Some(remote_mod) =
+                find_published_restore_metadata_match(&target, &remote, &version_db)
+                    .or_else(|| remote.mods.iter().find(|pm| pm.name == target.name))
             {
                 if let Some(bundle_url) = remote_mod.bundle_url.as_deref() {
                     download_bundle(
@@ -769,7 +853,80 @@ fn publish_keys_intersect(a: &[String], b: &[String]) -> bool {
     a.iter().any(|key| b.contains(key))
 }
 
-fn publish_profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo) -> bool {
+fn publish_key_matches_value(keys: &[String], value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty() && keys.iter().any(|key| key.eq_ignore_ascii_case(value))
+}
+
+fn profile_mod_is_published_bundle_member(member: &ProfileMod, bundle: &ProfileMod) -> bool {
+    if bundle.bundle_members.is_empty() && bundle.bundle_member_ids.is_empty() {
+        return false;
+    }
+    let member_keys = publish_identity_keys(
+        &member.name,
+        member.folder_name.as_deref(),
+        member.mod_id.as_deref(),
+    );
+    bundle
+        .bundle_member_ids
+        .iter()
+        .any(|id| publish_key_matches_value(&member_keys, id))
+        || bundle
+            .bundle_members
+            .iter()
+            .any(|name| publish_key_matches_value(&member_keys, name))
+}
+
+fn publish_profile_mods_direct_match(
+    a: &ProfileMod,
+    b: &ProfileMod,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> bool {
+    match (a.mod_version_id.as_deref(), b.mod_version_id.as_deref()) {
+        (Some(a_id), Some(b_id)) => {
+            return crate::mod_versions::ids_equivalent_in_db(version_db, a_id, b_id);
+        }
+        _ => {}
+    }
+
+    let a_artifact = crate::mod_versions::canonical_profile_mod_artifact_id(a, version_db);
+    let b_artifact = crate::mod_versions::canonical_profile_mod_artifact_id(b, version_db);
+    if let (Some(a_artifact), Some(b_artifact)) = (a_artifact, b_artifact) {
+        return a_artifact == b_artifact;
+    }
+
+    let a_strong = publish_strong_identity_keys(a.folder_name.as_deref(), a.mod_id.as_deref());
+    let b_strong = publish_strong_identity_keys(b.folder_name.as_deref(), b.mod_id.as_deref());
+
+    if !a_strong.is_empty() && !b_strong.is_empty() {
+        return publish_keys_intersect(&a_strong, &b_strong);
+    }
+
+    let a_keys = publish_identity_keys(&a.name, a.folder_name.as_deref(), a.mod_id.as_deref());
+    let b_keys = publish_identity_keys(&b.name, b.folder_name.as_deref(), b.mod_id.as_deref());
+    publish_keys_intersect(&a_keys, &b_keys)
+}
+
+fn publish_profile_mod_matches_installed(
+    pm: &ProfileMod,
+    installed: &ModInfo,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> bool {
+    if crate::profiles::profile_mod_matches_installed_with_version_db(pm, installed, version_db) {
+        return true;
+    }
+    if pm
+        .mod_version_id
+        .as_deref()
+        .is_some_and(|id| !id.trim().is_empty())
+        && installed
+            .mod_version_id
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty())
+    {
+        return false;
+    }
+
     let profile_strong =
         publish_strong_identity_keys(pm.folder_name.as_deref(), pm.mod_id.as_deref());
     let installed_strong = publish_strong_identity_keys(
@@ -796,20 +953,129 @@ fn publish_profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo) -
 /// the on-disk profile entry corresponding to an uploaded (and possibly
 /// filtered/refreshed) profile entry. Folder/mod_id ("strong" keys) win when
 /// both sides have them; otherwise falls back to name/folder/mod_id keys.
-fn publish_profile_mods_match(a: &ProfileMod, b: &ProfileMod) -> bool {
-    let a_strong = publish_strong_identity_keys(a.folder_name.as_deref(), a.mod_id.as_deref());
-    let b_strong = publish_strong_identity_keys(b.folder_name.as_deref(), b.mod_id.as_deref());
-
-    if !a_strong.is_empty() && !b_strong.is_empty() {
-        return publish_keys_intersect(&a_strong, &b_strong);
+fn publish_profile_mods_match(
+    a: &ProfileMod,
+    b: &ProfileMod,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> bool {
+    if profile_mod_is_published_bundle_member(a, b) || profile_mod_is_published_bundle_member(b, a)
+    {
+        return true;
     }
 
-    let a_keys = publish_identity_keys(&a.name, a.folder_name.as_deref(), a.mod_id.as_deref());
-    let b_keys = publish_identity_keys(&b.name, b.folder_name.as_deref(), b.mod_id.as_deref());
-    publish_keys_intersect(&a_keys, &b_keys)
+    publish_profile_mods_direct_match(a, b, version_db)
 }
 
-fn bundle_source_fingerprint_key(pm: &ProfileMod) -> String {
+fn profile_mod_has_bundle_metadata(pm: &ProfileMod) -> bool {
+    !pm.bundle_members.is_empty() || !pm.bundle_member_ids.is_empty()
+}
+
+fn profile_mod_represents_bundle_member(pm: &ProfileMod) -> bool {
+    profile_mod_has_bundle_metadata(pm) && profile_mod_is_published_bundle_member(pm, pm)
+}
+
+fn profile_mod_represents_bundle_container(pm: &ProfileMod) -> bool {
+    profile_mod_has_bundle_metadata(pm) && !profile_mod_represents_bundle_member(pm)
+}
+
+fn restore_metadata_match_rank(
+    local: &ProfileMod,
+    published: &ProfileMod,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> Option<u8> {
+    if publish_profile_mods_direct_match(local, published, version_db) {
+        return Some(3);
+    }
+
+    if profile_mod_represents_bundle_container(local) {
+        return None;
+    }
+
+    if profile_mod_represents_bundle_container(published)
+        && profile_mod_is_published_bundle_member(local, published)
+    {
+        return Some(2);
+    }
+
+    None
+}
+
+fn find_published_restore_metadata_match<'a>(
+    local_mod: &ProfileMod,
+    published: &'a Profile,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> Option<&'a ProfileMod> {
+    let mut best: Option<(&ProfileMod, u8)> = None;
+    for candidate in published.mods.iter().filter(|pm| pm.bundle_url.is_some()) {
+        let Some(rank) = restore_metadata_match_rank(local_mod, candidate, version_db) else {
+            continue;
+        };
+        if best.map(|(_, best_rank)| rank > best_rank).unwrap_or(true) {
+            best = Some((candidate, rank));
+        }
+    }
+    best.map(|(candidate, _)| candidate)
+}
+
+fn merge_published_restore_metadata(
+    local: &mut Profile,
+    published: &Profile,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> usize {
+    let mut merged = 0usize;
+    for local_mod in &mut local.mods {
+        if local_mod.bundle_url.is_some() {
+            continue;
+        }
+        let Some(published_mod) =
+            find_published_restore_metadata_match(local_mod, published, version_db)
+        else {
+            continue;
+        };
+
+        local_mod.version = published_mod.version.clone();
+        local_mod.bundle_url = published_mod.bundle_url.clone();
+        local_mod.bundle_sha256 = published_mod.bundle_sha256.clone();
+        if local_mod.source.is_none() {
+            local_mod.source = published_mod.source.clone();
+        }
+        local_mod.hash = published_mod.hash.clone();
+        local_mod.files = published_mod.files.clone();
+        if local_mod.bundle_members.is_empty() {
+            local_mod.bundle_members = published_mod.bundle_members.clone();
+        }
+        if local_mod.bundle_member_ids.is_empty() {
+            local_mod.bundle_member_ids = published_mod.bundle_member_ids.clone();
+        }
+        merged += 1;
+    }
+    merged
+}
+
+pub(crate) async fn enrich_profile_restore_metadata_from_share(
+    profile: &mut Profile,
+    profiles_path: &Path,
+    config_path: &Path,
+    token: Option<&str>,
+) -> Result<usize> {
+    let Some(info) = load_share_info_for_profile(profile, profiles_path) else {
+        return Ok(0);
+    };
+    let filename = code_to_filename(&info.code);
+    let published = fetch_shared_profile(&info.owner, &filename, token).await?;
+    let version_db = crate::mod_versions::load(config_path);
+    let merged = merge_published_restore_metadata(profile, &published, &version_db);
+    if merged > 0 {
+        log::info!(
+            "Enriched {} profile mod(s) in '{}' from published share restore metadata",
+            merged,
+            profile.name
+        );
+    }
+    Ok(merged)
+}
+
+fn legacy_bundle_source_fingerprint_key(pm: &ProfileMod) -> String {
     if let Some(mod_id) = pm
         .mod_id
         .as_deref()
@@ -829,6 +1095,47 @@ fn bundle_source_fingerprint_key(pm: &ProfileMod) -> String {
     format!("name:{}", pm.name.trim().to_lowercase())
 }
 
+fn publish_artifact_key_for_profile_mod(
+    pm: &ProfileMod,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> String {
+    if let Some(id) = crate::mod_versions::canonical_profile_mod_artifact_id(pm, version_db) {
+        return format!("artifact:{id}");
+    }
+    let mod_id = if pm.bundle_member_ids.is_empty() {
+        pm.mod_id.as_deref()
+    } else {
+        None
+    };
+    crate::mod_versions::artifact_identity_key(
+        &pm.name,
+        pm.folder_name.as_deref(),
+        mod_id,
+        &pm.version,
+        pm.hash.as_deref(),
+        pm.source.as_deref(),
+    )
+}
+
+fn bundle_source_fingerprint_key(
+    pm: &ProfileMod,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> String {
+    publish_artifact_key_for_profile_mod(pm, version_db)
+}
+
+fn bundle_source_fingerprint_lookup_keys(
+    pm: &ProfileMod,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> Vec<String> {
+    let mut keys = vec![bundle_source_fingerprint_key(pm, version_db)];
+    let legacy_key = legacy_bundle_source_fingerprint_key(pm);
+    if !keys.iter().any(|key| key == &legacy_key) {
+        keys.push(legacy_key);
+    }
+    keys
+}
+
 fn bundle_source_fingerprint_value(pm: &ProfileMod, file_fingerprint: &str) -> String {
     format!("v1:{}:{}", pm.version.trim(), file_fingerprint)
 }
@@ -840,29 +1147,33 @@ fn bundle_source_fast_fingerprint_value(pm: &ProfileMod, file_fingerprint: &str)
 fn existing_bundle_matches_source(
     pm: &ProfileMod,
     prior_bundle_source_fingerprints: &HashMap<String, String>,
-    fingerprint_key: &str,
+    fingerprint_keys: &[String],
     source_fingerprint: &str,
 ) -> bool {
     pm.bundle_url.is_some()
         && pm.bundle_sha256.is_some()
-        && prior_bundle_source_fingerprints
-            .get(fingerprint_key)
-            .map(String::as_str)
-            == Some(source_fingerprint)
+        && fingerprint_keys.iter().any(|fingerprint_key| {
+            prior_bundle_source_fingerprints
+                .get(fingerprint_key)
+                .map(String::as_str)
+                == Some(source_fingerprint)
+        })
 }
 
 fn existing_bundle_matches_fast_source(
     pm: &ProfileMod,
     prior_bundle_source_fast_fingerprints: &HashMap<String, String>,
-    fingerprint_key: &str,
+    fingerprint_keys: &[String],
     source_fast_fingerprint: &str,
 ) -> bool {
     pm.bundle_url.is_some()
         && pm.bundle_sha256.is_some()
-        && prior_bundle_source_fast_fingerprints
-            .get(fingerprint_key)
-            .map(String::as_str)
-            == Some(source_fast_fingerprint)
+        && fingerprint_keys.iter().any(|fingerprint_key| {
+            prior_bundle_source_fast_fingerprints
+                .get(fingerprint_key)
+                .map(String::as_str)
+                == Some(source_fast_fingerprint)
+        })
 }
 
 #[derive(Clone, Debug)]
@@ -874,29 +1185,74 @@ struct ReusableBundle {
 
 #[derive(Default)]
 struct ReusableBundleIndex {
+    artifact: HashMap<String, ReusableBundle>,
     fast: HashMap<(String, String), ReusableBundle>,
     strong: HashMap<(String, String), ReusableBundle>,
 }
 
 impl ReusableBundleIndex {
-    fn find_fast(&self, fingerprint_key: &str, fingerprint_value: &str) -> Option<ReusableBundle> {
-        self.fast
-            .get(&(fingerprint_key.to_string(), fingerprint_value.to_string()))
-            .cloned()
+    fn find_artifact(&self, fingerprint_key: &str) -> Option<ReusableBundle> {
+        self.artifact.get(fingerprint_key).cloned()
+    }
+
+    fn find_fast(
+        &self,
+        fingerprint_keys: &[String],
+        fingerprint_value: &str,
+    ) -> Option<ReusableBundle> {
+        fingerprint_keys.iter().find_map(|fingerprint_key| {
+            self.fast
+                .get(&(fingerprint_key.clone(), fingerprint_value.to_string()))
+                .cloned()
+        })
     }
 
     fn find_strong(
         &self,
-        fingerprint_key: &str,
+        fingerprint_keys: &[String],
         fingerprint_value: &str,
     ) -> Option<ReusableBundle> {
+        fingerprint_keys.iter().find_map(|fingerprint_key| {
+            self.strong
+                .get(&(fingerprint_key.clone(), fingerprint_value.to_string()))
+                .cloned()
+        })
+    }
+
+    fn insert_fast(
+        &mut self,
+        fingerprint_key: &str,
+        fingerprint_value: &str,
+        bundle: ReusableBundle,
+    ) {
+        self.fast
+            .entry((fingerprint_key.to_string(), fingerprint_value.to_string()))
+            .or_insert(bundle);
+    }
+
+    fn insert_strong(
+        &mut self,
+        fingerprint_key: &str,
+        fingerprint_value: &str,
+        bundle: ReusableBundle,
+    ) {
         self.strong
-            .get(&(fingerprint_key.to_string(), fingerprint_value.to_string()))
-            .cloned()
+            .entry((fingerprint_key.to_string(), fingerprint_value.to_string()))
+            .or_insert(bundle);
+    }
+
+    fn insert_artifact(&mut self, fingerprint_key: &str, bundle: ReusableBundle) {
+        self.artifact
+            .entry(fingerprint_key.to_string())
+            .or_insert(bundle);
     }
 }
 
-fn reusable_bundle_index(profiles_path: &Path, owner: &str) -> ReusableBundleIndex {
+fn reusable_bundle_index(
+    profiles_path: &Path,
+    owner: &str,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> ReusableBundleIndex {
     let mut index = ReusableBundleIndex::default();
     let owner = owner.trim();
     if owner.is_empty() {
@@ -934,26 +1290,50 @@ fn reusable_bundle_index(profiles_path: &Path, owner: &str) -> ReusableBundleInd
                 bundle_sha256: bundle_sha256.to_string(),
                 profile_name: profile.name.clone(),
             };
-            let fingerprint_key = bundle_source_fingerprint_key(pm);
-            if let Some(fingerprint) = share_info
-                .bundle_source_fast_fingerprints
-                .get(&fingerprint_key)
-            {
-                index
-                    .fast
-                    .entry((fingerprint_key.clone(), fingerprint.clone()))
-                    .or_insert_with(|| bundle.clone());
-            }
-            if let Some(fingerprint) = share_info.bundle_source_fingerprints.get(&fingerprint_key) {
-                index
-                    .strong
-                    .entry((fingerprint_key.clone(), fingerprint.clone()))
-                    .or_insert_with(|| bundle.clone());
+            for fingerprint_key in bundle_source_fingerprint_lookup_keys(pm, version_db) {
+                index.insert_artifact(&fingerprint_key, bundle.clone());
+                if let Some(fingerprint) = share_info
+                    .bundle_source_fast_fingerprints
+                    .get(&fingerprint_key)
+                {
+                    index.insert_fast(&fingerprint_key, fingerprint, bundle.clone());
+                }
+                if let Some(fingerprint) =
+                    share_info.bundle_source_fingerprints.get(&fingerprint_key)
+                {
+                    index.insert_strong(&fingerprint_key, fingerprint, bundle.clone());
+                }
             }
         }
     }
 
     index
+}
+
+fn remember_reusable_bundle(
+    index: &mut ReusableBundleIndex,
+    fingerprint_key: &str,
+    fast_fingerprint: Option<&str>,
+    strong_fingerprint: Option<&str>,
+    pm: &ProfileMod,
+    profile_name: &str,
+) {
+    let (Some(bundle_url), Some(bundle_sha256)) = (pm.bundle_url.clone(), pm.bundle_sha256.clone())
+    else {
+        return;
+    };
+    let bundle = ReusableBundle {
+        bundle_url,
+        bundle_sha256,
+        profile_name: profile_name.to_string(),
+    };
+    index.insert_artifact(fingerprint_key, bundle.clone());
+    if let Some(fingerprint) = fast_fingerprint {
+        index.insert_fast(fingerprint_key, fingerprint, bundle.clone());
+    }
+    if let Some(fingerprint) = strong_fingerprint {
+        index.insert_strong(fingerprint_key, fingerprint, bundle);
+    }
 }
 
 /// Merge publish-side enrichment from the just-uploaded (filtered) profile
@@ -978,14 +1358,18 @@ fn reusable_bundle_index(profiles_path: &Path, owner: &str) -> ReusableBundleInd
 /// Returns the merged profile (a clone of `on_disk` with the above applied)
 /// so callers can both persist it locally and compute the publish signature
 /// from it.
-fn merge_publish_enrichment(on_disk: &Profile, uploaded: &Profile) -> Profile {
+fn merge_publish_enrichment(
+    on_disk: &Profile,
+    uploaded: &Profile,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> Profile {
     let mut merged = on_disk.clone();
 
     for uploaded_pm in &uploaded.mods {
         let Some(target) = merged
             .mods
             .iter_mut()
-            .find(|pm| publish_profile_mods_match(pm, uploaded_pm))
+            .find(|pm| publish_profile_mods_match(pm, uploaded_pm, version_db))
         else {
             continue;
         };
@@ -1016,6 +1400,7 @@ fn merge_publish_enrichment(on_disk: &Profile, uploaded: &Profile) -> Profile {
     if uploaded.public.is_some() {
         merged.public = uploaded.public;
     }
+    crate::profiles::collapse_equivalent_profile_mods(&mut merged, version_db);
 
     merged
 }
@@ -1055,6 +1440,122 @@ fn refresh_profile_mod_from_installed(pm: &mut ProfileMod, installed: &ModInfo) 
     files_changed
 }
 
+fn profile_mod_has_usable_bundle(pm: &ProfileMod) -> bool {
+    pm.bundle_url
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+        && pm
+            .bundle_sha256
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+}
+
+fn copy_preserved_bundle_metadata(target: &mut ProfileMod, source: &ProfileMod) {
+    target.version = source.version.clone();
+    target.bundle_url = source.bundle_url.clone();
+    target.bundle_sha256 = source.bundle_sha256.clone();
+    if target.source.is_none() {
+        target.source = source.source.clone();
+    }
+    if source.mod_version_id.is_some() {
+        target.mod_version_id = source.mod_version_id.clone();
+    }
+    if target.hash.is_none() {
+        target.hash = source.hash.clone();
+    }
+    if target.bundle_members.is_empty() {
+        target.bundle_members = source.bundle_members.clone();
+    }
+    if target.bundle_member_ids.is_empty() {
+        target.bundle_member_ids = source.bundle_member_ids.clone();
+    }
+}
+
+fn preserve_missing_profile_mod_bundle(
+    pm: &mut ProfileMod,
+    published_profile: Option<&Profile>,
+    reusable_bundles: Option<&ReusableBundleIndex>,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> Option<String> {
+    if profile_mod_has_usable_bundle(pm) {
+        return Some("saved local profile entry".to_string());
+    }
+
+    if let Some(published) = published_profile {
+        if let Some(published_mod) =
+            find_published_restore_metadata_match(pm, published, version_db)
+                .filter(|candidate| profile_mod_has_usable_bundle(candidate))
+        {
+            copy_preserved_bundle_metadata(pm, published_mod);
+            return Some("last published manifest".to_string());
+        }
+    }
+
+    if let Some(index) = reusable_bundles {
+        let fingerprint_key = bundle_source_fingerprint_key(pm, version_db);
+        if let Some(bundle) = index.find_artifact(&fingerprint_key) {
+            pm.bundle_url = Some(bundle.bundle_url);
+            pm.bundle_sha256 = Some(bundle.bundle_sha256);
+            return Some(format!("owned profile '{}'", bundle.profile_name));
+        }
+    }
+
+    None
+}
+
+fn record_publish_issue(
+    failed_uploads: &mut Vec<String>,
+    failed_upload_reasons: &mut Vec<(String, String)>,
+    issue: PublishIssue,
+) {
+    let key = publish_issue_display_key(&issue.name);
+    let marked_reason = issue.marked_reason();
+    if let Some((index, _)) = failed_upload_reasons
+        .iter()
+        .enumerate()
+        .find(|(_, (name, _))| publish_issue_display_key(name) == key)
+    {
+        if publish_issue_priority(&issue.kind)
+            > publish_issue_priority_from_marked_reason(&failed_upload_reasons[index].1)
+        {
+            failed_upload_reasons[index] = (issue.name.clone(), marked_reason);
+            if let Some(existing_name) = failed_uploads
+                .iter_mut()
+                .find(|name| publish_issue_display_key(name) == key)
+            {
+                *existing_name = issue.name;
+            }
+        }
+        return;
+    }
+    failed_upload_reasons.push((issue.name.clone(), marked_reason));
+    failed_uploads.push(issue.name);
+}
+
+fn record_upload_issue_or_preserve(
+    pm: &ProfileMod,
+    reason: impl Into<String>,
+    failed_uploads: &mut Vec<String>,
+    failed_upload_reasons: &mut Vec<(String, String)>,
+) {
+    let reason = reason.into();
+    if profile_mod_has_usable_bundle(pm) {
+        log::warn!(
+            "Share '{}': keeping previous bundle after publish refresh failed: {}",
+            pm.name,
+            reason
+        );
+        return;
+    }
+    record_publish_issue(
+        failed_uploads,
+        failed_upload_reasons,
+        PublishIssue::upload_failed(pm.name.clone(), reason),
+    );
+}
+
 fn filter_profile_for_publish_compatibility(
     profile: &mut Profile,
     mods_path: &std::path::Path,
@@ -1062,13 +1563,16 @@ fn filter_profile_for_publish_compatibility(
     config_path: &std::path::Path,
     game_version: Option<&str>,
     exclude_stored_members: bool,
-) -> Vec<String> {
+    published_profile: Option<&Profile>,
+    reusable_bundles: Option<&ReusableBundleIndex>,
+) -> Vec<PublishIssue> {
     // We always need the installed scan so we can refresh stale paths and
     // (for the active pack) drop stored (disabled) members.
     let mut installed_mods =
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
     crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
+    let version_db = crate::mod_versions::load(config_path);
     let profile_name = profile.name.clone();
     let mut filtered_incompatible = 0;
     let mut filtered_stored = 0;
@@ -1078,12 +1582,13 @@ fn filter_profile_for_publish_compatibility(
     // zip error. We surface these to the caller so they can be reported
     // through the existing failed/missing-bundles mechanism with a clear
     // "not installed" message instead.
-    let mut not_installed: Vec<String> = Vec::new();
+    let mut issues: Vec<PublishIssue> = Vec::new();
+    let mut preserved_missing: Vec<(String, String)> = Vec::new();
 
     profile.mods.retain_mut(|pm| {
         let installed = installed_mods
             .iter()
-            .find(|installed| publish_profile_mod_matches_installed(pm, installed));
+            .find(|installed| publish_profile_mod_matches_installed(pm, installed, &version_db));
         match installed {
             // A mod that is stored (disabled on disk, i.e. living in the
             // mods_disabled folder) is excluded from the ACTIVE pack's
@@ -1144,8 +1649,18 @@ fn filter_profile_for_publish_compatibility(
             // caller reports it through the failed/missing-bundles
             // mechanism with the clearer "not installed" message instead.
             None => {
+                if let Some(source) = preserve_missing_profile_mod_bundle(
+                    pm,
+                    published_profile,
+                    reusable_bundles,
+                    &version_db,
+                ) {
+                    preserved_missing.push((pm.name.clone(), source));
+                    pm.files.clear();
+                    return true;
+                }
                 pm.files.clear();
-                not_installed.push(pm.name.clone());
+                issues.push(PublishIssue::missing_unrecoverable(pm.name.clone()));
                 true
             }
         }
@@ -1172,15 +1687,23 @@ fn filter_profile_for_publish_compatibility(
             refreshed_files,
         );
     }
-    for name in &not_installed {
+    for (name, source) in &preserved_missing {
+        log::warn!(
+            "Publish '{}': '{}' is not installed locally; preserving bundle metadata from {}",
+            profile_name,
+            name,
+            source,
+        );
+    }
+    for issue in &issues {
         log::warn!(
             "Publish '{}': '{}' is in this modpack but not installed -- remove it from the pack or reinstall it",
             profile_name,
-            name,
+            issue.name,
         );
     }
 
-    not_installed
+    issues
 }
 
 /// Returns the prepared profile plus the names of any pack entries that
@@ -1200,15 +1723,29 @@ fn load_profile_for_publish_from_paths(
     config_path: &std::path::Path,
     game_version: Option<&str>,
     exclude_stored_members: bool,
-) -> Result<(Profile, Vec<String>)> {
+    published_profile: Option<&Profile>,
+    reusable_bundles: Option<&ReusableBundleIndex>,
+) -> Result<(Profile, Vec<PublishIssue>)> {
     let mut profile = crate::profiles::load_profile(name, profiles_path)?;
-    let not_installed = filter_profile_for_publish_compatibility(
+    let version_db = crate::mod_versions::load(config_path);
+    let removed = crate::profiles::collapse_equivalent_profile_mods(&mut profile, &version_db);
+    if removed > 0 {
+        log::info!(
+            "Publish '{}': collapsed {} duplicate mod version entr{} before publish preparation",
+            profile.name,
+            removed,
+            if removed == 1 { "y" } else { "ies" },
+        );
+    }
+    let issues = filter_profile_for_publish_compatibility(
         &mut profile,
         mods_path,
         disabled_path,
         config_path,
         game_version,
         exclude_stored_members,
+        published_profile,
+        reusable_bundles,
     );
     backfill_profile_sources_from_db(&mut profile, config_path);
     if include_notes {
@@ -1221,7 +1758,19 @@ fn load_profile_for_publish_from_paths(
     if let Some(public) = list_public {
         profile.public = Some(public);
     }
-    Ok((profile, not_installed))
+    if let Some(game_version) = game_version {
+        profile.game_version = Some(game_version.to_string());
+    }
+    let removed = crate::profiles::collapse_equivalent_profile_mods(&mut profile, &version_db);
+    if removed > 0 {
+        log::info!(
+            "Publish '{}': collapsed {} duplicate mod version entr{} before upload",
+            profile.name,
+            removed,
+            if removed == 1 { "y" } else { "ies" },
+        );
+    }
+    Ok((profile, dedupe_publish_issues(issues)))
 }
 
 /// Populate the manifest's per-mod curator extras (note / custom link /
@@ -1420,6 +1969,8 @@ pub async fn share_profile(
         &config_path,
         game_version.as_deref(),
         exclude_stored_members,
+        None,
+        None,
     )
     .map_err(|e| e.to_string())?;
 
@@ -1433,6 +1984,7 @@ pub async fn share_profile(
         &mods_path,
         &disabled_path,
         &profiles_path,
+        &config_path,
         &token,
         Some(&emit_fn),
         Some(&cancel_check),
@@ -1467,14 +2019,25 @@ pub(super) async fn share_profile_impl(
     mods_path: &std::path::Path,
     disabled_path: &std::path::Path,
     profiles_path: &std::path::Path,
+    config_path: &std::path::Path,
     token: &str,
     emit: Option<&(dyn Fn(&str, ShareProgress) + Send + Sync)>,
     cancel_requested: Option<&(dyn Fn() -> bool + Send + Sync)>,
-    failed_uploads_seed: Vec<String>,
+    failed_uploads_seed: Vec<PublishIssue>,
 ) -> Result<ShareResult> {
     // Get username
     let username = get_github_username(token).await?;
     profile = attribute_profile_to_owner(profile, &username);
+    let version_db = crate::mod_versions::load(config_path);
+    let removed = crate::profiles::collapse_equivalent_profile_mods(&mut profile, &version_db);
+    if removed > 0 {
+        log::info!(
+            "Share '{}': collapsed {} duplicate mod version entr{} before upload",
+            profile.name,
+            removed,
+            if removed == 1 { "y" } else { "ies" },
+        );
+    }
 
     // Ensure repo exists
     ensure_profiles_repo(token, &username).await?;
@@ -1484,15 +2047,13 @@ pub(super) async fn share_profile_impl(
     // cleared their `files` so the bundling loop below skips them, but
     // they still need to surface in `ensure_profile_publish_complete`'s
     // missing-bundles report with a clear "not installed" message.
-    let mut failed_uploads: Vec<String> = failed_uploads_seed;
-    let mut failed_upload_reasons: Vec<(String, String)> = failed_uploads
+    let mut failed_uploads: Vec<String> = failed_uploads_seed
         .iter()
-        .map(|name| {
-            (
-                name.clone(),
-                "This mod is in the modpack but is not installed locally.".to_string(),
-            )
-        })
+        .map(|issue| issue.name.clone())
+        .collect();
+    let mut failed_upload_reasons: Vec<(String, String)> = failed_uploads_seed
+        .iter()
+        .map(|issue| (issue.name.clone(), issue.marked_reason()))
         .collect();
     let bundlable: Vec<usize> = profile
         .mods
@@ -1524,7 +2085,8 @@ pub(super) async fn share_profile_impl(
                 }
             })
             .unwrap_or_default();
-    let reusable_bundles = reusable_bundle_index(profiles_path, &username);
+    let mut reusable_bundles = reusable_bundle_index(profiles_path, &username, &version_db);
+    let profile_name_for_reuse = profile.name.clone();
 
     // Bundle ALL mods to guarantee version matching.
     // Friends get the exact same files the curator has installed.
@@ -1551,7 +2113,8 @@ pub(super) async fn share_profile_impl(
         }
 
         let pm = &mut profile.mods[idx];
-        let fingerprint_key = bundle_source_fingerprint_key(pm);
+        let fingerprint_key = bundle_source_fingerprint_key(pm, &version_db);
+        let fingerprint_lookup_keys = bundle_source_fingerprint_lookup_keys(pm, &version_db);
         let source_fast_fingerprint = match fingerprint_profile_mod_file_metadata_with_cancel(
             pm,
             mods_path,
@@ -1564,19 +2127,32 @@ pub(super) async fn share_profile_impl(
                     return Err(e);
                 }
                 log::error!("Failed to fingerprint mod metadata '{}': {}", pm.name, e);
-                failed_upload_reasons.push((pm.name.clone(), e.to_string()));
-                failed_uploads.push(pm.name.clone());
+                record_upload_issue_or_preserve(
+                    pm,
+                    e.to_string(),
+                    &mut failed_uploads,
+                    &mut failed_upload_reasons,
+                );
                 continue;
             }
         };
         if existing_bundle_matches_fast_source(
             pm,
             &prior_bundle_source_fast_fingerprints,
-            &fingerprint_key,
+            &fingerprint_lookup_keys,
             &source_fast_fingerprint,
         ) {
             bundles_skipped_before_zip += 1;
-            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            bundle_source_fast_fingerprints
+                .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
+            remember_reusable_bundle(
+                &mut reusable_bundles,
+                &fingerprint_key,
+                Some(&source_fast_fingerprint),
+                None,
+                pm,
+                &profile_name_for_reuse,
+            );
             log::info!(
                 "Share '{}': skipping bundle for '{}' (source metadata unchanged)",
                 profile.name,
@@ -1584,12 +2160,22 @@ pub(super) async fn share_profile_impl(
             );
             continue;
         }
-        if let Some(bundle) = reusable_bundles.find_fast(&fingerprint_key, &source_fast_fingerprint)
+        if let Some(bundle) =
+            reusable_bundles.find_fast(&fingerprint_lookup_keys, &source_fast_fingerprint)
         {
             bundles_skipped_before_zip += 1;
             pm.bundle_url = Some(bundle.bundle_url);
             pm.bundle_sha256 = Some(bundle.bundle_sha256);
-            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            bundle_source_fast_fingerprints
+                .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
+            remember_reusable_bundle(
+                &mut reusable_bundles,
+                &fingerprint_key,
+                Some(&source_fast_fingerprint),
+                None,
+                pm,
+                &profile_name_for_reuse,
+            );
             log::info!(
                 "Share '{}': reusing bundle for '{}' from profile '{}' (source metadata unchanged)",
                 profile.name,
@@ -1610,20 +2196,33 @@ pub(super) async fn share_profile_impl(
                     return Err(e);
                 }
                 log::error!("Failed to fingerprint mod '{}': {}", pm.name, e);
-                failed_upload_reasons.push((pm.name.clone(), e.to_string()));
-                failed_uploads.push(pm.name.clone());
+                record_upload_issue_or_preserve(
+                    pm,
+                    e.to_string(),
+                    &mut failed_uploads,
+                    &mut failed_upload_reasons,
+                );
                 continue;
             }
         };
         if existing_bundle_matches_source(
             pm,
             &prior_bundle_source_fingerprints,
-            &fingerprint_key,
+            &fingerprint_lookup_keys,
             &source_fingerprint,
         ) {
             bundles_skipped_before_zip += 1;
-            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint);
-            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint.clone());
+            bundle_source_fast_fingerprints
+                .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
+            remember_reusable_bundle(
+                &mut reusable_bundles,
+                &fingerprint_key,
+                Some(&source_fast_fingerprint),
+                Some(&source_fingerprint),
+                pm,
+                &profile_name_for_reuse,
+            );
             log::info!(
                 "Share '{}': skipping bundle for '{}' (source fingerprint unchanged)",
                 profile.name,
@@ -1631,12 +2230,23 @@ pub(super) async fn share_profile_impl(
             );
             continue;
         }
-        if let Some(bundle) = reusable_bundles.find_strong(&fingerprint_key, &source_fingerprint) {
+        if let Some(bundle) =
+            reusable_bundles.find_strong(&fingerprint_lookup_keys, &source_fingerprint)
+        {
             bundles_skipped_before_zip += 1;
             pm.bundle_url = Some(bundle.bundle_url);
             pm.bundle_sha256 = Some(bundle.bundle_sha256);
-            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint);
-            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint.clone());
+            bundle_source_fast_fingerprints
+                .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
+            remember_reusable_bundle(
+                &mut reusable_bundles,
+                &fingerprint_key,
+                Some(&source_fast_fingerprint),
+                Some(&source_fingerprint),
+                pm,
+                &profile_name_for_reuse,
+            );
             log::info!(
                 "Share '{}': reusing bundle for '{}' from profile '{}' (source fingerprint unchanged)",
                 profile.name,
@@ -1696,6 +2306,14 @@ pub(super) async fn share_profile_impl(
                             .insert(fingerprint_key.clone(), source_fingerprint.clone());
                         bundle_source_fast_fingerprints
                             .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
+                        remember_reusable_bundle(
+                            &mut reusable_bundles,
+                            &fingerprint_key,
+                            Some(&source_fast_fingerprint),
+                            Some(&source_fingerprint),
+                            pm,
+                            &profile_name_for_reuse,
+                        );
                         log::info!("Bundled mod '{}' successfully ({} bytes)", pm.name, zip_len);
                     }
                     Err(e) => {
@@ -1703,12 +2321,16 @@ pub(super) async fn share_profile_impl(
                             return Err(e);
                         }
                         log::error!("Failed to upload bundle for '{}': {}", pm.name, e);
-                        failed_upload_reasons.push((pm.name.clone(), e.to_string()));
+                        record_upload_issue_or_preserve(
+                            pm,
+                            e.to_string(),
+                            &mut failed_uploads,
+                            &mut failed_upload_reasons,
+                        );
                         // If bundling fails AND there's no GitHub source either, the
                         // mod isn't recoverable for friends. Track either way so the
                         // curator sees a clear "X of N failed" toast — they can
                         // retry instead of finding out from a confused friend later.
-                        failed_uploads.push(pm.name.clone());
                         if pm.source.is_none() {
                             log::error!("Mod '{}' has no bundle AND no GitHub source -- friends won't be able to download it", pm.name);
                         }
@@ -1720,8 +2342,12 @@ pub(super) async fn share_profile_impl(
                     return Err(e);
                 }
                 log::error!("Failed to zip mod '{}': {}", pm.name, e);
-                failed_upload_reasons.push((pm.name.clone(), e.to_string()));
-                failed_uploads.push(pm.name.clone());
+                record_upload_issue_or_preserve(
+                    pm,
+                    e.to_string(),
+                    &mut failed_uploads,
+                    &mut failed_upload_reasons,
+                );
             }
         }
     }
@@ -1786,7 +2412,7 @@ pub(super) async fn share_profile_impl(
     // always loads it first).
     let on_disk = crate::profiles::load_profile(&profile.id, profiles_path)
         .unwrap_or_else(|_| profile.clone());
-    let merged = merge_publish_enrichment(&on_disk, &profile);
+    let merged = merge_publish_enrichment(&on_disk, &profile, &version_db);
     crate::profiles::save_profile(&merged, profiles_path)?;
     log::info!(
         "Saved enriched profile '{}' with bundle_urls to local JSON ({} mod(s))",
@@ -1996,6 +2622,27 @@ pub async fn reshare_profile(
     .map_err(|e| e.to_string())?;
 
     let old_profile = crate::profiles::load_profile(&name, &profiles_path).ok();
+    let version_db = crate::mod_versions::load(&config_path);
+    let published_filename = code_to_filename(&share_info.code);
+    let published_profile = match fetch_shared_profile(
+        &share_info.owner,
+        &published_filename,
+        Some(&token),
+    )
+    .await
+    {
+        Ok(profile) => Some(profile),
+        Err(e) => {
+            log::warn!(
+                    "Re-share '{}': could not read last published manifest for missing-local recovery: {}",
+                    name,
+                    e
+                );
+            None
+        }
+    };
+    let reusable_bundles_for_missing =
+        reusable_bundle_index(&profiles_path, &share_info.owner, &version_db);
 
     let (mut profile, not_installed) = load_profile_for_publish_from_paths(
         &name,
@@ -2007,10 +2654,21 @@ pub async fn reshare_profile(
         &config_path,
         game_version.as_deref(),
         exclude_stored_members,
+        published_profile.as_ref(),
+        Some(&reusable_bundles_for_missing),
     )
     .map_err(|e| e.to_string())?;
 
     profile.created_by = Some(share_info.owner.clone());
+    let removed = crate::profiles::collapse_equivalent_profile_mods(&mut profile, &version_db);
+    if removed > 0 {
+        log::info!(
+            "Re-share '{}': collapsed {} duplicate mod version entr{} before upload",
+            profile.name,
+            removed,
+            if removed == 1 { "y" } else { "ies" },
+        );
+    }
     log::info!(
         "Re-sharing saved profile '{}': {} referenced mods",
         name,
@@ -2022,15 +2680,13 @@ pub async fn reshare_profile(
     // cleared their `files` so the bundling loop below skips them, but
     // they still need to surface in `ensure_profile_publish_complete`'s
     // missing-bundles report with a clear "not installed" message.
-    let mut failed_uploads: Vec<String> = not_installed;
-    let mut failed_upload_reasons: Vec<(String, String)> = failed_uploads
+    let mut failed_uploads: Vec<String> = not_installed
         .iter()
-        .map(|name| {
-            (
-                name.clone(),
-                "This mod is in the modpack but is not installed locally.".to_string(),
-            )
-        })
+        .map(|issue| issue.name.clone())
+        .collect();
+    let mut failed_upload_reasons: Vec<(String, String)> = not_installed
+        .iter()
+        .map(|issue| (issue.name.clone(), issue.marked_reason()))
         .collect();
     let prior_bundle_source_fingerprints = share_info.bundle_source_fingerprints.clone();
     let prior_bundle_source_fast_fingerprints = share_info.bundle_source_fast_fingerprints.clone();
@@ -2046,7 +2702,9 @@ pub async fn reshare_profile(
     let mut bundles_uploaded = 0usize;
     let mut bundle_source_fingerprints: HashMap<String, String> = HashMap::new();
     let mut bundle_source_fast_fingerprints: HashMap<String, String> = HashMap::new();
-    let reusable_bundles = reusable_bundle_index(&profiles_path, &share_info.owner);
+    let mut reusable_bundles =
+        reusable_bundle_index(&profiles_path, &share_info.owner, &version_db);
+    let profile_name_for_reuse = profile.name.clone();
 
     // Bundle ALL mods to guarantee version matching (same as share_profile).
     for (pos, idx) in bundlable.into_iter().enumerate() {
@@ -2067,25 +2725,39 @@ pub async fn reshare_profile(
         );
 
         let pm = &mut profile.mods[idx];
-        let fingerprint_key = bundle_source_fingerprint_key(pm);
+        let fingerprint_key = bundle_source_fingerprint_key(pm, &version_db);
+        let fingerprint_lookup_keys = bundle_source_fingerprint_lookup_keys(pm, &version_db);
         let source_fast_fingerprint =
             match fingerprint_profile_mod_file_metadata(pm, &mods_path, &disabled_path) {
                 Ok(fingerprint) => bundle_source_fast_fingerprint_value(pm, &fingerprint),
                 Err(e) => {
                     log::error!("Failed to fingerprint mod metadata '{}': {}", pm.name, e);
-                    failed_upload_reasons.push((pm.name.clone(), e.to_string()));
-                    failed_uploads.push(pm.name.clone());
+                    record_upload_issue_or_preserve(
+                        pm,
+                        e.to_string(),
+                        &mut failed_uploads,
+                        &mut failed_upload_reasons,
+                    );
                     continue;
                 }
             };
         if existing_bundle_matches_fast_source(
             pm,
             &prior_bundle_source_fast_fingerprints,
-            &fingerprint_key,
+            &fingerprint_lookup_keys,
             &source_fast_fingerprint,
         ) {
             bundles_skipped_before_zip += 1;
-            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            bundle_source_fast_fingerprints
+                .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
+            remember_reusable_bundle(
+                &mut reusable_bundles,
+                &fingerprint_key,
+                Some(&source_fast_fingerprint),
+                None,
+                pm,
+                &profile_name_for_reuse,
+            );
             log::info!(
                 "Re-share '{}': skipping bundle for '{}' (source metadata unchanged)",
                 profile.name,
@@ -2093,12 +2765,22 @@ pub async fn reshare_profile(
             );
             continue;
         }
-        if let Some(bundle) = reusable_bundles.find_fast(&fingerprint_key, &source_fast_fingerprint)
+        if let Some(bundle) =
+            reusable_bundles.find_fast(&fingerprint_lookup_keys, &source_fast_fingerprint)
         {
             bundles_skipped_before_zip += 1;
             pm.bundle_url = Some(bundle.bundle_url);
             pm.bundle_sha256 = Some(bundle.bundle_sha256);
-            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            bundle_source_fast_fingerprints
+                .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
+            remember_reusable_bundle(
+                &mut reusable_bundles,
+                &fingerprint_key,
+                Some(&source_fast_fingerprint),
+                None,
+                pm,
+                &profile_name_for_reuse,
+            );
             log::info!(
                 "Re-share '{}': reusing bundle for '{}' from profile '{}' (source metadata unchanged)",
                 profile.name,
@@ -2112,20 +2794,33 @@ pub async fn reshare_profile(
             Ok(fingerprint) => bundle_source_fingerprint_value(pm, &fingerprint),
             Err(e) => {
                 log::error!("Failed to fingerprint mod '{}': {}", pm.name, e);
-                failed_upload_reasons.push((pm.name.clone(), e.to_string()));
-                failed_uploads.push(pm.name.clone());
+                record_upload_issue_or_preserve(
+                    pm,
+                    e.to_string(),
+                    &mut failed_uploads,
+                    &mut failed_upload_reasons,
+                );
                 continue;
             }
         };
         if existing_bundle_matches_source(
             pm,
             &prior_bundle_source_fingerprints,
-            &fingerprint_key,
+            &fingerprint_lookup_keys,
             &source_fingerprint,
         ) {
             bundles_skipped_before_zip += 1;
-            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint);
-            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint.clone());
+            bundle_source_fast_fingerprints
+                .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
+            remember_reusable_bundle(
+                &mut reusable_bundles,
+                &fingerprint_key,
+                Some(&source_fast_fingerprint),
+                Some(&source_fingerprint),
+                pm,
+                &profile_name_for_reuse,
+            );
             log::info!(
                 "Re-share '{}': skipping bundle for '{}' (source fingerprint unchanged)",
                 profile.name,
@@ -2133,12 +2828,23 @@ pub async fn reshare_profile(
             );
             continue;
         }
-        if let Some(bundle) = reusable_bundles.find_strong(&fingerprint_key, &source_fingerprint) {
+        if let Some(bundle) =
+            reusable_bundles.find_strong(&fingerprint_lookup_keys, &source_fingerprint)
+        {
             bundles_skipped_before_zip += 1;
             pm.bundle_url = Some(bundle.bundle_url);
             pm.bundle_sha256 = Some(bundle.bundle_sha256);
-            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint);
-            bundle_source_fast_fingerprints.insert(fingerprint_key, source_fast_fingerprint);
+            bundle_source_fingerprints.insert(fingerprint_key.clone(), source_fingerprint.clone());
+            bundle_source_fast_fingerprints
+                .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
+            remember_reusable_bundle(
+                &mut reusable_bundles,
+                &fingerprint_key,
+                Some(&source_fast_fingerprint),
+                Some(&source_fingerprint),
+                pm,
+                &profile_name_for_reuse,
+            );
             log::info!(
                 "Re-share '{}': reusing bundle for '{}' from profile '{}' (source fingerprint unchanged)",
                 profile.name,
@@ -2189,6 +2895,14 @@ pub async fn reshare_profile(
                             .insert(fingerprint_key.clone(), source_fingerprint.clone());
                         bundle_source_fast_fingerprints
                             .insert(fingerprint_key.clone(), source_fast_fingerprint.clone());
+                        remember_reusable_bundle(
+                            &mut reusable_bundles,
+                            &fingerprint_key,
+                            Some(&source_fast_fingerprint),
+                            Some(&source_fingerprint),
+                            pm,
+                            &profile_name_for_reuse,
+                        );
                         log::info!(
                             "Re-bundled mod '{}' successfully ({} bytes)",
                             pm.name,
@@ -2197,15 +2911,23 @@ pub async fn reshare_profile(
                     }
                     Err(e) => {
                         log::error!("Failed to upload bundle for '{}': {}", pm.name, e);
-                        failed_upload_reasons.push((pm.name.clone(), e.to_string()));
-                        failed_uploads.push(pm.name.clone());
+                        record_upload_issue_or_preserve(
+                            pm,
+                            e.to_string(),
+                            &mut failed_uploads,
+                            &mut failed_upload_reasons,
+                        );
                     }
                 }
             }
             Err(e) => {
                 log::error!("Failed to zip mod '{}': {}", pm.name, e);
-                failed_upload_reasons.push((pm.name.clone(), e.to_string()));
-                failed_uploads.push(pm.name.clone());
+                record_upload_issue_or_preserve(
+                    pm,
+                    e.to_string(),
+                    &mut failed_uploads,
+                    &mut failed_upload_reasons,
+                );
             }
         }
     }
@@ -2281,7 +3003,7 @@ pub async fn reshare_profile(
         .ok()
         .or_else(|| old_profile.clone())
         .unwrap_or_else(|| profile.clone());
-    let merged = merge_publish_enrichment(&on_disk, &profile);
+    let merged = merge_publish_enrichment(&on_disk, &profile, &version_db);
     crate::profiles::save_profile(&merged, &profiles_path).map_err(|e| e.to_string())?;
     log::info!(
         "Saved re-shared enriched profile '{}' to local JSON ({} mod(s))",
@@ -2715,6 +3437,147 @@ mod listing_tests {
 }
 
 #[cfg(test)]
+mod restore_metadata_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn profile_mod(name: &str, version: &str, folder: &str) -> ProfileMod {
+        ProfileMod {
+            mod_version_id: None,
+            name: name.into(),
+            version: version.into(),
+            source: None,
+            hash: None,
+            files: vec![],
+            folder_name: Some(folder.into()),
+            mod_id: Some(folder.into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        }
+    }
+
+    fn profile(name: &str, mods: Vec<ProfileMod>) -> Profile {
+        Profile {
+            id: crate::profiles::new_profile_id(),
+            name: name.into(),
+            game_version: Some("0.105.0".into()),
+            created_by: Some("qa".into()),
+            mods,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            public: Some(false),
+            mod_extras: Default::default(),
+        }
+    }
+
+    #[test]
+    fn published_bundle_container_enriches_local_member_row() {
+        let mut local = profile(
+            "TesterW",
+            vec![profile_mod("Alice Defect Skin", "2.1", "AliceDefectSkin")],
+        );
+        let mut published_bundle =
+            profile_mod("AliceDefectSkin V2.0", "2.0", "AliceDefectSkin V2.0");
+        published_bundle.mod_id = None;
+        published_bundle.hash = Some("published-hash".into());
+        published_bundle.files = vec!["AliceDefectSkin V2.0/AliceDefectSkin.dll".into()];
+        published_bundle.bundle_url = Some(
+            "https://github.com/MohamedSerhan/sts2mm-profiles/releases/download/bundles/AliceDefectSkin_V2_0_v2.0.zip"
+                .into(),
+        );
+        published_bundle.bundle_sha256 = Some("580236".into());
+        published_bundle.bundle_members = vec![
+            "Alice Defect Skin".into(),
+            "Alice Defect Voice Bridge".into(),
+        ];
+        let published = profile("TesterW", vec![published_bundle]);
+
+        let version_db = crate::mod_versions::ModVersionsDb::default();
+        let merged = merge_published_restore_metadata(&mut local, &published, &version_db);
+
+        assert_eq!(merged, 1);
+        let repaired = &local.mods[0];
+        assert_eq!(repaired.version, "2.0");
+        assert!(repaired
+            .bundle_url
+            .as_deref()
+            .is_some_and(|url| url.contains("AliceDefectSkin_V2_0_v2.0.zip")));
+        assert_eq!(repaired.bundle_sha256.as_deref(), Some("580236"));
+        assert_eq!(
+            repaired.bundle_members,
+            vec![
+                "Alice Defect Skin".to_string(),
+                "Alice Defect Voice Bridge".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn local_bundle_container_does_not_enrich_from_published_member_row() {
+        let mut local_bundle = profile_mod("AliceDefectSkin V2.0", "2.0", "AliceDefectSkin V2.0");
+        local_bundle.mod_id = None;
+        local_bundle.bundle_members = vec![
+            "Alice Defect Skin".into(),
+            "Alice Defect Voice Bridge".into(),
+            "voicepack".into(),
+            "VoiceModFramework".into(),
+        ];
+        local_bundle.bundle_member_ids = vec![
+            "AliceDefectSkin".into(),
+            "AliceDefectVoiceBridge".into(),
+            "voicemod".into(),
+        ];
+        let mut local = profile("TesterW", vec![local_bundle]);
+
+        let mut published_voice =
+            profile_mod("VoiceModFramework", "1.0.0", "VoiceModFramework V1.11");
+        published_voice.mod_id = Some("voicemod".into());
+        published_voice.bundle_url = Some(
+            "https://github.com/MohamedSerhan/sts2mm-profiles/releases/download/bundles/VoiceModFramework_v1.0.0_b85dd30d.zip"
+                .into(),
+        );
+        published_voice.bundle_sha256 = Some("voice-sha".into());
+
+        let mut published_alice =
+            profile_mod("AliceDefectSkin V2.0", "2.0", "AliceDefectSkin V2.0");
+        published_alice.mod_id = None;
+        published_alice.bundle_url = Some(
+            "https://github.com/MohamedSerhan/sts2mm-profiles/releases/download/bundles/AliceDefectSkin_V2_0_v2.0_58023641.zip"
+                .into(),
+        );
+        published_alice.bundle_sha256 = Some("alice-sha".into());
+        published_alice.files = vec!["AliceDefectSkin V2.0/AliceDefectSkin.dll".into()];
+        published_alice.bundle_members = vec![
+            "Alice Defect Skin".into(),
+            "Alice Defect Voice Bridge".into(),
+            "voicepack".into(),
+            "VoiceModFramework".into(),
+        ];
+
+        let published = profile("TesterW", vec![published_voice, published_alice]);
+
+        let version_db = crate::mod_versions::ModVersionsDb::default();
+        let merged = merge_published_restore_metadata(&mut local, &published, &version_db);
+
+        assert_eq!(merged, 1);
+        let repaired = &local.mods[0];
+        let url = repaired.bundle_url.as_deref().unwrap_or_default();
+        assert!(
+            url.contains("AliceDefectSkin_V2_0_v2.0_58023641.zip"),
+            "Alice bundle container must use the Alice asset, got {url}"
+        );
+        assert!(
+            !url.contains("VoiceModFramework"),
+            "Alice bundle container must never inherit the member's asset URL"
+        );
+        assert_eq!(repaired.bundle_sha256.as_deref(), Some("alice-sha"));
+    }
+}
+
+#[cfg(test)]
 mod share_orchestration_tests {
     //! End-to-end orchestration tests that drive `share_profile_impl`
     //! and `load_profile_for_publish_from_paths`. These exercise the
@@ -2766,6 +3629,263 @@ mod share_orchestration_tests {
         }
     }
 
+    fn version_record(
+        id: &str,
+        name: &str,
+        version: &str,
+        folder: &str,
+        mod_id: &str,
+        aliases: Vec<String>,
+    ) -> crate::mod_versions::ModVersionRecord {
+        crate::mod_versions::ModVersionRecord {
+            id: id.into(),
+            identity_key: crate::mod_versions::artifact_identity_key(
+                name,
+                Some(folder),
+                Some(mod_id),
+                version,
+                Some(id),
+                None,
+            ),
+            aliases,
+            name: name.into(),
+            version: version.into(),
+            source_version: None,
+            folder_name: Some(folder.into()),
+            mod_id: Some(mod_id.into()),
+            bundle_member_ids: vec![],
+            source: None,
+            content_hash: Some(id.into()),
+            archive_sha256: None,
+            cache_relpath: None,
+        }
+    }
+
+    #[test]
+    fn bundle_source_fingerprint_key_resolves_aliases_and_keeps_versions_distinct() {
+        let mut db = crate::mod_versions::ModVersionsDb::default();
+        db.records.insert(
+            "ritsu-canonical".into(),
+            version_record(
+                "ritsu-canonical",
+                "RitsuLib (STS2 0.103.2 compat)",
+                "0.4.24",
+                "RitsuLib",
+                "STS2-RitsuLib",
+                vec!["ritsu-alias".into()],
+            ),
+        );
+        db.aliases
+            .insert("ritsu-alias".into(), "ritsu-canonical".into());
+        db.records.insert(
+            "ritsu-other".into(),
+            version_record(
+                "ritsu-other",
+                "RitsuLib (STS2 0.104.0 compat)",
+                "0.4.25",
+                "RitsuLib",
+                "STS2-RitsuLib",
+                vec![],
+            ),
+        );
+
+        let mut alias_pm = profile_mod("RitsuLib (STS2 0.103.2 compat)", "RitsuLib");
+        alias_pm.mod_id = Some("STS2-RitsuLib".into());
+        alias_pm.version = "0.4.24".into();
+        alias_pm.mod_version_id = Some("ritsu-alias".into());
+        let mut canonical_pm = alias_pm.clone();
+        canonical_pm.mod_version_id = Some("ritsu-canonical".into());
+        let mut other_pm = profile_mod("RitsuLib (STS2 0.104.0 compat)", "RitsuLib");
+        other_pm.mod_id = Some("STS2-RitsuLib".into());
+        other_pm.version = "0.4.25".into();
+        other_pm.mod_version_id = Some("ritsu-other".into());
+
+        assert_eq!(
+            bundle_source_fingerprint_key(&alias_pm, &db),
+            bundle_source_fingerprint_key(&canonical_pm, &db)
+        );
+        assert_ne!(
+            bundle_source_fingerprint_key(&alias_pm, &db),
+            bundle_source_fingerprint_key(&other_pm, &db)
+        );
+    }
+
+    #[test]
+    fn publish_preparation_dedupes_equivalent_mod_version_aliases() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+        write_mod(&mods_path, "RitsuLib", "RitsuLib (STS2 0.103.2 compat)");
+
+        let mut installed = scan_mods(&mods_path).into_iter().next().unwrap();
+        let canonical_id =
+            crate::mod_versions::ensure_mod_info_id(&mut installed, tmpdir.path()).unwrap();
+        crate::mod_versions::alias_shared_id("ritsu-alias", &mut installed, tmpdir.path()).unwrap();
+
+        let mut first = profile_mod("RitsuLib (STS2 0.103.2 compat)", "RitsuLib");
+        first.mod_version_id = Some("ritsu-alias".into());
+        let mut duplicate = profile_mod("RitsuLib (STS2 0.103.2 compat)", "RitsuLib");
+        duplicate.mod_version_id = Some(canonical_id.clone());
+        duplicate.source = Some("github:ritsu/lib".into());
+        duplicate.bundle_url = Some("https://example.com/ritsu.zip".into());
+        duplicate.bundle_sha256 = Some("ritsu-sha".into());
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Alias Pack".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![first, duplicate],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let (prepared, not_installed) = load_profile_for_publish_from_paths(
+            "Alias Pack",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(not_installed.is_empty());
+        assert_eq!(prepared.mods.len(), 1);
+        assert_eq!(
+            prepared.mods[0].mod_version_id.as_deref(),
+            Some(canonical_id.as_str())
+        );
+        assert_eq!(prepared.mods[0].source.as_deref(), Some("github:ritsu/lib"));
+        assert_eq!(prepared.mods[0].bundle_sha256.as_deref(), Some("ritsu-sha"));
+    }
+
+    #[test]
+    fn publish_preparation_collapses_duplicate_before_missing_issue_seed() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        let mod_dir = mods_path.join("RitsuLib");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+        std::fs::write(
+            mod_dir.join("RitsuLib.json"),
+            br#"{"id":"STS2-RitsuLib","name":"RitsuLib (STS2 0.103.2 compat)","version":"0.4.24"}"#,
+        )
+        .unwrap();
+        std::fs::write(mod_dir.join("RitsuLib.dll"), b"ritsu").unwrap();
+
+        let mut installed = scan_mods(&mods_path).into_iter().next().unwrap();
+        let canonical_id =
+            crate::mod_versions::ensure_mod_info_id(&mut installed, tmpdir.path()).unwrap();
+        crate::mod_versions::alias_shared_id("ritsu-alias", &mut installed, tmpdir.path()).unwrap();
+
+        let mut stale_missing = profile_mod("RitsuLib (STS2 0.103.2 compat)", "MissingRitsu");
+        stale_missing.version = "0.4.24".into();
+        stale_missing.mod_id = Some("STS2-RitsuLib".into());
+        stale_missing.mod_version_id = Some("ritsu-alias".into());
+        stale_missing.files = vec!["MissingRitsu/MissingRitsu.dll".into()];
+        let mut installed_duplicate = profile_mod("RitsuLib (STS2 0.103.2 compat)", "RitsuLib");
+        installed_duplicate.version = "0.4.24".into();
+        installed_duplicate.mod_id = Some("STS2-RitsuLib".into());
+        installed_duplicate.mod_version_id = Some(canonical_id.clone());
+        installed_duplicate.source = Some("github:ritsu/lib".into());
+
+        let profile = Profile {
+            id: "corrupt-ritsu-pack".into(),
+            name: "Corrupt Ritsu Pack".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![stale_missing, installed_duplicate],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        std::fs::write(
+            profiles_path.join("corrupt-ritsu-pack.json"),
+            serde_json::to_string_pretty(&profile).unwrap(),
+        )
+        .unwrap();
+
+        let (prepared, not_installed) = load_profile_for_publish_from_paths(
+            "Corrupt Ritsu Pack",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            not_installed.is_empty(),
+            "duplicate stale row must not seed a missing-local publish issue: {:?}",
+            not_installed
+        );
+        assert_eq!(prepared.mods.len(), 1);
+        assert_eq!(
+            prepared.mods[0].mod_version_id.as_deref(),
+            Some(canonical_id.as_str())
+        );
+        assert_eq!(prepared.mods[0].source.as_deref(), Some("github:ritsu/lib"));
+        assert_eq!(prepared.mods[0].folder_name.as_deref(), Some("RitsuLib"));
+        assert!(
+            prepared.mods[0]
+                .files
+                .iter()
+                .any(|file| file.ends_with("RitsuLib.dll")),
+            "prepared files should be refreshed from the installed mod: {:?}",
+            prepared.mods[0].files
+        );
+    }
+
+    #[test]
+    fn duplicate_publish_issue_for_same_mod_keeps_upload_failure() {
+        let mut failed_uploads = Vec::new();
+        let mut failed_upload_reasons = Vec::new();
+        record_publish_issue(
+            &mut failed_uploads,
+            &mut failed_upload_reasons,
+            PublishIssue::missing_unrecoverable("RitsuLib (STS2 0.103.2 compat)"),
+        );
+        record_publish_issue(
+            &mut failed_uploads,
+            &mut failed_upload_reasons,
+            PublishIssue::upload_failed(
+                "RitsuLib (STS2 0.103.2 compat)",
+                "Upload failed with 422 already_exists",
+            ),
+        );
+
+        assert_eq!(
+            failed_uploads,
+            vec!["RitsuLib (STS2 0.103.2 compat)".to_string()]
+        );
+        assert_eq!(failed_upload_reasons.len(), 1);
+        assert!(failed_upload_reasons[0].1.contains("upload_failed"));
+        assert!(failed_upload_reasons[0].1.contains("already_exists"));
+        assert!(!failed_upload_reasons[0].1.contains("missing_unrecoverable"));
+    }
+
     #[test]
     fn publish_preparation_uses_saved_profile_membership_not_entire_library() {
         let tmpdir = tempfile::tempdir().unwrap();
@@ -2802,6 +3922,8 @@ mod share_orchestration_tests {
             tmpdir.path(),
             Some("0.105.0"),
             false,
+            None,
+            None,
         )
         .unwrap();
 
@@ -2849,6 +3971,8 @@ mod share_orchestration_tests {
             tmpdir.path(),
             Some("0.105.0"),
             false,
+            None,
+            None,
         )
         .unwrap();
 
@@ -2915,6 +4039,8 @@ mod share_orchestration_tests {
             tmpdir.path(),
             None,
             false,
+            None,
+            None,
         )
         .unwrap();
 
@@ -2989,13 +4115,18 @@ mod share_orchestration_tests {
             tmpdir.path(),
             None,
             false,
+            None,
+            None,
         )
         .unwrap();
 
         // The entry is retained (so the curator can still see/remove it
         // from the pack) but flagged as not installed.
         assert_eq!(prepared.mods.len(), 2);
-        assert_eq!(not_installed, vec!["Long Gone".to_string()]);
+        assert_eq!(
+            not_installed,
+            vec![PublishIssue::missing_unrecoverable("Long Gone")]
+        );
         let missing_pm = prepared
             .mods
             .iter()
@@ -3013,6 +4144,320 @@ mod share_orchestration_tests {
             .find(|m| m.name == "Still Here")
             .unwrap();
         assert!(!ok_pm.files.is_empty());
+    }
+
+    #[test]
+    fn publish_preparation_preserves_saved_bundle_for_missing_local_mod() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut missing = profile_mod("Long Gone", "LongGone");
+        missing.bundle_url = Some(
+            "https://github.com/octo/sts2mm-profiles/releases/download/bundles/LongGone.zip".into(),
+        );
+        missing.bundle_sha256 = Some("saved-sha".into());
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![missing],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let (prepared, issues) = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(issues.is_empty());
+        assert_eq!(
+            prepared.mods[0].bundle_url.as_deref(),
+            Some("https://github.com/octo/sts2mm-profiles/releases/download/bundles/LongGone.zip")
+        );
+        assert_eq!(prepared.mods[0].bundle_sha256.as_deref(), Some("saved-sha"));
+        assert!(
+            prepared.mods[0].files.is_empty(),
+            "missing local files must be skipped even when the old bundle is preserved"
+        );
+    }
+
+    #[test]
+    fn publish_preparation_preserves_missing_local_bundle_from_published_manifest() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut local = profile_mod("RitsuLib (STS2 0.103.2 compat)", "RitsuLib");
+        local.mod_id = Some("STS2-RitsuLib".into());
+        local.mod_version_id = Some("ritsu-103".into());
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![local],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let mut published_mod = profile_mod("RitsuLib (STS2 0.103.2 compat)", "RitsuLib");
+        published_mod.mod_id = Some("STS2-RitsuLib".into());
+        published_mod.mod_version_id = Some("ritsu-103".into());
+        published_mod.bundle_url = Some("https://example.com/ritsu-103.zip".into());
+        published_mod.bundle_sha256 = Some("ritsu-103-sha".into());
+        let published = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Stable".into(),
+            game_version: None,
+            created_by: Some("octo".into()),
+            mods: vec![published_mod],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+
+        let (prepared, issues) = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+            false,
+            Some(&published),
+            None,
+        )
+        .unwrap();
+
+        assert!(issues.is_empty());
+        assert_eq!(
+            prepared.mods[0].bundle_url.as_deref(),
+            Some("https://example.com/ritsu-103.zip")
+        );
+        assert_eq!(
+            prepared.mods[0].bundle_sha256.as_deref(),
+            Some("ritsu-103-sha")
+        );
+        assert!(prepared.mods[0].files.is_empty());
+    }
+
+    #[test]
+    fn publish_preparation_reuses_same_artifact_bundle_from_owned_profiles() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut reusable_mod = profile_mod("Shared Lib", "SharedLib");
+        reusable_mod.mod_version_id = Some("shared-lib-1".into());
+        reusable_mod.bundle_url = Some("https://example.com/shared-lib.zip".into());
+        reusable_mod.bundle_sha256 = Some("shared-lib-sha".into());
+        let reusable_profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Other Pack".into(),
+            game_version: None,
+            created_by: Some("octo".into()),
+            mods: vec![reusable_mod],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&reusable_profile, &profiles_path).unwrap();
+        let share_info = ShareInfo {
+            code: "ABCD-1234".into(),
+            owner: "octo".into(),
+            file_sha: Some("sha".into()),
+            share_format_version: SHARE_FORMAT_VERSION,
+            published_signature: Some(profile_publish_signature(&reusable_profile)),
+            bundle_source_fingerprints: HashMap::new(),
+            bundle_source_fast_fingerprints: HashMap::new(),
+        };
+        save_share_info(
+            &share_info_path_for_profile(&reusable_profile, &profiles_path),
+            &share_info,
+        )
+        .unwrap();
+
+        let mut local = profile_mod("Shared Lib", "SharedLib");
+        local.mod_version_id = Some("shared-lib-1".into());
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![local],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let version_db = crate::mod_versions::load(tmpdir.path());
+        let reusable_index = reusable_bundle_index(&profiles_path, "octo", &version_db);
+        let (prepared, issues) = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+            false,
+            None,
+            Some(&reusable_index),
+        )
+        .unwrap();
+
+        assert!(issues.is_empty());
+        assert_eq!(
+            prepared.mods[0].bundle_url.as_deref(),
+            Some("https://example.com/shared-lib.zip")
+        );
+        assert_eq!(
+            prepared.mods[0].bundle_sha256.as_deref(),
+            Some("shared-lib-sha")
+        );
+    }
+
+    #[test]
+    fn publish_preparation_does_not_reuse_bundle_for_different_mod_version_id() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut local = profile_mod("RitsuLib (STS2 0.103.2 compat)", "RitsuLib");
+        local.mod_id = Some("STS2-RitsuLib".into());
+        local.mod_version_id = Some("ritsu-103".into());
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![local],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let mut published_mod = profile_mod("RitsuLib (STS2 0.104.0 compat)", "RitsuLib");
+        published_mod.mod_id = Some("STS2-RitsuLib".into());
+        published_mod.version = "0.4.25".into();
+        published_mod.mod_version_id = Some("ritsu-104".into());
+        published_mod.bundle_url = Some("https://example.com/ritsu-104.zip".into());
+        published_mod.bundle_sha256 = Some("ritsu-104-sha".into());
+        let published = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Stable".into(),
+            game_version: None,
+            created_by: Some("octo".into()),
+            mods: vec![published_mod],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+
+        let (prepared, issues) = load_profile_for_publish_from_paths(
+            "Stable",
+            None,
+            true,
+            &profiles_path,
+            &mods_path,
+            &disabled_path,
+            tmpdir.path(),
+            None,
+            false,
+            Some(&published),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            issues,
+            vec![PublishIssue::missing_unrecoverable(
+                "RitsuLib (STS2 0.103.2 compat)"
+            )]
+        );
+        assert!(prepared.mods[0].bundle_url.is_none());
+        assert!(prepared.mods[0].bundle_sha256.is_none());
+    }
+
+    #[test]
+    fn mixed_missing_local_and_upload_failure_reports_both_publish_issue_types() {
+        let missing = PublishIssue::missing_unrecoverable("Missing Local");
+        let upload = PublishIssue::upload_failed(
+            "Upload Stuck",
+            "Upload of 'Upload_Stuck_v1.0.0_deadbeef.zip' failed with 422 already_exists.",
+        );
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Stable".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![
+                profile_mod("Missing Local", "MissingLocal"),
+                profile_mod("Upload Stuck", "UploadStuck"),
+            ],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        let failed_uploads = vec![missing.name.clone(), upload.name.clone()];
+        let failed_upload_reasons = vec![
+            (missing.name.clone(), missing.marked_reason()),
+            (upload.name.clone(), upload.marked_reason()),
+        ];
+
+        let err =
+            ensure_profile_publish_complete(&profile, &failed_uploads, &failed_upload_reasons)
+                .expect_err("mixed publish issues should block with details");
+        let msg = err.to_string();
+        assert!(msg.contains("[publish_issue:missing_unrecoverable]"));
+        assert!(msg.contains("[publish_issue:upload_failed]"));
+        assert!(msg.contains("422 already_exists"));
     }
 
     #[test]
@@ -3060,6 +4505,8 @@ mod share_orchestration_tests {
             tmpdir.path(),
             None,
             true,
+            None,
+            None,
         )
         .unwrap();
 
@@ -3112,6 +4559,8 @@ mod share_orchestration_tests {
             tmpdir.path(),
             None,
             false,
+            None,
+            None,
         )
         .unwrap();
 
@@ -3188,6 +4637,8 @@ mod share_orchestration_tests {
             tmpdir.path(),
             None,
             false,
+            None,
+            None,
         )
         .unwrap();
 
@@ -3256,6 +4707,8 @@ mod share_orchestration_tests {
             tmpdir.path(),
             None,
             false,
+            None,
+            None,
         )
         .unwrap();
 
@@ -3372,6 +4825,7 @@ mod share_orchestration_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            tmpdir.path(),
             "test-token",
             None,
             None,
@@ -3404,15 +4858,180 @@ mod share_orchestration_tests {
         let share_info_text =
             std::fs::read_to_string(share_info_path_for_profile(&saved, &profiles_path)).unwrap();
         let share_info: ShareInfo = serde_json::from_str(&share_info_text).unwrap();
+        let version_db = crate::mod_versions::ModVersionsDb::default();
+        let fingerprint_key = bundle_source_fingerprint_key(&saved.mods[0], &version_db);
         let fingerprint = share_info
             .bundle_source_fingerprints
-            .get("folder:testmod")
+            .get(&fingerprint_key)
             .expect(
                 "successful share should persist the source fingerprint for future re-share skips",
             );
         assert!(
             fingerprint.starts_with("v1:1.0.0:"),
             "source fingerprint must include the profile mod version: {fingerprint}"
+        );
+    }
+
+    #[tokio::test]
+    async fn share_profile_dedupes_equivalent_artifact_aliases_before_upload() {
+        let _env_guard = super::github::release_upload_tests::ENV_LOCK.lock().await;
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"login": "octo"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"name": "sts2mm-profiles"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST")).and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 100, "name": "RitsuLib_v0.4.24.zip",
+                "browser_download_url": "https://github.com/octo/sts2mm-profiles/releases/download/bundles/RitsuLib_v0.4.24.zip"
+            })))
+            .expect(1)
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT")).and(path_regex(r"/repos/octo/sts2mm-profiles/contents/.+\.json"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "content": {"sha": "abc", "html_url": "https://github.com/octo/sts2mm-profiles/blob/main/x.json"}
+            })))
+            .expect(1)
+            .mount(&server).await;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mods_path = tmpdir.path().join("mods");
+        let disabled_path = tmpdir.path().join("mods_disabled");
+        let profiles_path = tmpdir.path().join("profiles");
+        let mod_dir = mods_path.join("RitsuLib");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+        std::fs::write(
+            mod_dir.join("RitsuLib.json"),
+            br#"{"id":"STS2-RitsuLib","name":"RitsuLib (STS2 0.103.2 compat)","version":"0.4.24"}"#,
+        )
+        .unwrap();
+        std::fs::write(mod_dir.join("RitsuLib.dll"), b"ritsu").unwrap();
+
+        let mut db = crate::mod_versions::ModVersionsDb::default();
+        db.records.insert(
+            "ritsu-canonical".into(),
+            version_record(
+                "ritsu-canonical",
+                "RitsuLib (STS2 0.103.2 compat)",
+                "0.4.24",
+                "RitsuLib",
+                "STS2-RitsuLib",
+                vec!["ritsu-alias".into()],
+            ),
+        );
+        db.aliases
+            .insert("ritsu-alias".into(), "ritsu-canonical".into());
+        crate::mod_versions::save(&db, tmpdir.path()).unwrap();
+
+        let mut first = crate::profiles::ProfileMod {
+            mod_version_id: Some("ritsu-alias".into()),
+            name: "RitsuLib (STS2 0.103.2 compat)".into(),
+            version: "0.4.24".into(),
+            source: None,
+            hash: None,
+            files: vec!["RitsuLib".into()],
+            folder_name: Some("RitsuLib".into()),
+            mod_id: Some("STS2-RitsuLib".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        };
+        let mut duplicate = first.clone();
+        duplicate.mod_version_id = Some("ritsu-canonical".into());
+        duplicate.source = Some("github:ritsu/lib".into());
+        first.source = None;
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Alias Upload Pack".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![first, duplicate],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &profiles_path).unwrap();
+
+        let result = share_profile_impl(
+            profile,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            tmpdir.path(),
+            "test-token",
+            None,
+            None,
+            Vec::new(),
+        )
+        .await
+        .expect("alias-equivalent duplicate should share once");
+
+        assert!(result.failed_uploads.is_empty());
+        let saved = crate::profiles::load_profile("Alias Upload Pack", &profiles_path).unwrap();
+        assert_eq!(saved.mods.len(), 1);
+        assert_eq!(
+            saved.mods[0].mod_version_id.as_deref(),
+            Some("ritsu-canonical")
+        );
+        assert_eq!(saved.mods[0].source.as_deref(), Some("github:ritsu/lib"));
+
+        let manifest_request = server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .find(|request| {
+                request.method.as_str() == "PUT"
+                    && request
+                        .url
+                        .path()
+                        .starts_with("/repos/octo/sts2mm-profiles/contents/")
+            })
+            .expect("manifest upload request should be recorded");
+        let body: serde_json::Value = serde_json::from_slice(&manifest_request.body).unwrap();
+        let encoded = body["content"].as_str().unwrap();
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).unwrap();
+        let published: Profile = serde_json::from_slice(&decoded).unwrap();
+        assert_eq!(published.mods.len(), 1);
+        assert_eq!(
+            published.mods[0].mod_version_id.as_deref(),
+            Some("ritsu-canonical")
         );
     }
 
@@ -3481,7 +5100,7 @@ mod share_orchestration_tests {
             bundle_members: vec![],
             bundle_member_ids: vec![],
         };
-        let fingerprint_key = bundle_source_fingerprint_key(&profile_mod);
+        let fingerprint_key = legacy_bundle_source_fingerprint_key(&profile_mod);
         let source_fingerprint = bundle_source_fingerprint_value(
             &profile_mod,
             &fingerprint_profile_mod_files(&profile_mod, &mods_path, &disabled_path).unwrap(),
@@ -3525,6 +5144,7 @@ mod share_orchestration_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            tmpdir.path(),
             "test-token",
             Some(&emit),
             None,
@@ -3565,8 +5185,11 @@ mod share_orchestration_tests {
         assert!(
             saved_share_info
                 .bundle_source_fast_fingerprints
-                .contains_key("folder:testmod"),
-            "legacy strong-fingerprint skips should backfill the fast map for the next re-share"
+                .contains_key(&bundle_source_fingerprint_key(
+                    &saved.mods[0],
+                    &crate::mod_versions::ModVersionsDb::default(),
+                )),
+            "legacy strong-fingerprint skips should backfill the version-aware fast map for the next re-share"
         );
     }
 
@@ -3635,7 +5258,7 @@ mod share_orchestration_tests {
             bundle_members: vec![],
             bundle_member_ids: vec![],
         };
-        let fingerprint_key = bundle_source_fingerprint_key(&profile_mod);
+        let fingerprint_key = legacy_bundle_source_fingerprint_key(&profile_mod);
         let source_fast_fingerprint = bundle_source_fast_fingerprint_value(
             &profile_mod,
             &fingerprint_profile_mod_file_metadata(&profile_mod, &mods_path, &disabled_path)
@@ -3683,6 +5306,7 @@ mod share_orchestration_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            tmpdir.path(),
             "test-token",
             Some(&emit),
             None,
@@ -3771,7 +5395,8 @@ mod share_orchestration_tests {
             bundle_members: vec![],
             bundle_member_ids: vec![],
         };
-        let fingerprint_key = bundle_source_fingerprint_key(&shared_mod);
+        let version_db = crate::mod_versions::ModVersionsDb::default();
+        let fingerprint_key = bundle_source_fingerprint_key(&shared_mod, &version_db);
         let source_fast_fingerprint = bundle_source_fast_fingerprint_value(
             &shared_mod,
             &fingerprint_profile_mod_file_metadata(&shared_mod, &mods_path, &disabled_path)
@@ -3846,6 +5471,7 @@ mod share_orchestration_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            tmpdir.path(),
             "test-token",
             Some(&emit),
             None,
@@ -3950,6 +5576,7 @@ mod share_orchestration_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            tmpdir.path(),
             "test-token",
             Some(&emit),
             Some(&cancel),
@@ -4038,6 +5665,7 @@ mod share_orchestration_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            tmpdir.path(),
             "test-token",
             None,
             Some(&cancel),
@@ -4151,6 +5779,8 @@ mod share_orchestration_tests {
             tmpdir.path(),
             None,
             false,
+            None,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -4164,6 +5794,7 @@ mod share_orchestration_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            tmpdir.path(),
             "test-token",
             None,
             None,
@@ -4291,6 +5922,8 @@ mod share_orchestration_tests {
             tmpdir.path(),
             None,
             true,
+            None,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -4305,6 +5938,7 @@ mod share_orchestration_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            tmpdir.path(),
             "test-token",
             None,
             None,
@@ -4445,6 +6079,7 @@ mod share_orchestration_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            tmpdir.path(),
             "test-token",
             None,
             None,
@@ -5000,6 +6635,10 @@ mod merge_publish_enrichment_tests {
         }
     }
 
+    fn empty_db() -> crate::mod_versions::ModVersionsDb {
+        crate::mod_versions::ModVersionsDb::default()
+    }
+
     /// bundle_url/bundle_sha256 from the uploaded (filtered) profile must
     /// land on the matching on-disk mod, without disturbing other fields.
     #[test]
@@ -5011,7 +6650,7 @@ mod merge_publish_enrichment_tests {
         uploaded_mod.bundle_sha256 = Some("deadbeef".into());
         let uploaded = make_profile("Pack", vec![uploaded_mod]);
 
-        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+        let merged = merge_publish_enrichment(&on_disk, &uploaded, &empty_db());
 
         assert_eq!(merged.mods.len(), 1);
         assert_eq!(
@@ -5047,7 +6686,7 @@ mod merge_publish_enrichment_tests {
         uploaded_mod.bundle_sha256 = Some("deadbeef".into());
         let uploaded = make_profile("Pack", vec![uploaded_mod]);
 
-        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+        let merged = merge_publish_enrichment(&on_disk, &uploaded, &empty_db());
 
         assert_eq!(merged.mods[0].version, "v3.1.3");
         assert_eq!(
@@ -5089,7 +6728,7 @@ mod merge_publish_enrichment_tests {
         uploaded_mod.bundle_sha256 = Some("cafef00d".into());
         let uploaded = make_profile("Pack", vec![uploaded_mod]);
 
-        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+        let merged = merge_publish_enrichment(&on_disk, &uploaded, &empty_db());
 
         assert_eq!(
             merged.mods.len(),
@@ -5118,7 +6757,7 @@ mod merge_publish_enrichment_tests {
         uploaded_mod.source = Some("nexus:123".into());
         let uploaded = make_profile("Pack", vec![uploaded_mod]);
 
-        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+        let merged = merge_publish_enrichment(&on_disk, &uploaded, &empty_db());
         assert_eq!(merged.mods[0].source.as_deref(), Some("nexus:123"));
 
         // Case 2: on-disk already has a source -> kept, not overwritten.
@@ -5130,7 +6769,7 @@ mod merge_publish_enrichment_tests {
         uploaded_mod2.source = Some("nexus:123".into());
         let uploaded2 = make_profile("Pack", vec![uploaded_mod2]);
 
-        let merged2 = merge_publish_enrichment(&on_disk_with_source, &uploaded2);
+        let merged2 = merge_publish_enrichment(&on_disk_with_source, &uploaded2, &empty_db());
         assert_eq!(
             merged2.mods[0].source.as_deref(),
             Some("curator:override"),
@@ -5151,7 +6790,7 @@ mod merge_publish_enrichment_tests {
         uploaded.created_by = Some("octo".into());
         uploaded.public = Some(true);
 
-        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+        let merged = merge_publish_enrichment(&on_disk, &uploaded, &empty_db());
         assert_eq!(merged.created_by.as_deref(), Some("octo"));
         assert_eq!(merged.public, Some(true));
     }
@@ -5168,11 +6807,51 @@ mod merge_publish_enrichment_tests {
         let uploaded = make_profile("Pack", vec![make_mod("Mod A", "1.0.0")]);
         assert_eq!(uploaded.public, None);
 
-        let merged = merge_publish_enrichment(&on_disk, &uploaded);
+        let merged = merge_publish_enrichment(&on_disk, &uploaded, &empty_db());
         assert_eq!(
             merged.public,
             Some(true),
             "on-disk public flag must survive when uploaded profile doesn't specify one"
+        );
+    }
+
+    #[test]
+    fn merge_does_not_cross_mod_version_id_boundary_for_same_mod_id() {
+        let mut old_ritsu = make_mod("RitsuLib (STS2 0.103.2 compat)", "0.4.24");
+        old_ritsu.mod_id = Some("STS2-RitsuLib".into());
+        old_ritsu.mod_version_id = Some("ritsu-sts2-103".into());
+
+        let mut new_ritsu = make_mod("RitsuLib (STS2 0.104.0 compat)", "0.4.25");
+        new_ritsu.mod_id = Some("STS2-RitsuLib".into());
+        new_ritsu.mod_version_id = Some("ritsu-sts2-104".into());
+        let on_disk = make_profile("Pack", vec![old_ritsu, new_ritsu]);
+
+        let mut uploaded_mod = make_mod("RitsuLib (STS2 0.104.0 compat)", "0.4.25");
+        uploaded_mod.mod_id = Some("STS2-RitsuLib".into());
+        uploaded_mod.mod_version_id = Some("ritsu-sts2-104".into());
+        uploaded_mod.bundle_url = Some("https://example.com/ritsu-104.zip".into());
+        uploaded_mod.bundle_sha256 = Some("ritsu-104-sha".into());
+        let uploaded = make_profile("Pack", vec![uploaded_mod]);
+
+        let merged = merge_publish_enrichment(&on_disk, &uploaded, &empty_db());
+
+        let old = merged
+            .mods
+            .iter()
+            .find(|pm| pm.mod_version_id.as_deref() == Some("ritsu-sts2-103"))
+            .unwrap();
+        assert!(
+            old.bundle_url.is_none(),
+            "same mod_id but different artifact ID must not receive publish metadata"
+        );
+        let new = merged
+            .mods
+            .iter()
+            .find(|pm| pm.mod_version_id.as_deref() == Some("ritsu-sts2-104"))
+            .unwrap();
+        assert_eq!(
+            new.bundle_url.as_deref(),
+            Some("https://example.com/ritsu-104.zip")
         );
     }
 }

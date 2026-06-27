@@ -88,6 +88,15 @@ describe('<SettingsView>', () => {
       detail: { value: 'sidebar' },
     }));
 
+    await chooseOption(user, /Navigation layout/i, /Top bar/i);
+
+    await waitFor(() => {
+      expect(localStorage.getItem(NAVIGATION_LAYOUT_STORAGE_KEY)).toBe('topbar');
+    });
+    expect(onLayoutChange).toHaveBeenCalledWith(expect.objectContaining({
+      detail: { value: 'topbar' },
+    }));
+
     window.removeEventListener(NAVIGATION_LAYOUT_CHANGE_EVENT, onLayoutChange);
   });
 
@@ -154,6 +163,13 @@ describe('<SettingsView>', () => {
     await waitFor(() => {
       expect(getInvokeCalls().some(
         (c) => c.cmd === 'set_backup_retention' && c.args?.count === 0,
+      )).toBe(true);
+    });
+
+    await chooseOption(user, /Backups to keep/i, '3');
+    await waitFor(() => {
+      expect(getInvokeCalls().some(
+        (c) => c.cmd === 'set_backup_retention' && c.args?.count === 3,
       )).toBe(true);
     });
   });

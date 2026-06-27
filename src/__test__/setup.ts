@@ -164,6 +164,7 @@ function registerSafeDefaults(): void {
   invokeHandlers.set('list_profiles_cmd', () => []);
   invokeHandlers.set('get_profile_memberships', () => ({ profiles: [], mods: [] }));
   invokeHandlers.set('get_library_version_options', () => ({}));
+  invokeHandlers.set('remove_library_mod_version', () => true);
   invokeHandlers.set('set_profile_load_order', () => ({
     profile: null,
     settings_status: 'skipped_inactive',
@@ -201,6 +202,24 @@ function registerSafeDefaults(): void {
     log_path: null,
     game_version: null,
     failed_mods: [],
+  }));
+  invokeHandlers.set('get_launch_health', () => ({
+    active_profile_id: null,
+    active_profile_name: null,
+    current_game_version: null,
+    last_launch_game_version: null,
+    profile_game_version: null,
+    game_version_changed_since_last_launch: false,
+    profile_game_version_changed: false,
+    known_incompatible_mods: [],
+    dependency_blocked_mods: [],
+    previous_failed_mods: [],
+  }));
+  invokeHandlers.set('resolve_launch_health_blockers', () => ({
+    active_profile_id: null,
+    moved: [],
+    disabled_profile_entries: [],
+    failed: [],
   }));
   invokeHandlers.set('open_external_url', async (args) => {
     const { openUrl } = await import('@tauri-apps/plugin-opener');

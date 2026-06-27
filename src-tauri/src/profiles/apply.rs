@@ -28,11 +28,20 @@ use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods};
 
 use super::crud::{
     load_profile, mod_identity_keys, profile_mod_artifact_id_matches,
-    profile_mod_matches_installed, profile_mod_matches_installed_with_registry, sanitize_filename,
-    save_profile, version_is_wildcard,
+    profile_mod_matches_bundle_member, profile_mod_matches_installed,
+    profile_mod_matches_installed_with_registry, sanitize_filename, save_profile,
+    version_is_wildcard,
 };
 use super::membership::sync_profile_load_order_to_settings;
 use super::{Profile, ProfileMod, APP_CREATED_BY};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ApplyProfileResult {
+    /// Enabled profile entries that still have no matching installed mod after
+    /// the apply pass. Disabled entries are allowed to be absent from disk.
+    #[serde(default)]
+    pub missing_enabled_mods: Vec<String>,
+}
 
 fn profile_runtime_rank(
     profile: &Profile,
@@ -345,9 +354,13 @@ fn snapshot_current_inner(
             .filter(|id| !id.trim().is_empty())
             .unwrap_or_else(crate::profiles::new_profile_id),
         name: name.to_string(),
-        game_version: existing_profile
-            .as_ref()
-            .and_then(|p| p.game_version.clone()),
+        game_version: game_version_for_filter
+            .map(ToString::to_string)
+            .or_else(|| {
+                existing_profile
+                    .as_ref()
+                    .and_then(|p| p.game_version.clone())
+            }),
         created_by: existing_profile
             .as_ref()
             .and_then(|p| p.created_by.clone())
@@ -387,7 +400,7 @@ pub fn apply_profile_with_pins(
     disabled_path: &Path,
     pinned: &std::collections::HashSet<String>,
     config_path: &Path,
-) -> Result<()> {
+) -> Result<ApplyProfileResult> {
     let is_pinned = |m: &crate::mods::ModInfo| -> bool {
         if pinned.contains(&m.name) {
             return true;
@@ -426,6 +439,10 @@ pub fn apply_profile_with_pins(
             if let Some(id_match) = profile_mod_artifact_id_matches(pm, m, config_path) {
                 if id_match {
                     return Some(pm.enabled);
+                }
+                if profile_mod_matches_bundle_member(pm, m) {
+                    legacy_match = Some(pm.enabled);
+                    continue;
                 }
                 if profile_mod_matches_installed(pm, m) {
                     id_conflict = true;
@@ -507,19 +524,38 @@ pub fn apply_profile_with_pins(
         }
     }
 
-    // Warn about profile mods that we never saw on disk (neither enabled nor
-    // disabled). Helps diagnose subscription-update issues where a download
-    // landed under a different identifier than the profile expected.
-    for pm in &profile.mods {
+    // Report enabled profile mods that we never saw on disk (neither enabled
+    // nor disabled). Helps diagnose subscription-update issues where a
+    // download landed under a different identifier than the profile expected,
+    // and gives direct callers a structured failure instead of a log-only
+    // partial apply.
+    let mut missing_enabled_mods = Vec::new();
+    let mut missing_enabled_identities = std::collections::HashSet::new();
+    for pm in profile.mods.iter().filter(|pm| pm.enabled) {
         let found = current_enabled
             .iter()
             .chain(current_disabled.iter())
             .any(|disk_mod| profile_mod_matches_installed_with_registry(pm, disk_mod, config_path));
         if !found {
-            log::error!(
-                "Profile apply: profile expects '{}' enabled but no matching mod found on disk (folder={:?}, mod_id={:?})",
-                pm.name, pm.folder_name, pm.mod_id
+            let identity_key = format!(
+                "{}|{}|{}|{}",
+                pm.mod_version_id.as_deref().unwrap_or_default(),
+                pm.name,
+                pm.folder_name.as_deref().unwrap_or_default(),
+                pm.mod_id.as_deref().unwrap_or_default()
             );
+            if missing_enabled_identities.insert(identity_key) {
+                log::error!(
+                    "Profile apply: profile expects '{}' enabled but no matching mod found on disk (folder={:?}, mod_id={:?})",
+                    pm.name, pm.folder_name, pm.mod_id
+                );
+            }
+            if !missing_enabled_mods
+                .iter()
+                .any(|existing| existing == &pm.name)
+            {
+                missing_enabled_mods.push(pm.name.clone());
+            }
         }
     }
 
@@ -537,7 +573,9 @@ pub fn apply_profile_with_pins(
         );
     }
 
-    Ok(())
+    Ok(ApplyProfileResult {
+        missing_enabled_mods,
+    })
 }
 
 pub(crate) fn profile_mod_matches_pin(
@@ -782,6 +820,18 @@ fn stash_mod_for_replace(
     }
 }
 
+fn dedupe_display_names(names: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut deduped = Vec::new();
+    for name in names {
+        let key = name.trim().to_lowercase();
+        if key.is_empty() || seen.insert(key) {
+            deduped.push(name);
+        }
+    }
+    deduped
+}
+
 /// Switch to a profile: downloads missing mods, then enables the target
 /// profile's included mods.
 pub(crate) async fn switch_profile_from_paths(
@@ -794,7 +844,7 @@ pub(crate) async fn switch_profile_from_paths(
     token: Option<&str>,
 ) -> std::result::Result<SwitchProfileResult, String> {
     // Load target profile -- try local JSON first, then re-fetch from share code if missing
-    let profile = match load_profile(name, profiles_path) {
+    let mut profile = match load_profile(name, profiles_path) {
         Ok(p) => p,
         Err(_) => {
             // Local .json missing -- check for .share file to re-fetch from GitHub
@@ -829,6 +879,47 @@ pub(crate) async fn switch_profile_from_paths(
             }
         }
     };
+    match crate::sharing::enrich_profile_restore_metadata_from_share(
+        &mut profile,
+        profiles_path,
+        config_path,
+        token,
+    )
+    .await
+    {
+        Ok(merged) if merged > 0 => {
+            if let Err(e) = save_profile(&profile, profiles_path) {
+                log::warn!(
+                    "Could not persist enriched restore metadata for profile '{}': {}",
+                    profile.name,
+                    e
+                );
+            }
+        }
+        Ok(_) => {}
+        Err(e) => log::warn!(
+            "Could not enrich profile '{}' from published share metadata: {}",
+            profile.name,
+            e
+        ),
+    }
+    let version_db = crate::mod_versions::load(config_path);
+    let removed_duplicates =
+        crate::profiles::collapse_equivalent_profile_mods(&mut profile, &version_db);
+    if removed_duplicates > 0 {
+        log::info!(
+            "Collapsed {} duplicate mod entry(s) in profile '{}'",
+            removed_duplicates,
+            profile.name
+        );
+        if let Err(e) = save_profile(&profile, profiles_path) {
+            log::warn!(
+                "Could not persist duplicate cleanup for profile '{}': {}",
+                profile.name,
+                e
+            );
+        }
+    }
 
     if profile.mods.is_empty() {
         return Ok(SwitchProfileResult {
@@ -872,28 +963,32 @@ pub(crate) async fn switch_profile_from_paths(
     }
 
     // ── STEP 1: Download missing mods AND restore version-mismatched mods ──
-    let mut all_on_disk: Vec<crate::mods::ModInfo> = scan_mods(mods_path)
-        .into_iter()
-        .chain(scan_disabled_mods(disabled_path).into_iter())
-        .collect();
-    crate::mod_sources::enrich_mods_with_sources(&mut all_on_disk, config_path);
-    crate::mod_versions::enrich_mods_with_versions(&mut all_on_disk, config_path);
+    let refresh_disk_state = || {
+        let mut all_on_disk: Vec<crate::mods::ModInfo> = scan_mods(mods_path)
+            .into_iter()
+            .chain(scan_disabled_mods(disabled_path).into_iter())
+            .collect();
+        crate::mod_sources::enrich_mods_with_sources(&mut all_on_disk, config_path);
+        crate::mod_versions::enrich_mods_with_versions(&mut all_on_disk, config_path);
 
-    // Build a map from identifiers to on-disk mod info (for version comparison)
-    let mut on_disk_by_id: std::collections::HashMap<String, &crate::mods::ModInfo> =
-        std::collections::HashMap::new();
-    for m in &all_on_disk {
-        if let Some(ref version_id) = m.mod_version_id {
-            on_disk_by_id.insert(version_id.clone(), m);
+        // Build a map from identifiers to on-disk mod indices (for version comparison).
+        let mut by_id: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for (index, m) in all_on_disk.iter().enumerate() {
+            if let Some(ref version_id) = m.mod_version_id {
+                by_id.insert(version_id.clone(), index);
+            }
+            by_id.insert(m.name.clone(), index);
+            if let Some(ref folder) = m.folder_name {
+                by_id.insert(folder.clone(), index);
+            }
+            if let Some(ref id) = m.mod_id {
+                by_id.insert(id.clone(), index);
+            }
         }
-        on_disk_by_id.insert(m.name.clone(), m);
-        if let Some(ref folder) = m.folder_name {
-            on_disk_by_id.insert(folder.clone(), m);
-        }
-        if let Some(ref id) = m.mod_id {
-            on_disk_by_id.insert(id.clone(), m);
-        }
-    }
+
+        (all_on_disk, by_id)
+    };
+    let (mut all_on_disk, mut on_disk_by_id) = refresh_disk_state();
 
     let mod_sources_db = crate::mod_sources::load_sources(config_path);
     let pinned_set = crate::mod_sources::load_pinned_set(config_path);
@@ -915,22 +1010,35 @@ pub(crate) async fn switch_profile_from_paths(
             .mod_version_id
             .as_ref()
             .and_then(|id| on_disk_by_id.get(id))
-            .copied()
+            .and_then(|index| all_on_disk.get(*index))
+            .cloned()
             .or_else(|| {
-                all_on_disk.iter().find(|disk_mod| {
-                    profile_mod_matches_installed_with_registry(pm, disk_mod, config_path)
-                })
+                all_on_disk
+                    .iter()
+                    .find(|disk_mod| {
+                        profile_mod_matches_installed_with_registry(pm, disk_mod, config_path)
+                    })
+                    .cloned()
             })
-            .or_else(|| on_disk_by_id.get(&pm.name).copied())
+            .or_else(|| {
+                on_disk_by_id
+                    .get(&pm.name)
+                    .and_then(|index| all_on_disk.get(*index))
+                    .cloned()
+            })
             .or_else(|| {
                 pm.folder_name
                     .as_ref()
-                    .and_then(|f| on_disk_by_id.get(f).copied())
+                    .and_then(|f| on_disk_by_id.get(f))
+                    .and_then(|index| all_on_disk.get(*index))
+                    .cloned()
             })
             .or_else(|| {
                 pm.mod_id
                     .as_ref()
-                    .and_then(|id| on_disk_by_id.get(id).copied())
+                    .and_then(|id| on_disk_by_id.get(id))
+                    .and_then(|index| all_on_disk.get(*index))
+                    .cloned()
             });
 
         if on_disk_mod.is_none() && profile_mod_matches_pin(pm, &pinned_set) {
@@ -941,7 +1049,7 @@ pub(crate) async fn switch_profile_from_paths(
         }
 
         // Pinned mods keep their installed version when there is one to preserve.
-        if should_skip_pinned_profile_mod_download(pm, on_disk_mod, &pinned_set) {
+        if should_skip_pinned_profile_mod_download(pm, on_disk_mod.as_ref(), &pinned_set) {
             log::info!(
                 "switch_profile: skipping frozen mod '{}' (preserving installed version)",
                 pm.name
@@ -949,7 +1057,7 @@ pub(crate) async fn switch_profile_from_paths(
             continue;
         }
 
-        if let Some(disk_mod) = on_disk_mod {
+        if let Some(ref disk_mod) = on_disk_mod {
             let disk_ver = disk_mod.version.trim_start_matches('v');
             let profile_ver = pm.version.trim_start_matches('v');
 
@@ -1050,6 +1158,7 @@ pub(crate) async fn switch_profile_from_paths(
                                 );
                                 downloaded_count += 1;
                                 replaced_mods.push(pm.name.clone());
+                                (all_on_disk, on_disk_by_id) = refresh_disk_state();
                                 continue;
                             }
                             Err(e) => {
@@ -1149,6 +1258,7 @@ pub(crate) async fn switch_profile_from_paths(
                             mods_path,
                             config_path,
                         );
+                        (all_on_disk, on_disk_by_id) = refresh_disk_state();
                     }
                 }
                 Err(e) => {
@@ -1210,6 +1320,7 @@ pub(crate) async fn switch_profile_from_paths(
                                 mods_path,
                                 config_path,
                             );
+                            (all_on_disk, on_disk_by_id) = refresh_disk_state();
                         }
                         Err(e) => {
                             log::error!("GitHub download also failed for '{}': {}", pm.name, e);
@@ -1257,8 +1368,9 @@ pub(crate) async fn switch_profile_from_paths(
     crate::mod_sources::merge_shared_extras(&profile.mod_extras, config_path);
 
     // ── STEP 2: Apply profile AFTER downloads ──
-    apply_profile_with_pins(&profile, mods_path, disabled_path, &pinned_set, config_path)
-        .map_err(|e| e.to_string())?;
+    let _apply_result =
+        apply_profile_with_pins(&profile, mods_path, disabled_path, &pinned_set, config_path)
+            .map_err(|e| e.to_string())?;
     let failed_enables = retry_enable_included_profile_mods(
         &profile,
         mods_path,
@@ -1286,6 +1398,7 @@ pub(crate) async fn switch_profile_from_paths(
     let still_missing: Vec<String> = profile
         .mods
         .iter()
+        .filter(|pm| pm.enabled)
         .filter(|pm| {
             !final_on_disk.iter().any(|disk_mod| {
                 profile_mod_matches_installed_with_registry(pm, disk_mod, config_path)
@@ -1296,12 +1409,12 @@ pub(crate) async fn switch_profile_from_paths(
 
     Ok(SwitchProfileResult {
         applied: true,
-        missing_mods: still_missing,
+        missing_mods: dedupe_display_names(still_missing),
         downloaded: downloaded_count,
-        failed_downloads: download_failures,
-        replaced_mods,
-        replace_failures,
-        failed_enables,
+        failed_downloads: dedupe_display_names(download_failures),
+        replaced_mods: dedupe_display_names(replaced_mods),
+        replace_failures: dedupe_display_names(replace_failures),
+        failed_enables: dedupe_display_names(failed_enables),
     })
 }
 
@@ -1416,6 +1529,61 @@ mod snapshot_metadata_tests {
         .unwrap();
 
         assert_eq!(snapshot.created_by, None);
+    }
+
+    #[test]
+    fn apply_reports_missing_enabled_mods_but_ignores_absent_disabled_entries() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+
+        let profile_mod = |name: &str, enabled: bool| ProfileMod {
+            mod_version_id: None,
+            name: name.into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: Vec::new(),
+            folder_name: Some(name.into()),
+            mod_id: Some(name.into()),
+            enabled,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        };
+        let now = Utc::now();
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "Missing Pack".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![
+                profile_mod("MissingEnabled", true),
+                profile_mod("StoredElsewhere", false),
+            ],
+            created_at: now,
+            updated_at: now,
+            public: None,
+            mod_extras: Default::default(),
+        };
+
+        let result = apply_profile_with_pins(
+            &profile,
+            &mods_path,
+            &disabled_path,
+            &std::collections::HashSet::new(),
+            config_tmp.path(),
+        )
+        .expect("apply should return a structured partial result");
+
+        assert_eq!(
+            result.missing_enabled_mods,
+            vec!["MissingEnabled".to_string()]
+        );
     }
 
     /// Regression test for issue #107: a mod whose folder appears in BOTH the
@@ -1635,6 +1803,48 @@ mod modpack_flow_tests {
         zw.finish().unwrap().into_inner()
     }
 
+    fn alice_bundle_zip() -> Vec<u8> {
+        let cursor = std::io::Cursor::new(Vec::new());
+        let mut zw = zip::ZipWriter::new(cursor);
+        let opts =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        zw.start_file("AliceDefectSkin V2.0/.sts2mm-bundle.json", opts)
+            .unwrap();
+        zw.write_all(br#"{"display_name":"AliceDefectSkin V2.0","installed_version":"2.0"}"#)
+            .unwrap();
+        zw.start_file(
+            "AliceDefectSkin V2.0/AliceDefectSkin/AliceDefectSkin.json",
+            opts,
+        )
+        .unwrap();
+        zw.write_all(
+            br#"{"id":"AliceDefectSkin","name":"Alice Defect Skin","version":"2.0","author":"QA"}"#,
+        )
+        .unwrap();
+        zw.start_file(
+            "AliceDefectSkin V2.0/AliceDefectSkin/AliceDefectSkin.dll",
+            opts,
+        )
+        .unwrap();
+        zw.write_all(b"alice-skin").unwrap();
+        zw.start_file(
+            "AliceDefectSkin V2.0/AliceDefectVoiceBridge/mod_manifest.json",
+            opts,
+        )
+        .unwrap();
+        zw.write_all(
+            br#"{"id":"AliceDefectVoiceBridge","name":"Alice Defect Voice Bridge","version":"1.0.4","author":"QA"}"#,
+        )
+        .unwrap();
+        zw.start_file(
+            "AliceDefectSkin V2.0/AliceDefectVoiceBridge/AliceDefectVoiceBridge.dll",
+            opts,
+        )
+        .unwrap();
+        zw.write_all(b"alice-voice").unwrap();
+        zw.finish().unwrap().into_inner()
+    }
+
     async fn publish_mod(
         server: &MockServer,
         path_name: &str,
@@ -1692,6 +1902,46 @@ mod modpack_flow_tests {
         };
         save_profile(&profile, profiles).unwrap();
         profile
+    }
+
+    fn ritsu_profile_mod() -> ProfileMod {
+        ProfileMod {
+            mod_version_id: None,
+            name: "RitsuLib (STS2 0.103.2 compat)".into(),
+            version: "0.4.24".into(),
+            source: None,
+            hash: Some("43e3f031142f174188c0032837944214a415f5af7e804f70f8618cd2f6c472a2".into()),
+            files: vec![
+                "STS2-RitsuLib/compat-target.txt".into(),
+                "STS2-RitsuLib/mod_manifest.json".into(),
+                "STS2-RitsuLib/STS2-RitsuLib.dll".into(),
+            ],
+            folder_name: Some("STS2-RitsuLib".into()),
+            mod_id: Some("STS2-RitsuLib".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        }
+    }
+
+    fn write_corrupt_duplicate_ritsu_profile(paths: &FlowPaths) {
+        let now = chrono::Utc::now();
+        let ritsu = ritsu_profile_mod();
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "TesterW".into(),
+            game_version: Some("0.105.0".into()),
+            created_by: Some("qa-curator".into()),
+            mods: vec![ritsu.clone(), ritsu],
+            created_at: now,
+            updated_at: now,
+            public: Some(false),
+            mod_extras: Default::default(),
+        };
+        let path = paths.profiles.join(format!("{}.json", profile.id));
+        fs::write(path, serde_json::to_string_pretty(&profile).unwrap()).unwrap();
     }
 
     fn clear_mod_dirs(paths: &FlowPaths) {
@@ -2021,6 +2271,315 @@ mod modpack_flow_tests {
         assert_marker(&paths.mods, "SharedCore", "shared-from-b");
         assert_marker(&paths.disabled, "BetaDisabled", "beta-disabled");
         assert_no_root_artifacts(&paths);
+    }
+
+    #[tokio::test]
+    async fn switch_collapses_duplicate_missing_manifest_rows() {
+        let paths = flow_paths();
+        write_corrupt_duplicate_ritsu_profile(&paths);
+
+        let result = switch_profile_from_paths(
+            "TesterW",
+            &paths.mods,
+            &paths.disabled,
+            &paths.profiles,
+            &paths.config,
+            &paths.cache,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.downloaded, 0);
+        assert_eq!(
+            result.failed_downloads,
+            vec!["RitsuLib (STS2 0.103.2 compat)".to_string()]
+        );
+        assert_eq!(
+            result.missing_mods,
+            vec!["RitsuLib (STS2 0.103.2 compat)".to_string()]
+        );
+        let saved = load_profile("TesterW", &paths.profiles).unwrap();
+        assert_eq!(saved.mods.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn repair_collapses_duplicate_missing_manifest_rows() {
+        let paths = flow_paths();
+        write_corrupt_duplicate_ritsu_profile(&paths);
+
+        let result = repair_profile_from_paths(
+            "TesterW",
+            &paths.mods,
+            &paths.disabled,
+            &paths.profiles,
+            &paths.config,
+            &paths.cache,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.downloaded, 0);
+        assert_eq!(
+            result.failed_downloads,
+            vec!["RitsuLib (STS2 0.103.2 compat)".to_string()]
+        );
+        assert_eq!(
+            result.missing_mods,
+            vec!["RitsuLib (STS2 0.103.2 compat)".to_string()]
+        );
+        let saved = load_profile("TesterW", &paths.profiles).unwrap();
+        assert_eq!(saved.mods.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn repair_restores_local_member_rows_from_one_published_bundle() {
+        let paths = flow_paths();
+        let server = MockServer::start().await;
+        let zip = alice_bundle_zip();
+        let bundle_path = "/AliceDefectSkinV2.0-979-2-0-1780132414.zip";
+        Mock::given(method("GET"))
+            .and(path(bundle_path))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let now = chrono::Utc::now();
+        let alice_member = ProfileMod {
+            mod_version_id: None,
+            name: "Alice Defect Skin".into(),
+            version: "2.0".into(),
+            source: None,
+            hash: None,
+            files: vec!["AliceDefectSkin/AliceDefectSkin.dll".into()],
+            folder_name: Some("AliceDefectSkin".into()),
+            mod_id: Some("AliceDefectSkin".into()),
+            enabled: true,
+            bundle_url: Some(format!("{}{}", server.uri(), bundle_path)),
+            bundle_sha256: Some(sha256_hex(&zip)),
+            bundle_members: vec![
+                "Alice Defect Skin".into(),
+                "Alice Defect Voice Bridge".into(),
+            ],
+            bundle_member_ids: vec!["AliceDefectSkin".into(), "AliceDefectVoiceBridge".into()],
+        };
+        let profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "TesterW".into(),
+            game_version: Some("0.105.0".into()),
+            created_by: Some("qa-curator".into()),
+            mods: vec![alice_member.clone(), alice_member],
+            created_at: now,
+            updated_at: now,
+            public: Some(false),
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&profile, &paths.profiles).unwrap();
+
+        let repair = repair_profile_from_paths(
+            "TesterW",
+            &paths.mods,
+            &paths.disabled,
+            &paths.profiles,
+            &paths.config,
+            &paths.cache,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(repair.downloaded, 1, "one bundle should satisfy both rows");
+        assert!(
+            repair.failed_downloads.is_empty(),
+            "repair failed downloads: {:?}",
+            repair.failed_downloads
+        );
+        assert!(
+            repair.missing_mods.is_empty(),
+            "repair missing mods: {:?}",
+            repair.missing_mods
+        );
+        assert!(
+            scan_mods(&paths.mods).into_iter().any(|m| m
+                .bundle_members
+                .iter()
+                .any(|name| name == "Alice Defect Skin")),
+            "the restored bundle container should be active and list Alice Defect Skin"
+        );
+    }
+
+    #[tokio::test]
+    async fn repair_enriches_local_bundle_container_from_matching_published_bundle() {
+        let _env_guard = crate::sharing::TEST_GITHUB_ENV_LOCK.lock().await;
+        let paths = flow_paths();
+        let server = MockServer::start().await;
+        std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+
+        let alice_zip = alice_bundle_zip();
+        let alice_path = "/bundles/AliceDefectSkin_V2_0_v2.0_58023641.zip";
+        Mock::given(method("GET"))
+            .and(path(alice_path))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(alice_zip.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let voice_zip = bundle_zip(
+            "VoiceModFramework V1.11",
+            "voicemod",
+            "VoiceModFramework",
+            "1.0.0",
+            "voice",
+        );
+        let voice_path = "/bundles/VoiceModFramework_v1.0.0_b85dd30d.zip";
+        Mock::given(method("GET"))
+            .and(path(voice_path))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(voice_zip.clone()))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let now = chrono::Utc::now();
+        let mut local_alice = ProfileMod {
+            mod_version_id: None,
+            name: "AliceDefectSkin V2.0".into(),
+            version: "2.0".into(),
+            source: None,
+            hash: None,
+            files: vec!["AliceDefectSkin V2.0/AliceDefectSkin/AliceDefectSkin.dll".into()],
+            folder_name: Some("AliceDefectSkin V2.0".into()),
+            mod_id: None,
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![
+                "Alice Defect Skin".into(),
+                "Alice Defect Voice Bridge".into(),
+                "voicepack".into(),
+                "VoiceModFramework".into(),
+            ],
+            bundle_member_ids: vec![
+                "AliceDefectSkin".into(),
+                "AliceDefectVoiceBridge".into(),
+                "voicemod".into(),
+            ],
+        };
+        let local_profile = Profile {
+            id: crate::profiles::new_profile_id(),
+            name: "TesterW".into(),
+            game_version: Some("0.105.0".into()),
+            created_by: Some("qa-curator".into()),
+            mods: vec![local_alice.clone()],
+            created_at: now,
+            updated_at: now,
+            public: Some(false),
+            mod_extras: Default::default(),
+        };
+        crate::profiles::save_profile(&local_profile, &paths.profiles).unwrap();
+        fs::write(
+            paths.profiles.join(format!("{}.share", local_profile.id)),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "code": "AA5A-315D-61AE",
+                "owner": "octo",
+                "file_sha": null,
+                "share_format_version": crate::sharing::SHARE_FORMAT_VERSION,
+                "published_signature": null,
+                "bundle_source_fingerprints": {},
+                "bundle_source_fast_fingerprints": {},
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut published_voice = ProfileMod {
+            mod_version_id: None,
+            name: "VoiceModFramework".into(),
+            version: "1.0.0".into(),
+            source: None,
+            hash: None,
+            files: vec!["VoiceModFramework V1.11/VoiceModFramework V1.11.dll".into()],
+            folder_name: Some("VoiceModFramework V1.11".into()),
+            mod_id: Some("voicemod".into()),
+            enabled: true,
+            bundle_url: Some(format!("{}{}", server.uri(), voice_path)),
+            bundle_sha256: Some(sha256_hex(&voice_zip)),
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        };
+        local_alice.bundle_url = Some(format!("{}{}", server.uri(), alice_path));
+        local_alice.bundle_sha256 = Some(sha256_hex(&alice_zip));
+        local_alice.files = vec![
+            "AliceDefectSkin V2.0/AliceDefectSkin/AliceDefectSkin.dll".into(),
+            "AliceDefectSkin V2.0/AliceDefectVoiceBridge/AliceDefectVoiceBridge.dll".into(),
+        ];
+        local_alice.mod_version_id = Some("alice-shared-version".into());
+        published_voice.mod_version_id = Some("voice-shared-version".into());
+        let published_profile = Profile {
+            mods: vec![published_voice, local_alice],
+            ..local_profile.clone()
+        };
+        let remote_json = serde_json::to_string(&published_profile).unwrap();
+        Mock::given(method("GET"))
+            .and(path(
+                "/repos/octo/sts2mm-profiles/contents/aa5a315d61ae.json",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string(remote_json))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let repair = repair_profile_from_paths(
+            "TesterW",
+            &paths.mods,
+            &paths.disabled,
+            &paths.profiles,
+            &paths.config,
+            &paths.cache,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(repair.downloaded, 1);
+        assert!(
+            repair.failed_downloads.is_empty(),
+            "repair failed downloads: {:?}",
+            repair.failed_downloads
+        );
+        assert!(
+            repair.missing_mods.is_empty(),
+            "repair missing mods: {:?}",
+            repair.missing_mods
+        );
+        assert!(
+            scan_mods(&paths.mods).into_iter().any(|m| m
+                .bundle_members
+                .iter()
+                .any(|name| name == "Alice Defect Skin")),
+            "the repaired profile should install the Alice bundle container"
+        );
+        assert!(
+            !paths.mods.join("VoiceModFramework V1.11").exists(),
+            "repair must not download the VoiceModFramework asset for the Alice bundle"
+        );
+
+        let saved = crate::profiles::load_profile(&local_profile.id, &paths.profiles).unwrap();
+        let saved_alice = saved
+            .mods
+            .iter()
+            .find(|pm| pm.name == "AliceDefectSkin V2.0")
+            .unwrap();
+        let saved_url = saved_alice.bundle_url.as_deref().unwrap_or_default();
+        assert!(
+            saved_url.contains("AliceDefectSkin_V2_0_v2.0_58023641.zip"),
+            "enriched local profile must persist the Alice bundle URL, got {saved_url}"
+        );
+        assert!(
+            !saved_url.contains("VoiceModFramework"),
+            "enriched local profile must not persist a member bundle URL"
+        );
     }
 
     #[tokio::test]

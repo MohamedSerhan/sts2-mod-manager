@@ -28,6 +28,7 @@ import {
   getGameInfo,
   getInstalledMods,
   getLaunchDiagnostics,
+  getLaunchHealth,
   getLaunchMode,
   getLibraryVersionOptions,
   getLogPath,
@@ -55,6 +56,7 @@ import {
   quarantineLaunchFailures,
   readLogTail,
   removeModSource,
+  resolveLaunchHealthBlockers,
   repairMod,
   repairModpackSubscription,
   repairProfile,
@@ -563,8 +565,12 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     expect(lastCall()).toEqual({ cmd: 'read_log_tail', args: { lines: 200 } });
     await getLaunchDiagnostics();
     expect(lastCall()).toEqual({ cmd: 'get_launch_diagnostics', args: undefined });
+    await getLaunchHealth();
+    expect(lastCall()).toEqual({ cmd: 'get_launch_health', args: undefined });
     await quarantineLaunchFailures();
     expect(lastCall()).toEqual({ cmd: 'quarantine_launch_failures', args: undefined });
+    await resolveLaunchHealthBlockers();
+    expect(lastCall()).toEqual({ cmd: 'resolve_launch_health_blockers', args: undefined });
   });
 
   it('returns whatever the backend handler returns (passthrough)', async () => {

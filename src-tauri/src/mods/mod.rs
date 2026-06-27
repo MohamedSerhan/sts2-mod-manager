@@ -312,31 +312,87 @@ fn active_profile_for_runtime_repair(
         .find(|profile| crate::profiles::profile_identifier_matches(profile, active))
 }
 
+fn values_match_case_insensitive(left: Option<&str>, right: Option<&str>) -> bool {
+    let Some(left) = left.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let Some(right) = right.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    left.eq_ignore_ascii_case(right)
+}
+
+fn profile_mod_directly_matches_disk_artifact(
+    profile_mod: &crate::profiles::ProfileMod,
+    disk_mod: &ModInfo,
+    config_path: &Path,
+) -> bool {
+    if values_match_case_insensitive(
+        profile_mod.mod_version_id.as_deref(),
+        disk_mod.mod_version_id.as_deref(),
+    ) {
+        return true;
+    }
+    if profile_mod
+        .mod_version_id
+        .as_deref()
+        .is_some_and(|id| !id.trim().is_empty())
+        && disk_mod
+            .mod_version_id
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty())
+        && crate::profiles::profile_mod_artifact_id_matches(profile_mod, disk_mod, config_path)
+            .unwrap_or(false)
+    {
+        return true;
+    }
+    if values_match_case_insensitive(
+        profile_mod.folder_name.as_deref(),
+        disk_mod.folder_name.as_deref(),
+    ) || values_match_case_insensitive(profile_mod.mod_id.as_deref(), disk_mod.mod_id.as_deref())
+    {
+        return true;
+    }
+
+    !is_bundle_container(disk_mod) && profile_mod.name.eq_ignore_ascii_case(&disk_mod.name)
+}
+
+fn profile_runtime_repair_match_rank(
+    profile_mod: &crate::profiles::ProfileMod,
+    disk_mod: &ModInfo,
+    config_path: &Path,
+) -> Option<usize> {
+    if !profile_mod.enabled {
+        return None;
+    }
+    if profile_mod_directly_matches_disk_artifact(profile_mod, disk_mod, config_path) {
+        return Some(0);
+    }
+    crate::profiles::profile_mod_matches_installed_with_registry(profile_mod, disk_mod, config_path)
+        .then_some(1)
+}
+
 fn runtime_repair_rank(
     profile: Option<&crate::profiles::Profile>,
     disk_mod: &ModInfo,
     index: usize,
     config_path: &Path,
-) -> (usize, usize, usize) {
-    let profile_rank = profile
+) -> (usize, usize, usize, usize) {
+    let (profile_rank, profile_match_rank) = profile
         .and_then(|profile| {
             profile
                 .mods
                 .iter()
                 .enumerate()
-                .find(|(_, profile_mod)| {
-                    profile_mod.enabled
-                        && crate::profiles::profile_mod_matches_installed_with_registry(
-                            profile_mod,
-                            disk_mod,
-                            config_path,
-                        )
+                .filter_map(|(rank, profile_mod)| {
+                    profile_runtime_repair_match_rank(profile_mod, disk_mod, config_path)
+                        .map(|match_rank| (rank, match_rank))
                 })
-                .map(|(rank, _)| rank)
+                .min()
         })
-        .unwrap_or(usize::MAX);
+        .unwrap_or((usize::MAX, usize::MAX));
     let bundle_rank = if is_bundle_container(disk_mod) { 0 } else { 1 };
-    (profile_rank, bundle_rank, index)
+    (profile_rank, profile_match_rank, bundle_rank, index)
 }
 
 /// Repair an already-broken active `mods/` folder that contains multiple
@@ -357,7 +413,7 @@ pub(crate) fn repair_active_runtime_id_duplicates(
 
     crate::mod_versions::enrich_mods_with_versions(&mut active, config_path);
     let profile = active_profile_for_runtime_repair(active_profile, profiles_path);
-    let mut keepers: std::collections::HashMap<String, (usize, usize, usize)> =
+    let mut keepers: std::collections::HashMap<String, (usize, usize, usize, usize)> =
         std::collections::HashMap::new();
 
     for (index, disk_mod) in active.iter().enumerate() {
@@ -383,7 +439,7 @@ pub(crate) fn repair_active_runtime_id_duplicates(
             .any(|id| {
                 keepers
                     .get(&id)
-                    .is_some_and(|(_, _, keep_index)| *keep_index != index)
+                    .is_some_and(|(_, _, _, keep_index)| *keep_index != index)
             });
         if !should_move {
             continue;
@@ -593,7 +649,7 @@ pub fn restore_mod_from_cache(
 pub fn get_installed_mods(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModInfo>, String> {
-    let (mods_path, disabled_mods_path, config_path, profiles_path, active_profile, game_version) = {
+    let (mods_path, disabled_mods_path, config_path, profiles_path, active_profile) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         (
             s.mods_path.clone(),
@@ -601,7 +657,6 @@ pub fn get_installed_mods(
             s.config_path.clone(),
             s.profiles_path.clone(),
             s.active_profile.clone(),
-            s.game_version.clone(),
         )
     };
 
@@ -626,48 +681,6 @@ pub fn get_installed_mods(
                 Ok(_) => {}
                 Err(err) => log::warn!(
                     "Library refresh could not repair active runtime-ID duplicates: {}",
-                    err
-                ),
-            }
-            match crate::launch_diagnostics::auto_quarantine_launch_failures(
-                mods_path,
-                disabled_path,
-                &profiles_path,
-                &config_path,
-                active_profile.clone(),
-                game_version.clone(),
-            ) {
-                Ok(result) => {
-                    if !result.moved.is_empty() || !result.disabled_profile_entries.is_empty() {
-                        let moved = result
-                            .moved
-                            .iter()
-                            .map(|item| item.name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        log::warn!(
-                            "Library refresh stored {} launch-failed active mod(s) and disabled {} active-profile entries: {}",
-                            result.moved.len(),
-                            result.disabled_profile_entries.len(),
-                            moved
-                        );
-                    }
-                    if !result.failed.is_empty() {
-                        let failed = result
-                            .failed
-                            .iter()
-                            .map(|item| format!("{} ({})", item.name, item.error))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        log::warn!(
-                            "Library refresh could not store {} launch-failed active mod(s): {}",
-                            result.failed.len(),
-                            failed
-                        );
-                    }
-                }
-                Err(err) => log::warn!(
-                    "Library refresh could not auto-store launch-failed mods: {}",
                     err
                 ),
             }
@@ -1189,37 +1202,36 @@ pub fn install_mod_from_file(
                 state.inner(),
             )
         });
-        crate::mod_versions::cache_mod_version_by_id_with_source_version(
-            &mut staged,
-            staging.path(),
+        let source_hint = staged
+            .source
+            .clone()
+            .or_else(|| crate::mod_versions::source_hint_for_mod(existing, &config_path));
+        let source_type = source_hint
+            .as_deref()
+            .map(|source| {
+                if source.starts_with("github:") || source.contains("github.com") {
+                    "github"
+                } else if source.contains("nexusmods.com") {
+                    "nexus"
+                } else {
+                    "unknown"
+                }
+            })
+            .unwrap_or("unknown");
+        let outcome = crate::updater::promote_archive_to_library(
+            &archive_path,
+            existing,
+            source_hint,
+            source_version.as_deref(),
+            source_type,
+            &mods_path,
+            disabled_path.as_deref(),
+            &profiles_path,
             &cache_path,
             &config_path,
-            source_version.as_deref(),
-        )
-        .ok_or_else(|| format!("Failed to cache '{}' v{}", staged.name, staged.version))?;
-        if let Some(id) = staged.mod_version_id.clone() {
-            if let Some(version) = source_version.as_deref() {
-                let _ = crate::mod_versions::set_record_source_version(
-                    &config_path,
-                    &id,
-                    Some(version),
-                );
-            }
-            let profiles = crate::profiles::list_profiles(&profiles_path);
-            let anchor_ids: Vec<String> = [existing.mod_version_id.clone(), Some(id.clone())]
-                .into_iter()
-                .flatten()
-                .collect();
-            let _ = crate::mod_versions::prune_cached_versions_around(
-                &config_path,
-                &cache_path,
-                &installed,
-                &profiles,
-                &anchor_ids,
-                &[id],
-            );
-        }
-        return Ok(staged);
+            None,
+        )?;
+        return Ok(outcome.mod_info);
     }
 
     let result = install_mod_from_archive(&archive_path, &mods_path).map_err(|e| e.to_string())?;

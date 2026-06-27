@@ -154,6 +154,17 @@ pub(crate) fn github_api_base() -> String {
     std::env::var("STS2_GITHUB_API_BASE").unwrap_or_else(|_| "https://api.github.com".to_string())
 }
 
+fn github_web_base() -> String {
+    #[cfg(test)]
+    {
+        std::env::var("STS2_GITHUB_WEB_BASE").unwrap_or_else(|_| "https://github.com".to_string())
+    }
+    #[cfg(not(test))]
+    {
+        "https://github.com".to_string()
+    }
+}
+
 /// Build a reqwest `Client` pre-configured with the GitHub API headers
 /// (Accept, User-Agent, Bearer auth) and the standard timeouts. Public
 /// at `pub(crate)` because `modpack_browser.rs` reuses it to fetch
@@ -832,6 +843,18 @@ async fn upload_release_asset_recovering_payload(
                         .await?;
                 }
             }
+            if let Some(asset) = probe_hidden_release_asset_download(
+                client,
+                owner,
+                repo,
+                filename,
+                payload,
+                cancel_requested,
+            )
+            .await?
+            {
+                return Ok(asset);
+            }
             Err(AppError::Other(format!(
                 "Upload of '{}' failed with 422 already_exists but the asset is not visible in the release listing after {} checks — \
                  wait a minute and try sharing again, or delete the asset manually from GitHub.",
@@ -839,6 +862,86 @@ async fn upload_release_asset_recovering_payload(
             )))
         }
         Err(e) => Err(e),
+    }
+}
+
+fn expected_release_asset_download_url(owner: &str, repo: &str, filename: &str) -> String {
+    format!(
+        "{}/{}/{}/releases/download/{}/{}",
+        github_web_base().trim_end_matches('/'),
+        owner,
+        repo,
+        BUNDLES_RELEASE_TAG,
+        filename
+    )
+}
+
+fn upload_payload_sha256(
+    payload: AssetUploadPayload<'_>,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<String> {
+    match payload {
+        AssetUploadPayload::Bytes(data) => Ok(sha256_hex_bytes(data)),
+        AssetUploadPayload::File(path) => sha256_hex_file_with_cancel(path, cancel_requested),
+    }
+}
+
+async fn probe_hidden_release_asset_download(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    filename: &str,
+    payload: AssetUploadPayload<'_>,
+    cancel_requested: CancelCheck<'_>,
+) -> Result<Option<ReleaseAsset>> {
+    check_cancel(cancel_requested)?;
+    let expected_sha256 = match upload_payload_sha256(payload, cancel_requested) {
+        Ok(hash) => hash,
+        Err(e) if e.to_string().contains("Sharing canceled") => return Err(e),
+        Err(e) => {
+            log::warn!(
+                "Asset '{}' returned 422 already_exists but hidden-asset probe could not hash local payload: {}",
+                filename,
+                e
+            );
+            return Ok(None);
+        }
+    };
+    let url = expected_release_asset_download_url(owner, repo, filename);
+    match download_bundle_bytes_with_retry(client, &url, filename, "hidden release asset", None)
+        .await
+    {
+        Ok(bytes) => {
+            let actual_sha256 = sha256_hex_bytes(&bytes);
+            if actual_sha256 == expected_sha256 {
+                log::warn!(
+                    "Asset '{}' returned 422 already_exists and was hidden from release listings, but the expected download URL is reachable with matching sha256",
+                    filename
+                );
+                Ok(Some(ReleaseAsset {
+                    id: 0,
+                    name: filename.to_string(),
+                    browser_download_url: url,
+                }))
+            } else {
+                log::warn!(
+                    "Asset '{}' hidden-download probe reached the expected URL but sha256 did not match (expected {}, got {})",
+                    filename,
+                    expected_sha256,
+                    actual_sha256
+                );
+                Ok(None)
+            }
+        }
+        Err(e) if e.to_string().contains("Sharing canceled") => Err(e),
+        Err(e) => {
+            log::warn!(
+                "Asset '{}' returned 422 already_exists and stayed hidden from release listings; expected download URL probe failed: {}",
+                filename,
+                e
+            );
+            Ok(None)
+        }
     }
 }
 
@@ -1845,6 +1948,7 @@ pub(super) mod release_upload_tests {
         let guard = ENV_LOCK.lock().await;
         let server = MockServer::start().await;
         std::env::set_var("STS2_GITHUB_API_BASE", server.uri());
+        std::env::set_var("STS2_GITHUB_WEB_BASE", server.uri());
         (server, guard)
     }
 
@@ -3101,6 +3205,69 @@ pub(super) mod release_upload_tests {
     }
 
     #[tokio::test]
+    async fn upload_release_asset_recovering_reuses_hidden_downloadable_asset() {
+        let (server, _env_guard) = mock_github().await;
+        let upload_url_template = format!(
+            "{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}",
+            server.uri()
+        );
+        let bytes = b"hidden-but-downloadable";
+        let filename = "Hidden_v1.0.0_abc12345.zip";
+        let download_path =
+            "/octo/sts2mm-profiles/releases/download/bundles/Hidden_v1.0.0_abc12345.zip";
+        let download_url = format!("{}{}", server.uri(), download_path);
+
+        Mock::given(method("POST"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .and(query_param("name", filename))
+            .respond_with(ResponseTemplate::new(422).set_body_json(serde_json::json!({
+                "message": "Validation Failed",
+                "errors": [{"code": "already_exists"}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/tags/bundles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "upload_url": format!("{}/repos/octo/sts2mm-profiles/releases/42/assets{{?name,label}}", server.uri()),
+                "assets": []
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/octo/sts2mm-profiles/releases/42/assets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(download_path))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(bytes))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = build_client("test-token");
+        let asset = upload_release_asset_recovering(
+            &client,
+            "octo",
+            "sts2mm-profiles",
+            &upload_url_template,
+            filename,
+            None,
+            bytes,
+        )
+        .await
+        .expect("hidden downloadable already_exists asset should be reused");
+
+        assert_eq!(asset.id, 0);
+        assert_eq!(asset.name, filename);
+        assert_eq!(asset.browser_download_url, download_url);
+    }
+
+    #[tokio::test]
     async fn upload_release_asset_recovering_matches_github_renamed_unicode_asset() {
         let (server, _env_guard) = mock_github().await;
         let upload_url_template = format!(
@@ -3468,6 +3635,7 @@ mod github_api_stress_tests {
             &mods_path,
             &disabled_path,
             &profiles_path,
+            work.path(),
             &token,
             &username,
             &repo,
@@ -3490,6 +3658,7 @@ mod github_api_stress_tests {
         mods_path: &std::path::Path,
         disabled_path: &std::path::Path,
         profiles_path: &std::path::Path,
+        config_path: &std::path::Path,
         token: &str,
         username: &str,
         repo: &str,
@@ -3500,6 +3669,7 @@ mod github_api_stress_tests {
             mods_path,
             disabled_path,
             profiles_path,
+            config_path,
             token,
             None,
             None,

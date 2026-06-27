@@ -240,6 +240,31 @@ describe('<ProfileSwitcher>', () => {
     expect(getInvokeCalls().some((c) => c.cmd === 'switch_profile')).toBe(false);
   });
 
+  it('uses the active profile display name in drift confirmation when the active profile is stored by UUID', async () => {
+    const uuid = '731aeaec-7f3d-4859-baec-16219701e2e7';
+    registerInvokeHandler('list_profiles_cmd', () => [
+      { id: uuid, name: 'TesterW', mods: [], created_at: '2026-01-01' },
+      { id: 'profile-other', name: 'Other', mods: [], created_at: '2026-02-01' },
+    ]);
+    registerInvokeHandler('get_active_profile', () => uuid);
+    registerInvokeHandler('get_active_profile_id', () => uuid);
+    registerInvokeHandler('get_profile_drift', () => ({
+      has_drift: true,
+      added: ['Loose Mod'],
+      removed: [],
+      toggled: [],
+      version_changed: [],
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    await user.click(await screen.findByText('Other'));
+
+    expect(await screen.findByText(/Switch away from "TesterW"/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(uuid);
+  });
+
   it('switches after confirming drift and reports missing restored-pack mods', async () => {
     registerInvokeHandler('list_profiles_cmd', () => PROFILES);
     registerInvokeHandler('get_active_profile', () => 'My Pack');

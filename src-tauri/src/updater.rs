@@ -4,9 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::download::{fetch_latest_release, fetch_releases};
 use crate::error::Result;
 use crate::mod_sources::{load_sources, lookup_entry, ModSourceEntry};
-use crate::mods::{scan_mods, ModInfo};
+use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods, ModInfo};
 use crate::state::AppState;
-#[cfg(test)]
 use std::path::Path;
 
 // ── Version Comparison ─────────────────────────────────────────────────────
@@ -813,28 +812,267 @@ fn rollback_release_target(
     }
 }
 
-#[cfg(test)]
-fn cache_downloaded_mod_artifact(
-    zip_path: &Path,
+pub(crate) struct PromotionOutcome {
+    pub mod_info: ModInfo,
+    pub preserved_configs: Vec<String>,
+    pub lost_configs: Vec<String>,
+}
+
+fn existing_source_version(existing: &ModInfo, config_path: &Path) -> Option<String> {
+    existing
+        .mod_version_id
+        .as_deref()
+        .and_then(|id| crate::mod_versions::record_by_id(config_path, id))
+        .and_then(|record| record.source_version)
+        .or_else(|| {
+            let sources = load_sources(config_path);
+            lookup_entry(
+                &sources.mods,
+                existing.folder_name.as_deref(),
+                &existing.name,
+                existing.mod_id.as_deref(),
+            )
+            .and_then(|entry| entry.installed_version.clone())
+        })
+}
+
+fn merged_installed_mods(mods_path: &Path, disabled_path: Option<&Path>) -> Vec<ModInfo> {
+    merge_active_disabled_mods(
+        scan_mods(mods_path),
+        disabled_path.map(scan_disabled_mods).unwrap_or_default(),
+    )
+}
+
+fn enrich_installed_for_updates(installed: &mut [ModInfo], config_path: &Path) {
+    crate::mod_sources::enrich_mods_with_sources(installed, config_path);
+    crate::mod_versions::enrich_mods_with_versions(installed, config_path);
+}
+
+/// Promote a downloaded update archive to the Library's current artifact while
+/// keeping saved profile/modpack references pinned to their old artifacts.
+pub(crate) fn promote_archive_to_library(
+    archive_path: &Path,
+    existing: &ModInfo,
     source_hint: Option<String>,
+    source_version: Option<&str>,
+    source_type: &str,
+    mods_path: &Path,
+    disabled_path: Option<&Path>,
+    profiles_path: &Path,
     cache_path: &Path,
     config_path: &Path,
-) -> Result<ModInfo> {
-    let staging = tempfile::tempdir()?;
-    let mut info = crate::mods::install_mod_from_zip(zip_path, staging.path())?;
-    if info.source.is_none() {
-        info.source = source_hint;
+    game_version: Option<&str>,
+) -> std::result::Result<PromotionOutcome, String> {
+    let lane_base = if existing.enabled {
+        mods_path
+    } else {
+        disabled_path.ok_or_else(|| "Stored mods path not set".to_string())?
+    };
+    let source_hint =
+        source_hint.or_else(|| crate::mod_versions::source_hint_for_mod(existing, config_path));
+
+    let staging = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let mut staged = crate::mods::install_mod_from_archive(archive_path, staging.path())
+        .map_err(|e| e.to_string())?;
+    if staged.source.is_none() {
+        staged.source = source_hint
+            .clone()
+            .or_else(|| crate::mod_versions::source_hint_for_mod(&staged, config_path));
     }
-    crate::mod_versions::cache_mod_version_by_id(
-        &mut info,
+    if let Err(e) = validate_update_install_result(existing, &staged, game_version) {
+        return Err(e);
+    }
+
+    let old_source_version = existing_source_version(existing, config_path);
+    let mut old_cached = existing.clone();
+    crate::mod_versions::cache_mod_version_by_id_with_source_version(
+        &mut old_cached,
+        lane_base,
+        cache_path,
+        config_path,
+        old_source_version.as_deref(),
+    )
+    .ok_or_else(|| format!("Failed to cache '{}' v{}", existing.name, existing.version))?;
+
+    crate::mod_versions::cache_mod_version_by_id_with_source_version(
+        &mut staged,
         staging.path(),
         cache_path,
         config_path,
+        source_version,
     )
-    .ok_or_else(|| {
-        crate::error::AppError::Other(format!("Failed to cache '{}' v{}", info.name, info.version))
-    })?;
-    Ok(info)
+    .ok_or_else(|| format!("Failed to cache '{}' v{}", staged.name, staged.version))?;
+
+    let old_folder = existing
+        .folder_name
+        .clone()
+        .unwrap_or_else(|| existing.name.clone());
+    let pre_update_preserved = crate::mods::prepare_update_with_preserved_configs(
+        &old_folder,
+        &existing.name,
+        lane_base,
+        config_path,
+    );
+
+    crate::downloads_watcher::sweep_stale_update_stashes(existing, lane_base);
+    let stashed_existing =
+        crate::downloads_watcher::stash_existing_mod_files(existing, lane_base, None);
+
+    let mut installed = match crate::mods::install_mod_from_archive(archive_path, lane_base) {
+        Ok(info) => info,
+        Err(e) => {
+            stashed_existing.restore();
+            return Err(e.to_string());
+        }
+    };
+    installed.enabled = existing.enabled;
+    if installed.source.is_none() {
+        installed.source = source_hint
+            .clone()
+            .or_else(|| crate::mod_versions::source_hint_for_mod(&installed, config_path));
+    }
+
+    if let Err(e) = validate_update_install_result(existing, &installed, game_version) {
+        crate::mods::delete_mod_files_by_info(&installed, lane_base);
+        stashed_existing.restore();
+        return Err(e);
+    }
+
+    if crate::mod_versions::cache_mod_version_by_id_with_source_version(
+        &mut installed,
+        lane_base,
+        cache_path,
+        config_path,
+        source_version,
+    )
+    .is_none()
+    {
+        crate::mods::delete_mod_files_by_info(&installed, lane_base);
+        stashed_existing.restore();
+        return Err(format!(
+            "Failed to cache '{}' v{}",
+            installed.name, installed.version
+        ));
+    }
+
+    stashed_existing.discard();
+
+    crate::mod_sources::carry_source_entry(
+        existing.folder_name.as_deref(),
+        &existing.name,
+        installed.folder_name.as_deref(),
+        &installed.name,
+        config_path,
+    );
+
+    let version_to_store = source_version
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(installed.version.as_str())
+        .to_string();
+    if version_to_store != "unknown" && version_to_store != "0.0.0" {
+        let install_key = installed
+            .folder_name
+            .as_deref()
+            .unwrap_or(installed.name.as_str());
+        crate::mod_sources::update_installed_version_from_source(
+            install_key,
+            &version_to_store,
+            source_type,
+            config_path,
+        );
+    }
+
+    if source_type == "nexus" || !installed.bundle_member_ids.is_empty() {
+        let install_key = installed
+            .folder_name
+            .as_deref()
+            .unwrap_or(installed.name.as_str());
+        let sources_db = load_sources(config_path);
+        let nexus_entry = lookup_entry(
+            &sources_db.mods,
+            Some(install_key),
+            &installed.name,
+            installed.mod_id.as_deref(),
+        );
+        let (nexus_url, nexus_game_domain, nexus_mod_id) =
+            nexus_entry.map_or((None, None, None), |entry| {
+                (
+                    entry.nexus_url.clone(),
+                    entry.nexus_game_domain.clone(),
+                    entry.nexus_mod_id,
+                )
+            });
+        let bundle_version = (version_to_store != "unknown" && version_to_store != "0.0.0")
+            .then_some(version_to_store.clone());
+        crate::mods::bundle::enrich_bundle_sidecar(
+            lane_base,
+            archive_path,
+            None,
+            nexus_url,
+            nexus_game_domain,
+            nexus_mod_id,
+            bundle_version,
+        );
+    }
+
+    let outcome = crate::mods::finalize_update_with_preserved_configs(
+        &installed,
+        lane_base,
+        pre_update_preserved,
+        config_path,
+    )
+    .map_err(|e| e.to_string())?;
+
+    if existing.enabled {
+        if let Some(disabled_path) = disabled_path {
+            let moved = crate::mods::move_runtime_id_conflicts_to_disabled(
+                &installed,
+                mods_path,
+                disabled_path,
+            )
+            .map_err(|e| e.to_string())?;
+            if !moved.is_empty() {
+                log::warn!(
+                    "Update promotion moved {} active runtime-ID conflict(s) to disabled storage: {}",
+                    moved.len(),
+                    moved.join(", ")
+                );
+            }
+        }
+    }
+
+    if let Some(new_id) = installed.mod_version_id.clone() {
+        let mut refreshed = merged_installed_mods(mods_path, disabled_path);
+        enrich_installed_for_updates(&mut refreshed, config_path);
+        let profiles = crate::profiles::list_profiles(profiles_path);
+        let anchor_ids: Vec<String> = [
+            old_cached.mod_version_id.clone(),
+            existing.mod_version_id.clone(),
+            Some(new_id.clone()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let keep_ids: Vec<String> = [old_cached.mod_version_id.clone(), Some(new_id)]
+            .into_iter()
+            .flatten()
+            .collect();
+        let _ = crate::mod_versions::prune_cached_versions_around(
+            config_path,
+            cache_path,
+            &refreshed,
+            &profiles,
+            &anchor_ids,
+            &keep_ids,
+        );
+    }
+
+    Ok(PromotionOutcome {
+        mod_info: installed,
+        preserved_configs: outcome.preserved,
+        lost_configs: outcome.lost,
+    })
 }
 
 /// Download and cache the newest version of a specific mod from its
@@ -856,13 +1094,14 @@ pub async fn update_mod(
     name: String,
     folder_name: Option<String>,
     _profile_id: Option<String>,
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModInfo, String> {
     crate::game::ensure_game_not_running()?;
-    let (mods_path, profiles_path, cache_path, config_path, token, game_version) = {
+    let (mods_path, disabled_path, profiles_path, cache_path, config_path, token, game_version) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
+        let disabled_path = s.disabled_mods_path.clone();
         let profiles_path = s.profiles_path.clone();
         let cache_path = s.cache_path.clone();
         let config_path = s.config_path.clone();
@@ -870,6 +1109,7 @@ pub async fn update_mod(
         let game_version = s.game_version.clone();
         (
             mods_path,
+            disabled_path,
             profiles_path,
             cache_path,
             config_path,
@@ -878,23 +1118,15 @@ pub async fn update_mod(
         )
     };
 
-    let mut installed = scan_mods(&mods_path);
-    crate::mod_sources::enrich_mods_with_sources(&mut installed, &config_path);
-    crate::mod_versions::enrich_mods_with_versions(&mut installed, &config_path);
+    let mut installed = merged_installed_mods(&mods_path, disabled_path.as_deref());
+    enrich_installed_for_updates(&mut installed, &config_path);
     let sources_db = load_sources(&config_path);
 
     // Folder-first lookup so update_mod targets the exact install when two
     // mods share a display name (e.g. two CardArtEditor installs with
     // different GitHub sources).
-    let mod_info = if let Some(ref folder) = folder_name {
-        installed
-            .iter()
-            .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
-    } else {
-        installed.iter().find(|m| m.name == name)
-    }
-    .ok_or_else(|| format!("Mod '{}' not found", name))?;
-    let old_info_for_validation = mod_info.clone();
+    let mod_info = find_installed_mod(&installed, &name, folder_name.as_deref())
+        .ok_or_else(|| format!("Mod '{}' not found", name))?;
 
     let (owner, repo) = resolve_github_repo(mod_info, &sources_db.mods).ok_or_else(|| {
         format!(
@@ -960,49 +1192,34 @@ pub async fn update_mod(
     }
 
     log::info!(
-        "update_mod: caching {}/{}@{} for '{}' without changing the active library copy",
+        "update_mod: promoting {}/{}@{} for '{}' into the Library copy",
         owner,
         repo,
         chosen_tag,
         name,
     );
-    let info = crate::mod_versions::cache_archive_as_mod_version_with_source_version(
+    let outcome = promote_archive_to_library(
         &chosen_zip,
+        mod_info,
         Some(format!("github:{}/{}", owner, repo)),
+        Some(&chosen_tag),
+        "github",
+        &mods_path,
+        disabled_path.as_deref(),
+        &profiles_path,
         &cache_path,
         &config_path,
-        Some(&chosen_tag),
+        game_version.as_deref(),
     )
     .map_err(|e| e.to_string())?;
+    crate::mod_sources::emit_configs_preserved(
+        &app,
+        &outcome.mod_info.name,
+        &outcome.preserved_configs,
+    );
+    crate::mod_sources::emit_configs_lost(&app, &outcome.mod_info.name, &outcome.lost_configs);
 
-    if let Err(e) =
-        validate_update_install_result(&old_info_for_validation, &info, game_version.as_deref())
-    {
-        return Err(e);
-    }
-
-    if let Some(id) = info.mod_version_id.clone() {
-        let _ =
-            crate::mod_versions::set_record_source_version(&config_path, &id, Some(&chosen_tag));
-        let profiles = crate::profiles::list_profiles(&profiles_path);
-        let mut refreshed = scan_mods(&mods_path);
-        crate::mod_sources::enrich_mods_with_sources(&mut refreshed, &config_path);
-        crate::mod_versions::enrich_mods_with_versions(&mut refreshed, &config_path);
-        let anchor_ids: Vec<String> = [mod_info.mod_version_id.clone(), Some(id.clone())]
-            .into_iter()
-            .flatten()
-            .collect();
-        let _ = crate::mod_versions::prune_cached_versions_around(
-            &config_path,
-            &cache_path,
-            &refreshed,
-            &profiles,
-            &anchor_ids,
-            &[id],
-        );
-    }
-
-    Ok(info)
+    Ok(outcome.mod_info)
 }
 
 /// Force-reinstall a mod from its linked GitHub source, picking the
@@ -1604,13 +1821,23 @@ pub async fn pick_previous_compatible_release(
 #[tauri::command]
 pub async fn update_all_mods(
     _profile_id: Option<String>,
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Vec<ModInfo>, String> {
     crate::game::ensure_game_not_running()?;
-    let (mods_path, profiles_path, cache_path, config_path, token, nexus_key, game_version) = {
+    let (
+        mods_path,
+        disabled_path,
+        profiles_path,
+        cache_path,
+        config_path,
+        token,
+        nexus_key,
+        game_version,
+    ) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         let mods_path = s.mods_path.clone().ok_or("Game path not set")?;
+        let disabled_path = s.disabled_mods_path.clone();
         let profiles_path = s.profiles_path.clone();
         let cache_path = s.cache_path.clone();
         let config_path = s.config_path.clone();
@@ -1619,6 +1846,7 @@ pub async fn update_all_mods(
         let game_version = s.game_version.clone();
         (
             mods_path,
+            disabled_path,
             profiles_path,
             cache_path,
             config_path,
@@ -1628,9 +1856,8 @@ pub async fn update_all_mods(
         )
     };
 
-    let mut installed = scan_mods(&mods_path);
-    crate::mod_sources::enrich_mods_with_sources(&mut installed, &config_path);
-    crate::mod_versions::enrich_mods_with_versions(&mut installed, &config_path);
+    let mut installed = merged_installed_mods(&mods_path, disabled_path.as_deref());
+    enrich_installed_for_updates(&mut installed, &config_path);
     let sources_db = load_sources(&config_path);
     let updates = check_all_updates(
         &installed,
@@ -1745,64 +1972,49 @@ pub async fn update_all_mods(
 
         // Read user-edited configs BEFORE the destructive delete pass —
         // same prepare/finalize pattern as update_mod / repair_mod.
-        let old_info_opt = if let Some(ref folder) = update.folder_name {
-            installed
-                .iter()
-                .find(|m| m.folder_name.as_deref() == Some(folder.as_str()))
-        } else {
-            installed.iter().find(|m| m.name == update.mod_name)
+        let Some(old_info) =
+            find_installed_mod(&installed, &update.mod_name, update.folder_name.as_deref())
+                .cloned()
+        else {
+            log::error!(
+                "update_all_mods: could not find installed row for '{}' (folder: {:?})",
+                update.mod_name,
+                update.folder_name
+            );
+            continue;
         };
-        match crate::mod_versions::cache_archive_as_mod_version_with_source_version(
+
+        match promote_archive_to_library(
             &chosen_zip,
+            &old_info,
             Some(format!("github:{}/{}", owner, repo)),
+            Some(&chosen_tag),
+            "github",
+            &mods_path,
+            disabled_path.as_deref(),
+            &profiles_path,
             &cache_path,
             &config_path,
-            Some(&chosen_tag),
+            game_version.as_deref(),
         ) {
-            Ok(info) => {
-                if let Some(old_info) = old_info_opt {
-                    if let Err(e) =
-                        validate_update_install_result(old_info, &info, game_version.as_deref())
-                    {
-                        log::error!(
-                            "update_all_mods: cached update for '{}' from {}/{}@{} failed validation: {}",
-                            update.mod_name,
-                            owner,
-                            repo,
-                            chosen_tag,
-                            e,
-                        );
-                        continue;
-                    }
-                }
-                if let Some(id) = info.mod_version_id.clone() {
-                    let _ = crate::mod_versions::set_record_source_version(
-                        &config_path,
-                        &id,
-                        Some(&chosen_tag),
-                    );
-                    let profiles = crate::profiles::list_profiles(&profiles_path);
-                    let anchor_ids: Vec<String> = [
-                        old_info_opt.and_then(|m| m.mod_version_id.clone()),
-                        Some(id.clone()),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect();
-                    let _ = crate::mod_versions::prune_cached_versions_around(
-                        &config_path,
-                        &cache_path,
-                        &installed,
-                        &profiles,
-                        &anchor_ids,
-                        &[id],
-                    );
-                }
-                results.push(info);
+            Ok(outcome) => {
+                crate::mod_sources::emit_configs_preserved(
+                    &app,
+                    &outcome.mod_info.name,
+                    &outcome.preserved_configs,
+                );
+                crate::mod_sources::emit_configs_lost(
+                    &app,
+                    &outcome.mod_info.name,
+                    &outcome.lost_configs,
+                );
+                results.push(outcome.mod_info);
+                installed = merged_installed_mods(&mods_path, disabled_path.as_deref());
+                enrich_installed_for_updates(&mut installed, &config_path);
             }
             Err(e) => {
                 log::error!(
-                    "update_all_mods: failed to cache update artifact for '{}': {}",
+                    "update_all_mods: failed to promote update artifact for '{}': {}",
                     update.mod_name,
                     e,
                 );
@@ -2354,80 +2566,343 @@ mod version_helper_tests {
         );
     }
 
-    #[test]
-    fn cache_downloaded_artifact_records_uuid_cache_without_touching_library() {
-        let tmp = tempfile::tempdir().unwrap();
-        let mods_path = tmp.path().join("mods");
-        let cache_path = tmp.path().join("cache");
-        let config_path = tmp.path().join("config");
-        std::fs::create_dir_all(mods_path.join("Watcher")).unwrap();
-        std::fs::create_dir_all(&cache_path).unwrap();
-        std::fs::create_dir_all(&config_path).unwrap();
+    fn write_mod_folder(
+        base: &Path,
+        folder: &str,
+        id: &str,
+        name: &str,
+        version: &str,
+        dll_bytes: &str,
+    ) {
+        let folder_path = base.join(folder);
+        std::fs::create_dir_all(&folder_path).unwrap();
         std::fs::write(
-            mods_path.join("Watcher").join("manifest.json"),
-            r#"{"name":"Watcher","version":"1.4.2"}"#,
+            folder_path.join("manifest.json"),
+            format!(r#"{{"id":"{id}","name":"{name}","version":"{version}"}}"#),
         )
         .unwrap();
-        std::fs::write(mods_path.join("Watcher").join("Watcher.dll"), "old-bytes").unwrap();
+        std::fs::write(folder_path.join(format!("{id}.dll")), dll_bytes).unwrap();
+    }
 
-        let zip_path = tmp.path().join("Watcher-1.4.3.zip");
-        {
-            let file = std::fs::File::create(&zip_path).unwrap();
-            let mut writer = zip::ZipWriter::new(file);
-            let options = zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Stored);
-            writer.start_file("Watcher/manifest.json", options).unwrap();
-            std::io::Write::write_all(
-                &mut writer,
-                br#"{"id":"Watcher","name":"Watcher","version":"1.4.3"}"#,
+    fn write_archive(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in entries {
+            writer.start_file(*name, options).unwrap();
+            std::io::Write::write_all(&mut writer, bytes).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    fn save_profile_with_mod(
+        profiles_path: &Path,
+        name: &str,
+        info: &ModInfo,
+    ) -> crate::profiles::Profile {
+        let mut profile_mod = crate::profiles::profile_mod_from_installed(info);
+        profile_mod.mod_version_id = info.mod_version_id.clone();
+        let profile = crate::profiles::Profile {
+            id: format!("{name}-id"),
+            name: name.into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![profile_mod],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            public: None,
+            mod_extras: std::collections::HashMap::new(),
+        };
+        crate::profiles::save_profile(&profile, profiles_path).unwrap();
+        profile
+    }
+
+    fn enriched_installed(
+        mods_path: &Path,
+        disabled_path: &Path,
+        config_path: &Path,
+    ) -> Vec<ModInfo> {
+        let mut installed =
+            merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+        crate::mod_sources::enrich_mods_with_sources(&mut installed, config_path);
+        crate::mod_versions::enrich_mods_with_versions(&mut installed, config_path);
+        installed
+    }
+
+    #[test]
+    fn promote_downloaded_artifact_updates_library_lane_and_keeps_profile_pin() {
+        for old_enabled in [true, false] {
+            let tmp = tempfile::tempdir().unwrap();
+            let mods_path = tmp.path().join("mods");
+            let disabled_path = tmp.path().join("mods_disabled");
+            let profiles_path = tmp.path().join("profiles");
+            let cache_path = tmp.path().join("cache");
+            let config_path = tmp.path().join("config");
+            std::fs::create_dir_all(&mods_path).unwrap();
+            std::fs::create_dir_all(&disabled_path).unwrap();
+            std::fs::create_dir_all(&profiles_path).unwrap();
+            std::fs::create_dir_all(&cache_path).unwrap();
+            std::fs::create_dir_all(&config_path).unwrap();
+
+            let old_base = if old_enabled {
+                &mods_path
+            } else {
+                &disabled_path
+            };
+            write_mod_folder(
+                old_base,
+                "Watcher",
+                "Watcher",
+                "Watcher",
+                "1.4.2",
+                "old-bytes",
+            );
+
+            let mut installed = enriched_installed(&mods_path, &disabled_path, &config_path);
+            let mut old_info = installed.remove(0);
+            crate::mod_versions::cache_mod_version_by_id_with_source_version(
+                &mut old_info,
+                old_base,
+                &cache_path,
+                &config_path,
+                Some("1.4.2"),
             )
             .unwrap();
-            writer.start_file("Watcher/Watcher.dll", options).unwrap();
-            std::io::Write::write_all(&mut writer, b"new-bytes").unwrap();
-            writer.finish().unwrap();
-        }
+            crate::mod_sources::update_installed_version_from_source(
+                "Watcher",
+                "1.4.2",
+                "github",
+                &config_path,
+            );
+            let profile = save_profile_with_mod(&profiles_path, "Stable", &old_info);
+            let old_profile_id = profile.mods[0].mod_version_id.clone();
 
-        let cached_info = cache_downloaded_mod_artifact(
-            &zip_path,
-            Some("github:owner/watcher".into()),
+            let zip_path = tmp.path().join("Watcher-1.4.3.zip");
+            write_archive(
+                &zip_path,
+                &[
+                    (
+                        "Watcher/manifest.json",
+                        br#"{"id":"Watcher","name":"Watcher","version":"1.4.3"}"#,
+                    ),
+                    ("Watcher/Watcher.dll", b"new-bytes"),
+                ],
+            );
+
+            let outcome = promote_archive_to_library(
+                &zip_path,
+                &old_info,
+                Some("github:owner/watcher".into()),
+                Some("1.4.3"),
+                "github",
+                &mods_path,
+                Some(&disabled_path),
+                &profiles_path,
+                &cache_path,
+                &config_path,
+                None,
+            )
+            .unwrap();
+
+            assert_eq!(outcome.mod_info.version, "1.4.3");
+            assert_eq!(outcome.mod_info.enabled, old_enabled);
+            let new_base = if old_enabled {
+                &mods_path
+            } else {
+                &disabled_path
+            };
+            let other_base = if old_enabled {
+                &disabled_path
+            } else {
+                &mods_path
+            };
+            assert_eq!(
+                std::fs::read_to_string(new_base.join("Watcher").join("Watcher.dll")).unwrap(),
+                "new-bytes"
+            );
+            assert!(
+                !other_base.join("Watcher").exists(),
+                "promotion should stay in the original active/stored lane"
+            );
+
+            let saved = crate::profiles::load_profile("Stable", &profiles_path).unwrap();
+            assert_eq!(saved.mods[0].mod_version_id, old_profile_id);
+            let old_cached = crate::mod_versions::get_cached_mod_path_for_profile_mod(
+                &cache_path,
+                &config_path,
+                &saved.mods[0],
+            )
+            .expect("old profile-pinned artifact should remain cached");
+            assert!(old_cached.exists());
+        }
+    }
+
+    #[test]
+    fn promote_bundle_uses_nexus_source_version_and_keeps_members_in_container() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let profiles_path = tmp.path().join("profiles");
+        let cache_path = tmp.path().join("cache");
+        let config_path = tmp.path().join("config");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+        std::fs::create_dir_all(&cache_path).unwrap();
+        std::fs::create_dir_all(&config_path).unwrap();
+
+        let old_zip = tmp
+            .path()
+            .join("AliceDefectSkin V2.0-979-2-0-1770000000.zip");
+        write_archive(
+            &old_zip,
+            &[
+                (
+                    "AliceDefectSkin/manifest.json",
+                    br#"{"id":"AliceDefectSkin","name":"Alice Defect Skin","version":"0.1.31"}"#,
+                ),
+                ("AliceDefectSkin/AliceDefectSkin.dll", b"old-skin"),
+                (
+                    "AliceDefectVoiceBridge/manifest.json",
+                    br#"{"id":"AliceDefectVoiceBridge","name":"Alice Defect Voice Bridge","version":"0.1.31"}"#,
+                ),
+                (
+                    "AliceDefectVoiceBridge/AliceDefectVoiceBridge.dll",
+                    b"old-voice",
+                ),
+            ],
+        );
+        let mut old_info = crate::mods::install_mod_from_archive(&old_zip, &mods_path).unwrap();
+        crate::mods::bundle::enrich_bundle_sidecar(
+            &mods_path,
+            &old_zip,
+            Some("AliceDefectSkin V2.0"),
+            Some("https://www.nexusmods.com/slaythespire2/mods/979".into()),
+            Some("slaythespire2".into()),
+            Some(979),
+            Some("2.0".into()),
+        );
+        let mut sources = crate::mod_sources::load_sources(&config_path);
+        let old_key = old_info
+            .folder_name
+            .clone()
+            .unwrap_or_else(|| old_info.name.clone());
+        sources.mods.insert(
+            old_key.clone(),
+            ModSourceEntry {
+                nexus_url: Some("https://www.nexusmods.com/slaythespire2/mods/979".into()),
+                nexus_game_domain: Some("slaythespire2".into()),
+                nexus_mod_id: Some(979),
+                installed_version: Some("2.0".into()),
+                installed_version_source: Some("nexus".into()),
+                ..Default::default()
+            },
+        );
+        crate::mod_sources::save_sources(&sources, &config_path).unwrap();
+        crate::mod_sources::enrich_mods_with_sources(
+            std::slice::from_mut(&mut old_info),
+            &config_path,
+        );
+        crate::mod_versions::cache_mod_version_by_id_with_source_version(
+            &mut old_info,
+            &mods_path,
             &cache_path,
             &config_path,
+            Some("2.0"),
+        )
+        .unwrap();
+        let profile = save_profile_with_mod(&profiles_path, "AlicePack", &old_info);
+        let old_profile_id = profile.mods[0].mod_version_id.clone();
+
+        let new_zip = tmp
+            .path()
+            .join("AliceDefectSkin V2.0-979-2-1-1780132414.zip");
+        write_archive(
+            &new_zip,
+            &[
+                (
+                    "AliceDefectSkin/manifest.json",
+                    br#"{"id":"AliceDefectSkin","name":"Alice Defect Skin","version":"0.1.31"}"#,
+                ),
+                ("AliceDefectSkin/AliceDefectSkin.dll", b"new-skin"),
+                (
+                    "AliceDefectVoiceBridge/manifest.json",
+                    br#"{"id":"AliceDefectVoiceBridge","name":"Alice Defect Voice Bridge","version":"0.1.31"}"#,
+                ),
+                (
+                    "AliceDefectVoiceBridge/AliceDefectVoiceBridge.dll",
+                    b"new-voice",
+                ),
+            ],
+        );
+
+        let outcome = promote_archive_to_library(
+            &new_zip,
+            &old_info,
+            Some("https://www.nexusmods.com/slaythespire2/mods/979".into()),
+            Some("2.1"),
+            "nexus",
+            &mods_path,
+            Some(&disabled_path),
+            &profiles_path,
+            &cache_path,
+            &config_path,
+            None,
         )
         .unwrap();
 
+        assert_eq!(outcome.mod_info.bundle_member_ids.len(), 2);
+        let mut refreshed = enriched_installed(&mods_path, &disabled_path, &config_path);
         assert_eq!(
-            std::fs::read_to_string(mods_path.join("Watcher").join("Watcher.dll")).unwrap(),
-            "old-bytes",
-            "cache-only updates must not replace the library copy on disk"
+            refreshed.len(),
+            1,
+            "bundle members should stay inside one Library container row"
+        );
+        let current = refreshed.pop().unwrap();
+        assert_eq!(current.bundle_member_ids.len(), 2);
+        let current_record = crate::mod_versions::record_by_id(
+            &config_path,
+            current.mod_version_id.as_deref().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(current_record.source_version.as_deref(), Some("2.1"));
+        assert_eq!(
+            std::fs::read_to_string(
+                mods_path
+                    .join(current.folder_name.as_deref().unwrap())
+                    .join("AliceDefectSkin")
+                    .join("AliceDefectSkin.dll")
+            )
+            .unwrap(),
+            "new-skin"
         );
 
-        let profile_mod = crate::profiles::ProfileMod {
-            mod_version_id: cached_info.mod_version_id.clone(),
-            name: "Watcher".into(),
-            version: "1.4.3".into(),
-            source: Some("github:owner/watcher".into()),
-            hash: cached_info.hash.clone(),
-            files: cached_info.files.clone(),
-            folder_name: Some("Watcher".into()),
-            mod_id: Some("Watcher".into()),
-            enabled: true,
-            bundle_url: None,
-            bundle_sha256: None,
-            bundle_members: vec![],
-            bundle_member_ids: vec![],
-        };
-        let cached = crate::mod_versions::get_cached_mod_path_for_profile_mod(
+        let saved = crate::profiles::load_profile("AlicePack", &profiles_path).unwrap();
+        assert_eq!(saved.mods[0].mod_version_id, old_profile_id);
+        let old_cached = crate::mod_versions::get_cached_mod_path_for_profile_mod(
             &cache_path,
             &config_path,
-            &profile_mod,
+            &saved.mods[0],
         )
-        .expect("downloaded update artifact should be cached by ID");
-        let file = std::fs::File::open(cached).unwrap();
-        let mut archive = zip::ZipArchive::new(file).unwrap();
-        let mut dll = archive.by_name("Watcher/Watcher.dll").unwrap();
-        let mut contents = String::new();
-        std::io::Read::read_to_string(&mut dll, &mut contents).unwrap();
-        assert_eq!(contents, "new-bytes");
+        .expect("old bundle artifact should remain cached");
+        assert!(old_cached.exists());
+
+        let options = crate::mod_versions::local_version_options_for_target(
+            &[current.clone()],
+            &[saved],
+            &config_path,
+            &cache_path,
+            &current.name,
+            current.mod_version_id.as_deref(),
+            current.mod_id.as_deref(),
+        );
+        let versions = options
+            .iter()
+            .map(|option| option.version.as_str())
+            .collect::<Vec<_>>();
+        assert!(versions.contains(&"2.1"));
+        assert!(versions.contains(&"2.0"));
     }
 
     #[test]

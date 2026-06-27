@@ -134,6 +134,9 @@ export interface ProfileMembershipMod {
   display_name?: string | null;
   bundle_members?: string[];
   bundle_member_ids?: string[];
+  installed?: boolean;
+  cached?: boolean;
+  missing?: boolean;
   installed_enabled: boolean;
   version_options?: LocalModVersionOption[];
   profiles: ProfileMembershipState[];
@@ -152,6 +155,40 @@ export interface LocalModVersionOption {
   cached: boolean;
   pinned: boolean;
   used_by_profiles?: string[];
+}
+
+export interface LocalModVersionAffectedProfile {
+  profile_id: string;
+  profile_name: string;
+}
+
+export interface LocalModVersionRemovalPreview {
+  target: LocalModVersionOption;
+  affected_profiles: LocalModVersionAffectedProfile[];
+  replacement_candidates: LocalModVersionOption[];
+  active: boolean;
+  installed: boolean;
+  cached: boolean;
+  pinned: boolean;
+  can_delete_directly: boolean;
+}
+
+export type ManualModVersionRemovalMode = 'remap' | 'remove_from_packs';
+
+export interface ManualModVersionProfileReplacement {
+  profile_id: string;
+  mod_version_id: string;
+}
+
+export interface ManualModVersionRemovalResult {
+  removed_mod_version_id: string;
+  mode: ManualModVersionRemovalMode;
+  remapped_profiles?: LocalModVersionAffectedProfile[];
+  removed_profiles?: LocalModVersionAffectedProfile[];
+  switched_active: boolean;
+  deleted_disk: boolean;
+  deleted_cache: boolean;
+  removed_record: boolean;
 }
 
 export interface ProfileMembershipState {
@@ -210,6 +247,37 @@ export interface LaunchDiagnostics {
   log_path?: string | null;
   game_version?: string | null;
   failed_mods: LaunchFailureMod[];
+}
+
+export interface LaunchIncompatibleMod {
+  name: string;
+  display_name?: string | null;
+  version: string;
+  folder_name?: string | null;
+  mod_id?: string | null;
+  min_game_version: string;
+}
+
+export interface LaunchDependencyBlockedMod {
+  name: string;
+  display_name?: string | null;
+  version: string;
+  folder_name?: string | null;
+  mod_id?: string | null;
+  missing_dependencies: string[];
+}
+
+export interface LaunchHealthReport {
+  active_profile_id?: string | null;
+  active_profile_name?: string | null;
+  current_game_version?: string | null;
+  last_launch_game_version?: string | null;
+  profile_game_version?: string | null;
+  game_version_changed_since_last_launch: boolean;
+  profile_game_version_changed: boolean;
+  known_incompatible_mods: LaunchIncompatibleMod[];
+  dependency_blocked_mods: LaunchDependencyBlockedMod[];
+  previous_failed_mods: LaunchFailureMod[];
 }
 
 export interface LaunchQuarantinedMod {
@@ -341,7 +409,13 @@ export interface ModSourceEntry {
    *  frontend doesn't read this directly. */
   config_hashes?: Record<string, string>;
   installed_version?: string | null;
-  installed_version_source?: 'github' | 'nexus' | 'manual' | 'unknown' | string | null;
+  installed_version_source?:
+    | 'github'
+    | 'nexus'
+    | 'manual'
+    | 'unknown'
+    | string
+    | null;
 }
 
 export interface AutoDetectResult {
@@ -470,11 +544,11 @@ export interface ModAuditTarget {
 
 export interface BrowserCard {
   owner: string;
-  code: string;           // "AA5A-315D-61AE"
+  code: string; // "AA5A-315D-61AE"
   name: string;
   mod_count: number;
-  created_at: string;     // ISO
-  updated_at: string;     // ISO
+  created_at: string; // ISO
+  updated_at: string; // ISO
 }
 
 export interface BrowserPage {
@@ -482,5 +556,5 @@ export interface BrowserPage {
   page: number;
   has_next_page: boolean;
   stale: boolean;
-  fetched_at: number;     // unix seconds
+  fetched_at: number; // unix seconds
 }

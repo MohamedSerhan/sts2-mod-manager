@@ -23,6 +23,8 @@ const SAME_AS_ENGLISH_ALLOWED = new Set([
   'mods.nexusEffectiveVersion',
   'mods.notePrefix',
   'mods.versionOption',
+  'mods.versionOptionVersion',
+  'mods.versionReplacementOption',
   'onboarding.step1.browsePlaceholderLinux',
   'onboarding.step1.browsePlaceholderMac',
   'onboarding.step1.browsePlaceholderWindows',

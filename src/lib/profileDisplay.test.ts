@@ -26,7 +26,7 @@ describe('profileDisplay helpers', () => {
 
   it('resolves profile identifiers to display names when profiles are available', () => {
     const profiles = [
-      { id: UUID, name: 'TesterW', mods: [], created_at: '2026-01-01' },
+      { id: UUID, name: 'TesterW', game_version: null, created_by: null, mods: [], created_at: '2026-01-01', updated_at: '2026-01-01' },
     ] as Profile[];
 
     expect(findProfileForIdentifier(profiles, UUID)?.name).toBe('TesterW');
@@ -35,7 +35,7 @@ describe('profileDisplay helpers', () => {
 
   it('resolves a profile by case-insensitive name', () => {
     const profiles = [
-      { id: UUID, name: 'TesterW', mods: [], created_at: '2026-01-01' },
+      { id: UUID, name: 'TesterW', game_version: null, created_by: null, mods: [], created_at: '2026-01-01', updated_at: '2026-01-01' },
     ] as Profile[];
 
     expect(findProfileForIdentifier(profiles, 'testerw')?.id).toBe(UUID);

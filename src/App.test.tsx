@@ -1063,7 +1063,7 @@ describe('<App>', () => {
 
   it('dropping supported archives when NOT viewing a modpack just installs them (no membership change)', async () => {
     registerInvokeHandler('install_mod_from_file', (args) => ({
-      name: args?.path?.includes('rar') ? 'LooseRar' : args?.path?.includes('7z') ? 'Loose7z' : 'LooseMod',
+      name: (args?.path as string | undefined)?.includes('rar') ? 'LooseRar' : (args?.path as string | undefined)?.includes('7z') ? 'Loose7z' : 'LooseMod',
       version: '1.0', description: '', enabled: true, files: [],
       source: null, hash: null, dependencies: [], size_bytes: 0,
       folder_name: 'LooseMod', mod_id: 'LooseMod', github_url: null, nexus_url: null,

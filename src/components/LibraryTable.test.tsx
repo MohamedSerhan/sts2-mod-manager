@@ -2216,9 +2216,9 @@ describe('<LibraryTable modpackName={null}>', () => {
           },
         ],
       }));
-      registerInvokeHandler('preview_library_mod_version_removal', ({ modVersionId }) => ({
+      registerInvokeHandler('preview_library_mod_version_removal', (args) => ({
         target: {
-          mod_version_id: modVersionId,
+          mod_version_id: args?.modVersionId as string,
           name: 'Watcher',
           version: '1.5.0',
           folder_name: 'Watcher-v1.5.0',

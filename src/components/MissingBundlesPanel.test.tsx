@@ -121,6 +121,56 @@ describe("parseMissingBundlesError", () => {
   });
 });
 
+describe("parseMissingBundleIssues classification branches", () => {
+  it("classifies recoverable, preserved-remote, marker-less upload, marker-less missing, and unknown details", () => {
+    const issues = parseMissingBundleIssues(
+      ["Recov", "Kept", "Stuck", "Gone", "Mystery"],
+      [
+        "Recov: [publish_issue:missing_recoverable] can be restored",
+        "Kept: [publish_issue:preserved_remote_bundle] still on remote",
+        "Stuck: Upload of asset failed with 422 already_exists",
+        "Gone: local files are missing",
+        "Mystery: something we do not recognize",
+      ].join(" | "),
+    );
+    const byName = Object.fromEntries(issues.map((i) => [i.name, i.kind]));
+    expect(byName).toEqual({
+      Recov: "missing_recoverable",
+      Kept: "preserved_remote_bundle",
+      Stuck: "upload_failed",
+      Gone: "missing_unrecoverable",
+      Mystery: "unknown",
+    });
+  });
+
+  it("derives the default kind from an upload-only detail and fills un-detailed mods with it", () => {
+    const issues = parseMissingBundleIssues(
+      ["Detailed", "Bare"],
+      "Detailed: Upload of asset failed with already_exists",
+    );
+    // explicitUpload && !explicitMissing → the detail-less 'Bare' mod defaults
+    // to upload_failed rather than missing_unrecoverable.
+    expect(issues.find((i) => i.name === "Bare")?.kind).toBe("upload_failed");
+  });
+
+  it("skips blank-named segments and drops blank/whitespace mod names", () => {
+    const issues = parseMissingBundleIssues(
+      ["", "  ", "Real"],
+      ": orphaned detail with no name | Real: [publish_issue:missing_unrecoverable] not installed locally",
+    );
+    expect(issues.map((i) => i.name)).toEqual(["Real"]);
+  });
+
+  it("names an issue from a colon split when the mod is not in the provided list", () => {
+    const issues = parseMissingBundleIssues(
+      ["Listed"],
+      "Unlisted: Upload of asset failed with already_exists",
+    );
+    expect(issues.find((i) => i.name === "Unlisted")?.kind).toBe("upload_failed");
+    expect(issues.find((i) => i.name === "Listed")).toBeDefined();
+  });
+});
+
 describe("<MissingBundlesPanel>", () => {
   const baseProfile: Profile = {
     id: "profile-1",

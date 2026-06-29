@@ -76,7 +76,7 @@ jobs:
     steps:
       - name: Checkout dispatched dev-build head
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dev_pr != '' && inputs.dev_head_sha != '' && inputs.dev_head_repository != '' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.dev_head_repository }}
           ref: ${{ inputs.dev_head_sha }}
@@ -84,7 +84,7 @@ jobs:
 
       - name: Checkout repository
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.dev_pr == '' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install system dependencies (Linux only)
         if: matrix.platform == 'ubuntu-22.04'
@@ -284,7 +284,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Assemble and upload latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -297,7 +297,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Generate release body
         env:
@@ -430,7 +430,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v6

@@ -5,7 +5,6 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-use crate::mod_sources::load_sources;
 use crate::mods::{install_mod_from_archive, scan_disabled_mods, scan_mods, ModInfo};
 use crate::state::AppState;
 
@@ -46,6 +45,16 @@ pub struct ModAutoInstalledIncompatible {
 pub struct ModAutoInstallFailed {
     pub file_name: String,
     pub error: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_version_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_version: Option<String>,
 }
 
 fn incompatible_install_payload(
@@ -59,6 +68,79 @@ fn incompatible_install_payload(
         min_game_version: info.min_game_version.clone().unwrap_or_default(),
         user_game_version: user_game_version.unwrap_or_default().to_string(),
     })
+}
+
+fn failed_update_install_payload(
+    file_name: String,
+    error: String,
+    existing: &ModInfo,
+    skip_version: Option<String>,
+) -> ModAutoInstallFailed {
+    let skip_version = skip_version.and_then(|version| {
+        let trimmed = version.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+
+    if skip_version.is_none() {
+        return ModAutoInstallFailed {
+            file_name,
+            error,
+            mod_version_id: None,
+            mod_name: None,
+            folder_name: None,
+            mod_id: None,
+            skip_version: None,
+        };
+    }
+
+    ModAutoInstallFailed {
+        file_name,
+        error,
+        mod_version_id: existing.mod_version_id.clone(),
+        mod_name: Some(existing.name.clone()),
+        folder_name: existing.folder_name.clone(),
+        mod_id: existing.mod_id.clone(),
+        skip_version,
+    }
+}
+
+pub(crate) fn exact_download_source_version(path: &Path, manifest_version: &str) -> Option<String> {
+    crate::mods::bundle::nexus_file_version(path)
+        .or_else(|| crate::mod_versions::usable_source_version_label(manifest_version))
+}
+
+fn display_source_version(version: &str) -> String {
+    let trimmed = version.trim();
+    if trimmed.starts_with(['v', 'V']) {
+        trimmed.to_string()
+    } else {
+        format!("v{trimmed}")
+    }
+}
+
+fn duplicate_downloaded_update_error(
+    existing: &ModInfo,
+    downloaded_source_version: Option<&str>,
+    config_path: &Path,
+) -> Option<String> {
+    let downloaded =
+        downloaded_source_version.and_then(crate::mod_versions::usable_source_version_label)?;
+    let current =
+        crate::mod_versions::installed_source_version_label_for_mod(existing, config_path)
+            .or_else(|| crate::mod_versions::usable_source_version_label(&existing.version))?;
+    match crate::mod_versions::compare_source_version_labels(&current, &downloaded) {
+        Some(std::cmp::Ordering::Equal) => Some(format!(
+            "Downloaded update for '{}' is {}, which is already the current stored version. Keep showing this update if you want to choose a different Nexus file.",
+            existing.name,
+            display_source_version(&downloaded),
+        )),
+        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Greater) => None,
+        None => None,
+    }
 }
 
 /// Determine which directory the watcher should monitor.
@@ -282,6 +364,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 .unwrap_or_default()
                                 .to_string_lossy()
                                 .to_string();
+                            let mut skip_version = crate::mods::bundle::nexus_file_version(path);
                             let promote_result: std::result::Result<
                                 crate::updater::PromotionOutcome,
                                 String,
@@ -309,16 +392,19 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                         )
                                     });
                                 }
-                                let source_version = crate::mods::bundle::nexus_file_version(path)
-                                    .or_else(|| {
-                                        fetch_nexus_version_blocking(
-                                            &staged.name,
-                                            staged.folder_name.as_deref(),
-                                            staged.mod_id.as_deref(),
-                                            &config_path,
-                                            &state,
-                                        )
-                                    });
+                                let source_version =
+                                    exact_download_source_version(path, &staged.version);
+                                if skip_version.is_none() {
+                                    skip_version = source_version.clone();
+                                }
+                                if let Some(error) = duplicate_downloaded_update_error(
+                                    existing,
+                                    source_version.as_deref(),
+                                    &config_path,
+                                ) {
+                                    skip_version = None;
+                                    return Err(error);
+                                }
                                 let source_hint = staged.source.clone().or_else(|| {
                                     crate::mod_versions::source_hint_for_mod(existing, &config_path)
                                 });
@@ -377,10 +463,12 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     );
                                     let _ = app.emit(
                                         "mod-auto-install-failed",
-                                        ModAutoInstallFailed {
+                                        failed_update_install_payload(
                                             file_name,
-                                            error: e.to_string(),
-                                        },
+                                            e.to_string(),
+                                            existing,
+                                            skip_version.clone(),
+                                        ),
                                     );
                                 }
                             }
@@ -504,28 +592,13 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                 //  1. the version in the Nexus download filename
                                 //     ("...-979-2-1-..." -> "2.1") — exactly the file the
                                 //     user installed, no API key/network needed;
-                                //  2. the live Nexus file version (API);
-                                //  3. the archive's manifest version — last resort, and
-                                //     for a multi-mod pack this is just the FIRST member's
-                                //     number (e.g. "0.1.31"), which is why packs used to
-                                //     show a sub-mod's version.
+                                //  2. the archive's manifest version if it is usable.
                                 let version_to_store_for_bundle;
                                 {
-                                    let nexus_ver = crate::mods::bundle::nexus_file_version(path)
-                                        .or_else(|| {
-                                            fetch_nexus_version_blocking(
-                                                &mod_info.name,
-                                                mod_info.folder_name.as_deref(),
-                                                mod_info.mod_id.as_deref(),
-                                                &config_path,
-                                                &state,
-                                            )
-                                        });
                                     let version_to_store =
-                                        nexus_ver.unwrap_or_else(|| mod_info.version.clone());
+                                        exact_download_source_version(path, &mod_info.version);
                                     version_to_store_for_bundle = version_to_store.clone();
-                                    if version_to_store != "unknown" && version_to_store != "0.0.0"
-                                    {
+                                    if let Some(version_to_store) = version_to_store.as_deref() {
                                         // Folder-first key so installed_version is stored
                                         // under the same DB key the folder-first read
                                         // path (enrich/audit/pin) uses.
@@ -572,13 +645,6 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                                 e.nexus_mod_id,
                                             )
                                         });
-                                    let bundle_version = if version_to_store_for_bundle != "unknown"
-                                        && version_to_store_for_bundle != "0.0.0"
-                                    {
-                                        Some(version_to_store_for_bundle.clone())
-                                    } else {
-                                        None
-                                    };
                                     crate::mods::bundle::enrich_bundle_sidecar(
                                         &mods_path,
                                         path,
@@ -586,7 +652,7 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                         nexus_url,
                                         nexus_game_domain,
                                         nexus_mod_id,
-                                        bundle_version,
+                                        version_to_store_for_bundle.clone(),
                                     );
                                 }
 
@@ -648,6 +714,11 @@ pub fn start_downloads_watcher(app: AppHandle, state: AppState) {
                                     ModAutoInstallFailed {
                                         file_name,
                                         error: e.to_string(),
+                                        mod_version_id: None,
+                                        mod_name: None,
+                                        folder_name: None,
+                                        mod_id: None,
+                                        skip_version: None,
                                     },
                                 );
                             }
@@ -1199,83 +1270,6 @@ pub(crate) fn stash_existing_mod_files(
 // stranded after a Nexus update — that was the user-reported "link reset"
 // bug.
 
-/// Query the Nexus API (blocking) for the current version of a mod.
-/// Returns None if the mod has no Nexus source or if the API call fails.
-///
-/// Pages with multiple variants (e.g. BetterSpire2 + BetterSpire2Lite) report
-/// a single page-level `version` that's whichever file the author uploaded
-/// last. To stay accurate we also pull the files list and pick the one that
-/// matches the local mod's flavor (currently: "lite" detection).
-pub(crate) fn fetch_nexus_version_blocking(
-    mod_name: &str,
-    folder_name: Option<&str>,
-    mod_id_key: Option<&str>,
-    config_path: &Path,
-    state: &AppState,
-) -> Option<String> {
-    let db = load_sources(config_path);
-    // Folder-first lookup (matching enrich/audit/pin): a bundle's source entry is
-    // keyed by its container folder, not its display name, so a name-only
-    // `db.mods.get(mod_name)` misses it — and the caller then falls back to a
-    // member manifest version (e.g. "0.1.31" instead of the Nexus file "2.1").
-    let entry = crate::mod_sources::lookup_entry(&db.mods, folder_name, mod_name, mod_id_key)?;
-    let domain = entry.nexus_game_domain.as_ref()?;
-    let mod_id = entry.nexus_mod_id?;
-
-    let api_key = {
-        let s = state.lock().ok()?;
-        s.nexus_api_key.clone()?
-    };
-
-    let client = crate::http::https_blocking_client_builder()
-        .build()
-        .unwrap_or_else(|_| reqwest::blocking::Client::new());
-    let mk_get = |url: &str| {
-        client
-            .get(url)
-            .header("apikey", &api_key)
-            .header("accept", "application/json")
-            .header(
-                "user-agent",
-                concat!("sts2-mod-manager/", env!("CARGO_PKG_VERSION")),
-            )
-    };
-
-    // 1. Page-level version as the fallback.
-    let page_url = format!(
-        "https://api.nexusmods.com/v1/games/{}/mods/{}.json",
-        domain, mod_id
-    );
-    let page_version = mk_get(&page_url)
-        .send()
-        .ok()
-        .and_then(|r| r.error_for_status().ok())
-        .and_then(|r| r.json::<serde_json::Value>().ok())
-        .and_then(|info| info.get("version")?.as_str().map(|s| s.to_string()))
-        .filter(|v| !v.is_empty());
-
-    // 2. Files list — pick the variant matching the local mod's flavor.
-    let files_url = format!(
-        "https://api.nexusmods.com/v1/games/{}/mods/{}/files.json",
-        domain, mod_id
-    );
-    let picked = mk_get(&files_url)
-        .send()
-        .ok()
-        .and_then(|r| r.error_for_status().ok())
-        .and_then(|r| r.json::<serde_json::Value>().ok())
-        .and_then(|v| {
-            let arr = v.get("files")?.as_array()?.clone();
-            let files: Vec<crate::nexus::NexusFile> = arr
-                .into_iter()
-                .filter_map(|item| serde_json::from_value(item).ok())
-                .collect();
-            crate::nexus::pick_version_for_local_mod(&files, mod_name)
-        });
-
-    picked.or(page_version)
-}
-
 /// If the user recently queued a Nexus mod via Quick Add and this download
 /// matches it (by mod_id in the filename or fuzzy name match), attach the
 /// Nexus URL to the mod's source entry and consume the pending hint.
@@ -1328,12 +1322,22 @@ fn attach_pending_nexus_source(
     let Some(pending) = consumed else { return };
 
     let mod_id = pending.mod_id;
-    crate::mod_sources::attach_nexus_source(
+    let archive_path = std::path::Path::new(file_name);
+    let source_version = crate::mods::bundle::nexus_file_version(archive_path);
+    let mut file_identity =
+        crate::nexus::nexus_file_identity_from_download(archive_path, source_version.as_deref());
+    if file_identity.file_id.is_none() {
+        file_identity.file_id = pending.file_id;
+    }
+    crate::mod_sources::attach_nexus_source_with_file_identity(
         installed_name,
         installed_folder,
         pending.nexus_url,
         pending.game_domain,
         pending.mod_id,
+        file_identity.file_id,
+        file_identity.file_name,
+        file_identity.lane_key,
         config_path,
     );
     log::info!(
@@ -1451,6 +1455,7 @@ mod compatibility_payload_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         }
     }
 
@@ -1488,6 +1493,170 @@ mod compatibility_payload_tests {
         )
         .is_none());
     }
+
+    #[test]
+    fn failed_update_install_payload_names_skip_target_for_matched_update() {
+        let mut existing = mod_info_with_min_game_version(None);
+        existing.name = "Route Planner".into();
+        existing.folder_name = Some("route_planner".into());
+        existing.mod_id = Some("route_planner".into());
+        existing.mod_version_id = Some("route-planner-v1".into());
+
+        let payload = failed_update_install_payload(
+            "RoutePlanner-1260-2-1780.zip".into(),
+            "Installed archive did not produce a parseable manifest version.".into(),
+            &existing,
+            Some("V2".into()),
+        );
+
+        assert_eq!(payload.file_name, "RoutePlanner-1260-2-1780.zip");
+        assert_eq!(payload.mod_name.as_deref(), Some("Route Planner"));
+        assert_eq!(payload.folder_name.as_deref(), Some("route_planner"));
+        assert_eq!(payload.mod_id.as_deref(), Some("route_planner"));
+        assert_eq!(payload.mod_version_id.as_deref(), Some("route-planner-v1"));
+        assert_eq!(payload.skip_version.as_deref(), Some("V2"));
+    }
+
+    #[test]
+    fn failed_update_install_payload_without_skip_version_stays_toast_only() {
+        let existing = mod_info_with_min_game_version(None);
+
+        let payload = failed_update_install_payload(
+            "bad.zip".into(),
+            "corrupt".into(),
+            &existing,
+            Some("   ".into()),
+        );
+
+        assert_eq!(payload.file_name, "bad.zip");
+        assert_eq!(payload.error, "corrupt");
+        assert!(payload.mod_name.is_none());
+        assert!(payload.folder_name.is_none());
+        assert!(payload.mod_id.is_none());
+        assert!(payload.mod_version_id.is_none());
+        assert!(payload.skip_version.is_none());
+    }
+
+    #[test]
+    fn watcher_update_rejects_exact_source_version_and_keeps_cached_newer_option() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let source = "https://www.nexusmods.com/slaythespire2/mods/46";
+
+        std::fs::create_dir_all(base.path().join("Watcher")).unwrap();
+        std::fs::write(
+            base.path().join("Watcher/Watcher.json"),
+            r#"{"id":"Watcher","name":"Watcher","version":"v1.4.3"}"#,
+        )
+        .unwrap();
+
+        let mut existing = mod_info_with_min_game_version(None);
+        existing.name = "Watcher".into();
+        existing.version = "v1.4.3".into();
+        existing.folder_name = Some("Watcher".into());
+        existing.mod_id = Some("Watcher".into());
+        existing.source = Some(source.into());
+        existing.files = vec!["Watcher/Watcher.json".into()];
+        existing.hash = Some("watcher-current".into());
+        crate::mod_versions::ensure_mod_info_id(&mut existing, config.path()).unwrap();
+        crate::mod_versions::set_record_source_version(
+            config.path(),
+            existing.mod_version_id.as_deref().unwrap(),
+            Some("1.4.3"),
+        )
+        .unwrap();
+        crate::mod_sources::attach_nexus_source(
+            "Watcher",
+            Some("Watcher"),
+            source.into(),
+            "slaythespire2".into(),
+            46,
+            config.path(),
+        );
+        crate::mod_sources::update_installed_version_from_source(
+            "Watcher",
+            "1.4.3",
+            "nexus",
+            config.path(),
+        );
+
+        std::fs::write(
+            base.path().join("Watcher/Watcher.json"),
+            r#"{"id":"Watcher","name":"Watcher","version":"1.4.20"}"#,
+        )
+        .unwrap();
+        let mut cached = existing.clone();
+        cached.mod_version_id = None;
+        cached.version = "1.4.20".into();
+        cached.hash = Some("watcher-cached-1420".into());
+        crate::mod_versions::cache_mod_version_by_id_with_source_version(
+            &mut cached,
+            base.path(),
+            cache.path(),
+            config.path(),
+            Some("1.4.20"),
+        )
+        .expect("cached newer Watcher archive should be written");
+
+        let error = duplicate_downloaded_update_error(&existing, Some("1.4.3"), config.path())
+            .expect("same-version watcher download should be rejected");
+        assert!(error.contains("already the current stored version"));
+        assert!(error.contains("v1.4.3"));
+        assert!(
+            duplicate_downloaded_update_error(&existing, Some("1.4.2"), config.path()).is_none(),
+            "different lower source versions are valid branch choices and should install"
+        );
+        assert!(
+            duplicate_downloaded_update_error(&existing, Some("1.4.20"), config.path()).is_none(),
+            "different higher source versions should still install"
+        );
+        let payload = failed_update_install_payload(
+            "The Watcher - 1.4.3 - StS2 - v0.103.2-46-1-4-3-1777364274.zip".into(),
+            error,
+            &existing,
+            None,
+        );
+        assert!(
+            payload.mod_name.is_none(),
+            "exact duplicate downloads should stay on the toast-only failure path"
+        );
+        assert!(payload.skip_version.is_none());
+
+        let options = crate::mod_versions::local_version_options_for_target(
+            &[existing.clone()],
+            &[],
+            config.path(),
+            cache.path(),
+            &existing.name,
+            existing.mod_version_id.as_deref(),
+            existing.mod_id.as_deref(),
+        );
+        assert!(
+            options
+                .iter()
+                .any(|option| option.version == "1.4.20" && option.cached),
+            "rejecting the same-version download must leave the newer cached option selectable"
+        );
+        assert!(
+            crate::mod_versions::has_local_version_for_mod(
+                config.path(),
+                cache.path(),
+                &existing,
+                "1.4.20",
+            ),
+            "cached Watcher 1.4.20 should suppress only the exact 1.4.20 update pill"
+        );
+        assert!(
+            !crate::mod_versions::has_local_version_for_mod(
+                config.path(),
+                cache.path(),
+                &existing,
+                "1.4.19",
+            ),
+            "cached Watcher 1.4.20 must not suppress a different branch/file version"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1524,6 +1693,7 @@ mod stash_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         }
     }
 
@@ -1745,6 +1915,45 @@ mod pending_nexus_source_tests {
             state.lock().unwrap().pending_nexus_installs.is_empty(),
             "matching pending Nexus install should be consumed"
         );
+    }
+
+    #[test]
+    fn attach_pending_nexus_source_persists_file_identity_from_download() {
+        let config = tempdir().unwrap();
+        let state = create_app_state();
+        {
+            let mut s = state.lock().unwrap();
+            s.pending_nexus_installs.push(PendingNexusInstall {
+                mod_name: "Watcher".into(),
+                nexus_url: "https://www.nexusmods.com/slaythespire2/mods/46".into(),
+                game_domain: "slaythespire2".into(),
+                mod_id: 46,
+                file_id: Some(1780935880),
+                queued_at: std::time::Instant::now(),
+            });
+        }
+
+        attach_pending_nexus_source(
+            "Watcher",
+            Some("Watcher"),
+            Some("Watcher"),
+            "Watcher-46-1-4-22-1780935880.zip",
+            config.path(),
+            &state,
+        );
+
+        let db = crate::mod_sources::load_sources(config.path());
+        let entry = db
+            .mods
+            .get("Watcher")
+            .expect("pending Nexus source should attach to the installed folder key");
+        assert_eq!(entry.nexus_mod_id, Some(46));
+        assert_eq!(entry.nexus_file_id, Some(1780935880));
+        assert_eq!(
+            entry.nexus_file_name.as_deref(),
+            Some("Watcher-46-1-4-22-1780935880.zip")
+        );
+        assert!(entry.nexus_file_lane_key.is_some());
     }
 
     #[test]

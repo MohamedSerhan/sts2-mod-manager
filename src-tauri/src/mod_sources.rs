@@ -33,6 +33,21 @@ pub struct ModSourceEntry {
     /// Nexus mod ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nexus_mod_id: Option<u64>,
+    /// Nexus file ID for the last installed file lane on this page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nexus_file_id: Option<u64>,
+    /// Nexus file display/download name for the last installed file lane.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nexus_file_name: Option<String>,
+    /// Normalized backend-only lane key used to avoid cross-file update checks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nexus_file_lane_key: Option<String>,
+    /// Canonical Steam Workshop page URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workshop_url: Option<String>,
+    /// Steam Workshop numeric published-file ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workshop_item_id: Option<String>,
     /// Tracks the version (release tag) that was last installed via the updater
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
@@ -244,6 +259,30 @@ fn merge_missing_entry_fields(dest: &mut ModSourceEntry, old: ModSourceEntry) ->
         dest.nexus_url = old.nexus_url;
         dest.nexus_game_domain = old.nexus_game_domain;
         dest.nexus_mod_id = old.nexus_mod_id;
+        dest.nexus_file_id = old.nexus_file_id;
+        dest.nexus_file_name = old.nexus_file_name;
+        dest.nexus_file_lane_key = old.nexus_file_lane_key;
+        changed = true;
+    } else {
+        if dest.nexus_file_id.is_none() && old.nexus_file_id.is_some() {
+            dest.nexus_file_id = old.nexus_file_id;
+            changed = true;
+        }
+        if dest.nexus_file_name.is_none() && old.nexus_file_name.is_some() {
+            dest.nexus_file_name = old.nexus_file_name;
+            changed = true;
+        }
+        if dest.nexus_file_lane_key.is_none() && old.nexus_file_lane_key.is_some() {
+            dest.nexus_file_lane_key = old.nexus_file_lane_key;
+            changed = true;
+        }
+    }
+    if dest.workshop_item_id.is_none() && old.workshop_item_id.is_some() {
+        dest.workshop_item_id = old.workshop_item_id;
+        dest.workshop_url = old.workshop_url;
+        changed = true;
+    } else if dest.workshop_url.is_none() && old.workshop_url.is_some() {
+        dest.workshop_url = old.workshop_url;
         changed = true;
     }
     if !dest.pinned && old.pinned {
@@ -624,14 +663,54 @@ pub fn attach_nexus_source(
     mod_id: u64,
     config_path: &Path,
 ) {
+    attach_nexus_source_with_file_identity(
+        mod_name,
+        folder_name,
+        nexus_url,
+        game_domain,
+        mod_id,
+        None,
+        None,
+        None,
+        config_path,
+    );
+}
+
+pub fn attach_nexus_source_with_file_identity(
+    mod_name: &str,
+    folder_name: Option<&str>,
+    nexus_url: String,
+    game_domain: String,
+    mod_id: u64,
+    nexus_file_id: Option<u64>,
+    nexus_file_name: Option<String>,
+    nexus_file_lane_key: Option<String>,
+    config_path: &Path,
+) {
     let mut db = load_sources(config_path);
     let key = folder_name
         .map(|s| s.to_string())
         .unwrap_or_else(|| mod_name.to_string());
     let entry = db.mods.entry(key).or_default();
+    let same_page = entry.nexus_game_domain.as_deref() == Some(game_domain.as_str())
+        && entry.nexus_mod_id == Some(mod_id);
     entry.nexus_url = Some(nexus_url);
     entry.nexus_game_domain = Some(game_domain);
     entry.nexus_mod_id = Some(mod_id);
+    if !same_page {
+        entry.nexus_file_id = None;
+        entry.nexus_file_name = None;
+        entry.nexus_file_lane_key = None;
+    }
+    if nexus_file_id.is_some() {
+        entry.nexus_file_id = nexus_file_id;
+    }
+    if nexus_file_name.is_some() {
+        entry.nexus_file_name = nexus_file_name;
+    }
+    if nexus_file_lane_key.is_some() {
+        entry.nexus_file_lane_key = nexus_file_lane_key;
+    }
     if let Err(e) = save_sources(&db, config_path) {
         log::error!(
             "Failed to attach Nexus source for '{}' (folder {:?}): {}",
@@ -639,6 +718,30 @@ pub fn attach_nexus_source(
             folder_name,
             e
         );
+    }
+}
+
+pub fn set_nexus_file_identity_for_key(
+    key: &str,
+    identity: &crate::nexus::NexusFileIdentity,
+    config_path: &Path,
+) {
+    if identity.file_id.is_none() && identity.file_name.is_none() && identity.lane_key.is_none() {
+        return;
+    }
+    let mut db = load_sources(config_path);
+    let entry = db.mods.entry(key.to_string()).or_default();
+    if identity.file_id.is_some() {
+        entry.nexus_file_id = identity.file_id;
+    }
+    if identity.file_name.is_some() {
+        entry.nexus_file_name = identity.file_name.clone();
+    }
+    if identity.lane_key.is_some() {
+        entry.nexus_file_lane_key = identity.lane_key.clone();
+    }
+    if let Err(e) = save_sources(&db, config_path) {
+        log::error!("Failed to store Nexus file identity for '{}': {}", key, e);
     }
 }
 
@@ -749,6 +852,17 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
             if m.nexus_url.is_none() {
                 m.nexus_url = entry.nexus_url.clone();
             }
+            if m.workshop_item_id.is_none() {
+                m.workshop_item_id = entry.workshop_item_id.clone();
+            }
+            if m.workshop_url.is_none() {
+                m.workshop_url = entry.workshop_url.clone().or_else(|| {
+                    entry
+                        .workshop_item_id
+                        .as_deref()
+                        .map(crate::mods::workshop_url)
+                });
+            }
             m.pinned = entry.pinned;
             // User-saved extras: surface on the row so they show up next
             // to the GitHub/Nexus chips and the kebab menu.
@@ -784,8 +898,23 @@ pub fn enrich_mods_with_sources(mods: &mut [ModInfo], config_path: &Path) {
 ///   - owner/repo (assumed GitHub)
 ///   - https://www.nexusmods.com/game/mods/123
 ///   - nexus:game/mods/123
+///   - https://steamcommunity.com/sharedfiles/filedetails/?id=123
+///   - steam://openurl/https://steamcommunity.com/sharedfiles/filedetails/?id=123
+///   - steam://url/CommunityFilePage/123
+///   - 123 (Steam Workshop item ID)
 pub fn parse_source_url(url: &str) -> Option<ModSourceEntry> {
     let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(item_id) = crate::mods::workshop_item_id_from_reference(Some(trimmed), None) {
+        return Some(ModSourceEntry {
+            workshop_url: Some(crate::mods::workshop_url(&item_id)),
+            workshop_item_id: Some(item_id),
+            ..Default::default()
+        });
+    }
 
     // GitHub shorthand: github:owner/repo
     if let Some(rest) = trimmed.strip_prefix("github:") {
@@ -894,6 +1023,21 @@ pub fn parse_source_url(url: &str) -> Option<ModSourceEntry> {
 }
 
 pub fn source_entries_match(a: &ModSourceEntry, b: &ModSourceEntry) -> bool {
+    let left_workshop = a.workshop_item_id.clone().or_else(|| {
+        a.workshop_url
+            .as_deref()
+            .and_then(crate::mods::workshop_item_id_from_url)
+    });
+    let right_workshop = b.workshop_item_id.clone().or_else(|| {
+        b.workshop_url
+            .as_deref()
+            .and_then(crate::mods::workshop_item_id_from_url)
+    });
+    if matches!((left_workshop.as_deref(), right_workshop.as_deref()), (Some(left), Some(right)) if left == right)
+    {
+        return true;
+    }
+
     let github_match = match (a.github_repo.as_deref(), b.github_repo.as_deref()) {
         (Some(left), Some(right)) => {
             normalize_github_repo_input(left).as_deref()
@@ -926,6 +1070,22 @@ pub fn profile_source_matches_entry(source: Option<&str>, entry: &ModSourceEntry
 
 pub fn mod_info_source_matches_entry(info: &ModInfo, entry: &ModSourceEntry) -> bool {
     if profile_source_matches_entry(info.source.as_deref(), entry) {
+        return true;
+    }
+    if info
+        .workshop_url
+        .as_deref()
+        .and_then(parse_source_url)
+        .is_some_and(|parsed| source_entries_match(&parsed, entry))
+    {
+        return true;
+    }
+    if info
+        .workshop_item_id
+        .as_deref()
+        .and_then(parse_source_url)
+        .is_some_and(|parsed| source_entries_match(&parsed, entry))
+    {
         return true;
     }
     if info
@@ -990,7 +1150,10 @@ pub(crate) fn normalize_github_repo_input(raw: &str) -> Option<String> {
 pub fn fill_source_if_absent(db: &mut ModSourcesDb, key: &str, parsed: &ModSourceEntry) -> bool {
     // Nothing to contribute — don't insert an empty entry that would just
     // serialize as noise.
-    if parsed.github_repo.is_none() && parsed.nexus_url.is_none() {
+    if parsed.github_repo.is_none()
+        && parsed.nexus_url.is_none()
+        && parsed.workshop_item_id.is_none()
+    {
         return false;
     }
     let entry = db.mods.entry(key.to_string()).or_default();
@@ -1007,6 +1170,16 @@ pub fn fill_source_if_absent(db: &mut ModSourcesDb, key: &str, parsed: &ModSourc
             entry.nexus_url = Some(url.clone());
             entry.nexus_game_domain = parsed.nexus_game_domain.clone();
             entry.nexus_mod_id = parsed.nexus_mod_id;
+            changed = true;
+        }
+    }
+    if entry.workshop_item_id.is_none() {
+        if let Some(ref item_id) = parsed.workshop_item_id {
+            entry.workshop_item_id = Some(item_id.clone());
+            entry.workshop_url = parsed
+                .workshop_url
+                .clone()
+                .or_else(|| Some(crate::mods::workshop_url(item_id)));
             changed = true;
         }
     }
@@ -1036,6 +1209,15 @@ pub fn shareable_source_for(
     }
     if let (Some(domain), Some(id)) = (entry.nexus_game_domain.as_ref(), entry.nexus_mod_id) {
         return Some(format!("nexus:{}/mods/{}", domain, id));
+    }
+    let workshop_item_id = entry.workshop_item_id.clone().or_else(|| {
+        entry
+            .workshop_url
+            .as_deref()
+            .and_then(crate::mods::workshop_item_id_from_url)
+    });
+    if let Some(item_id) = workshop_item_id {
+        return Some(crate::mods::workshop_url(&item_id));
     }
     None
 }
@@ -1092,7 +1274,7 @@ pub fn get_mod_sources(
 }
 
 /// Set or update the source link for a mod. Accepts a URL or shorthand string.
-/// The `source_url` can be a GitHub URL, Nexus URL, or shorthand.
+/// The `source_url` can be a GitHub, Nexus, Steam Workshop URL, or shorthand.
 /// Pass empty string to clear.
 #[tauri::command]
 pub fn set_mod_source(
@@ -1115,12 +1297,12 @@ pub fn set_mod_source(
 
     let entry = parse_source_url(&source_url).ok_or_else(|| {
         format!(
-            "Could not parse source URL: {}. Try: github:owner/repo, a GitHub URL, or a Nexus Mods URL",
+            "Could not parse source URL: {}. Try: github:owner/repo, a GitHub URL, a Nexus Mods URL, or a Steam Workshop URL",
             source_url
         )
     })?;
 
-    // Merge with existing entry (so setting GitHub doesn't erase Nexus and vice versa)
+    // Merge with existing entry (so setting one official source doesn't erase the others).
     let existing = db.mods.entry(key).or_default();
     if entry.github_repo.is_some() {
         existing.github_repo = entry.github_repo;
@@ -1130,6 +1312,10 @@ pub fn set_mod_source(
         existing.nexus_url = entry.nexus_url;
         existing.nexus_game_domain = entry.nexus_game_domain;
         existing.nexus_mod_id = entry.nexus_mod_id;
+    }
+    if entry.workshop_item_id.is_some() {
+        existing.workshop_url = entry.workshop_url;
+        existing.workshop_item_id = entry.workshop_item_id;
     }
 
     let result = existing.clone();
@@ -1149,6 +1335,7 @@ pub(crate) fn set_mod_sources_full_from_path(
     folder_name: Option<&str>,
     github_repo: Option<String>,
     nexus_url: Option<String>,
+    workshop_url: Option<String>,
     config_path: &Path,
 ) -> Result<ModSourceEntry> {
     let mut db = load_sources(config_path);
@@ -1179,6 +1366,35 @@ pub(crate) fn set_mod_sources_full_from_path(
             }
         },
     };
+    let normalized_workshop: Option<(String, String)> = match workshop_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        None => None,
+        Some(raw) => match parse_source_url(raw) {
+            Some(parsed) => match parsed.workshop_item_id {
+                Some(item_id) => Some((
+                    parsed
+                        .workshop_url
+                        .unwrap_or_else(|| crate::mods::workshop_url(&item_id)),
+                    item_id,
+                )),
+                None => {
+                    return Err(AppError::Other(format!(
+                        "Could not parse Steam Workshop URL '{}'. Use a Steam Workshop page URL, steam:// Workshop link, or item ID.",
+                        raw
+                    )));
+                }
+            },
+            None => {
+                return Err(AppError::Other(format!(
+                    "Could not parse Steam Workshop URL '{}'. Use a Steam Workshop page URL, steam:// Workshop link, or item ID.",
+                    raw
+                )));
+            }
+        },
+    };
 
     let entry = db.mods.entry(key).or_default();
 
@@ -1187,17 +1403,38 @@ pub(crate) fn set_mod_sources_full_from_path(
 
     if let Some(ref nurl) = nexus_url {
         if let Some(parsed) = parse_source_url(nurl) {
+            let same_page = entry.nexus_game_domain.as_deref()
+                == parsed.nexus_game_domain.as_deref()
+                && entry.nexus_mod_id == parsed.nexus_mod_id;
             entry.nexus_url = parsed.nexus_url.or(Some(nurl.clone()));
             entry.nexus_game_domain = parsed.nexus_game_domain;
             entry.nexus_mod_id = parsed.nexus_mod_id;
+            if !same_page {
+                entry.nexus_file_id = None;
+                entry.nexus_file_name = None;
+                entry.nexus_file_lane_key = None;
+            }
         } else {
             entry.nexus_url = Some(nurl.clone());
+            entry.nexus_file_id = None;
+            entry.nexus_file_name = None;
+            entry.nexus_file_lane_key = None;
         }
     } else {
         // Explicit clear: the SourceEditor's `null` means "remove this link".
         entry.nexus_url = None;
         entry.nexus_game_domain = None;
         entry.nexus_mod_id = None;
+        entry.nexus_file_id = None;
+        entry.nexus_file_name = None;
+        entry.nexus_file_lane_key = None;
+    }
+    if let Some((url, item_id)) = normalized_workshop {
+        entry.workshop_url = Some(url);
+        entry.workshop_item_id = Some(item_id);
+    } else {
+        entry.workshop_url = None;
+        entry.workshop_item_id = None;
     }
 
     let result = entry.clone();
@@ -1211,6 +1448,7 @@ pub fn set_mod_sources_full(
     folder_name: Option<String>,
     github_repo: Option<String>,
     nexus_url: Option<String>,
+    workshop_url: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<ModSourceEntry, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
@@ -1219,6 +1457,7 @@ pub fn set_mod_sources_full(
         folder_name.as_deref(),
         github_repo,
         nexus_url,
+        workshop_url,
         &s.config_path,
     )
     .map_err(|e| e.to_string())
@@ -1257,6 +1496,11 @@ fn clear_source_link_fields(entry: &mut ModSourceEntry) {
     entry.nexus_url = None;
     entry.nexus_game_domain = None;
     entry.nexus_mod_id = None;
+    entry.nexus_file_id = None;
+    entry.nexus_file_name = None;
+    entry.nexus_file_lane_key = None;
+    entry.workshop_url = None;
+    entry.workshop_item_id = None;
 }
 
 fn source_entry_has_any_metadata(entry: &ModSourceEntry) -> bool {
@@ -1265,6 +1509,11 @@ fn source_entry_has_any_metadata(entry: &ModSourceEntry) -> bool {
         || entry.nexus_url.is_some()
         || entry.nexus_game_domain.is_some()
         || entry.nexus_mod_id.is_some()
+        || entry.nexus_file_id.is_some()
+        || entry.nexus_file_name.is_some()
+        || entry.nexus_file_lane_key.is_some()
+        || entry.workshop_url.is_some()
+        || entry.workshop_item_id.is_some()
         || entry.installed_version.is_some()
         || entry.pinned
         || entry.note.is_some()
@@ -2357,6 +2606,7 @@ mod enrich_priority_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         }
     }
 
@@ -2509,6 +2759,7 @@ mod enrich_priority_tests {
             Some("SomeMod"),
             Some("guess/from-nexus".into()),
             Some("https://www.nexusmods.com/slaythespire2/mods/42".into()),
+            None,
             config,
         )
         .unwrap();
@@ -2734,6 +2985,8 @@ mod enrich_priority_tests {
                 nexus_url: Some("https://www.nexusmods.com/sts2/mods/77".into()),
                 nexus_game_domain: Some("sts2".into()),
                 nexus_mod_id: Some(77),
+                workshop_url: None,
+                workshop_item_id: None,
                 installed_version: Some("v1.0.0".into()),
                 installed_version_source: None,
                 pinned: true,
@@ -2747,6 +3000,7 @@ mod enrich_priority_tests {
                     "FolderName/config.ini".into(),
                     "sha256".into(),
                 )]),
+                ..ModSourceEntry::default()
             },
         );
 
@@ -3213,6 +3467,26 @@ mod shared_profile_source_tests {
     }
 
     #[test]
+    fn parses_steam_workshop_sources() {
+        let parsed =
+            parse_source_url("https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295")
+                .expect("workshop URL parses");
+        assert_eq!(parsed.workshop_item_id.as_deref(), Some("3747602295"));
+        assert_eq!(
+            parsed.workshop_url.as_deref(),
+            Some("https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295")
+        );
+
+        let steam_protocol = parse_source_url("steam://url/CommunityFilePage/3747602295")
+            .expect("steam protocol Workshop link parses");
+        assert!(source_entries_match(&parsed, &steam_protocol));
+        assert!(
+            parse_source_url("https://www.nexusmods.com/slaythespire2/mods/77")
+                .is_some_and(|nexus| !source_entries_match(&parsed, &nexus))
+        );
+    }
+
+    #[test]
     fn fills_github_into_an_empty_db() {
         let mut db = ModSourcesDb::default();
         let wrote = fill_source_if_absent(&mut db, "AutoPath", &gh("foo/AutoPath"));
@@ -3379,6 +3653,30 @@ mod shared_profile_source_tests {
     }
 
     #[test]
+    fn fills_workshop_without_disturbing_other_official_sources() {
+        let mut db = ModSourcesDb::default();
+        db.mods.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                github_repo: Some("BAKAOLC/RitsuLib".into()),
+                nexus_url: Some("https://www.nexusmods.com/slaythespire2/mods/42".into()),
+                nexus_game_domain: Some("slaythespire2".into()),
+                nexus_mod_id: Some(42),
+                ..Default::default()
+            },
+        );
+        let workshop =
+            parse_source_url("https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295")
+                .unwrap();
+        let wrote = fill_source_if_absent(&mut db, "RitsuLib", &workshop);
+        assert!(wrote);
+        let entry = db.mods.get("RitsuLib").unwrap();
+        assert_eq!(entry.github_repo.as_deref(), Some("BAKAOLC/RitsuLib"));
+        assert_eq!(entry.nexus_mod_id, Some(42));
+        assert_eq!(entry.workshop_item_id.as_deref(), Some("3747602295"));
+    }
+
+    #[test]
     fn empty_parsed_entry_writes_nothing() {
         let mut db = ModSourcesDb::default();
         let wrote = fill_source_if_absent(&mut db, "ModX", &ModSourceEntry::default());
@@ -3435,6 +3733,21 @@ mod shared_profile_source_tests {
         let src = shareable_source_for(&db2, Some("NexusOnly"), "NexusOnly", None).unwrap();
         assert_eq!(src, "nexus:slaythespire2/mods/123");
         assert_eq!(parse_source_url(&src).unwrap().nexus_mod_id, Some(123));
+
+        let mut db3 = ModSourcesDb::default();
+        db3.mods.insert(
+            "WorkshopOnly".into(),
+            parse_source_url("steam://url/CommunityFilePage/3747602295").unwrap(),
+        );
+        let src = shareable_source_for(&db3, Some("WorkshopOnly"), "WorkshopOnly", None).unwrap();
+        assert_eq!(
+            src,
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295"
+        );
+        assert_eq!(
+            parse_source_url(&src).unwrap().workshop_item_id.as_deref(),
+            Some("3747602295")
+        );
     }
 
     #[test]
@@ -3472,6 +3785,7 @@ mod shared_profile_source_tests {
             custom_url: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         }
     }
 

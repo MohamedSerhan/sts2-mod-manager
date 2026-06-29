@@ -145,6 +145,65 @@ pub fn nexus_file_version(archive_path: &Path) -> Option<String> {
     (!version.is_empty()).then_some(version)
 }
 
+/// Extract Nexus page/file ids from a download filename suffix.
+///
+/// Nexus download names end with `-{modId}-{version...}-{fileId}.zip`.
+/// This uses the same suffix stripper as `nexus_file_version` so a filename
+/// that yields a source version also yields the matching file id.
+pub fn nexus_download_ids(archive_path: &Path) -> Option<(u64, u64)> {
+    let stem = archive_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let stem = strip_browser_copy_suffix(&stem);
+    let all_segs: Vec<&str> = stem.split('-').filter(|s| !s.is_empty()).collect();
+    if all_segs
+        .last()
+        .is_some_and(|s| s.chars().all(|c| c.is_ascii_digit()))
+    {
+        for idx in 1..all_segs.len().saturating_sub(1) {
+            let first = all_segs[idx];
+            let without_v = first.trim_start_matches(|c| c == 'v' || c == 'V');
+            if without_v.len() == first.len() || without_v.is_empty() {
+                continue;
+            }
+            if !without_v.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let Some(mod_id_segment) = all_segs.get(idx.saturating_sub(1)) else {
+                continue;
+            };
+            if !mod_id_segment.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            if !all_segs[idx + 1..all_segs.len() - 1]
+                .iter()
+                .all(|s| s.chars().all(|c| c.is_ascii_digit()))
+            {
+                continue;
+            }
+            let mod_id = mod_id_segment.parse().ok()?;
+            let file_id = all_segs.last()?.parse().ok()?;
+            return Some((mod_id, file_id));
+        }
+    }
+    let name = strip_nexus_suffix(&stem);
+    if name.len() >= stem.len() {
+        return None;
+    }
+    let segs: Vec<&str> = stem[name.len()..]
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect();
+    if segs.len() < 3 || !segs.iter().all(|s| s.chars().all(|c| c.is_ascii_digit())) {
+        return None;
+    }
+    let mod_id = segs.first()?.parse().ok()?;
+    let file_id = segs.last()?.parse().ok()?;
+    Some((mod_id, file_id))
+}
+
 fn human_readable_archive_version(stem: &str) -> Option<String> {
     let lower = stem.to_ascii_lowercase();
     let stop = [" release", " sts2", " slay the spire"]
@@ -345,12 +404,43 @@ mod tests {
     }
 
     #[test]
+    fn nexus_download_ids_extracts_mod_and_file_ids_from_suffix() {
+        assert_eq!(
+            nexus_download_ids(std::path::Path::new(
+                "AliceDefectSkin V2.0-979-2-1-1780132414.zip"
+            )),
+            Some((979, 1780132414))
+        );
+        assert_eq!(
+            nexus_download_ids(std::path::Path::new(
+                "RelicsReminder-284-1-1-0-1775500710 (2).zip"
+            )),
+            Some((284, 1775500710))
+        );
+    }
+
+    #[test]
+    fn nexus_download_ids_ignores_non_nexus_filenames() {
+        assert_eq!(
+            nexus_download_ids(std::path::Path::new("MyMod-1775500710.zip")),
+            None
+        );
+        assert_eq!(nexus_download_ids(std::path::Path::new("MyMod.zip")), None);
+    }
+
+    #[test]
     fn nexus_file_version_handles_v_prefixed_dash_version() {
         assert_eq!(
             nexus_file_version(std::path::Path::new(
                 "SlayTheStats v1.1.0-349-v1-1-0-1780935880.zip"
             )),
             Some("1.1.0".to_string())
+        );
+        assert_eq!(
+            nexus_file_version(std::path::Path::new(
+                "SlayTheStats v1.2.0-349-v1-2-0-1780935880.zip"
+            )),
+            Some("1.2.0".to_string())
         );
     }
 

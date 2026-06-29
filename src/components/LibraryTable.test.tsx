@@ -125,6 +125,73 @@ describe('<LibraryTable>', () => {
     expect(screen.getAllByText('CardArtEditor').length).toBeGreaterThan(0);
   });
 
+  it('warns when the same version is installed from local storage and Steam Workshop', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('list_profiles_cmd', () => [
+      baseProfile({ name: 'Stable' }),
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: 'RitsuLib',
+          mod_id: 'STS2-RitsuLib',
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+          ],
+        },
+        {
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: '3747602295',
+          mod_id: 'STS2-RitsuLib',
+          source: workshopUrl,
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+          installed_enabled: true,
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    const modInfoByKey = new Map<string, ModInfo>([
+      [
+        'RitsuLib',
+        mkModInfo({
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: 'RitsuLib',
+          mod_id: 'STS2-RitsuLib',
+        }),
+      ],
+      [
+        '3747602295',
+        mkModInfo({
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: '3747602295',
+          mod_id: 'STS2-RitsuLib',
+          source: workshopUrl,
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+        }),
+      ],
+    ]);
+
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+
+    expect(
+      (await screen.findAllByText(/STS2 may prefer the local mods folder copy/i)).length,
+    ).toBe(2);
+  });
+
   it('appends extra rows once and ignores duplicates already in the membership grid', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [
       baseProfile({ name: 'Stable' }),
@@ -1195,6 +1262,288 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(getInvokeCalls().some((call) => call.cmd === 'select_profile_mod_version')).toBe(false);
   });
 
+  it('passes Workshop and local source identity when selecting a Library version', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'ritsu-steam-041',
+        name: 'RitsuLib',
+        version: '0.4.41',
+        folder_name: '3747602295',
+        mod_id: 'STS2-RitsuLib',
+        enabled: true,
+        source: workshopUrl,
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747602295',
+        workshop_url: workshopUrl,
+      }),
+      mkModInfo({
+        mod_version_id: 'ritsu-local-0226',
+        name: 'RitsuLib',
+        version: '0.2.26',
+        folder_name: 'STS2-RitsuLib-v0.2.26',
+        mod_id: 'STS2-RitsuLib',
+        enabled: false,
+        install_source: 'local',
+      }),
+    ]);
+    registerInvokeHandler('select_library_mod_version', () => mkModInfo({
+      mod_version_id: 'ritsu-local-0226',
+      name: 'RitsuLib',
+      version: '0.2.26',
+      folder_name: 'STS2-RitsuLib-v0.2.26',
+      mod_id: 'STS2-RitsuLib',
+      enabled: true,
+      install_source: 'local',
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap modpackName={null} />);
+    await screen.findAllByText('RitsuLib');
+
+    await chooseOption(user, /Choose version/i, /0\.2\.26 \(stored\)/i);
+
+    await waitFor(() => {
+      expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+        cmd: 'select_library_mod_version',
+        args: expect.objectContaining({
+          currentModVersionId: 'ritsu-steam-041',
+          currentInstallSource: 'steam_workshop',
+          currentWorkshopItemId: '3747602295',
+          currentWorkshopUrl: workshopUrl,
+          selectedModVersionId: 'ritsu-local-0226',
+          selectedInstallSource: 'local',
+          selectedWorkshopItemId: null,
+          selectedWorkshopUrl: null,
+        }),
+      }));
+    });
+  });
+
+  it('labels version choices by source and keeps the local source as the effective active copy', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'ritsu-local-0426',
+        name: 'RitsuLib',
+        version: '0.4.26',
+        folder_name: 'STS2-RitsuLib',
+        mod_id: 'STS2-RitsuLib',
+        enabled: true,
+        source: 'github:BAKAOLC/STS2-RitsuLib',
+        github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+        install_source: 'local',
+      }),
+      mkModInfo({
+        mod_version_id: 'ritsu-steam-0441',
+        name: 'RitsuLib',
+        version: '0.4.41',
+        folder_name: '3747602295',
+        mod_id: 'STS2-RitsuLib',
+        enabled: true,
+        source: workshopUrl,
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747602295',
+        workshop_url: workshopUrl,
+      }),
+    ]);
+
+    const user = userEvent.setup();
+    render(<Wrap modpackName={null} />);
+
+    const picker = await screen.findByRole('combobox', { name: /Choose version/i });
+    expect(picker).toHaveTextContent(/0\.4\.26 \(active\)/i);
+    expect(picker).toHaveTextContent(/GitHub \+ Nexus/i);
+
+    await user.click(picker);
+    const listbox = await screen.findByRole('listbox');
+    expect(
+      within(listbox).getByRole('option', {
+        name: /0\.4\.41 \(active\).*Steam Workshop/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps same-version source variants grouped under one row', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'ritsu-steam-current',
+        name: 'RitsuLib',
+        version: '0.4.41',
+        folder_name: '3747602295',
+        mod_id: 'STS2-RitsuLib',
+        enabled: true,
+        source: workshopUrl,
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747602295',
+        workshop_url: workshopUrl,
+      }),
+      mkModInfo({
+        mod_version_id: 'ritsu-steam-stale',
+        name: 'RitsuLib',
+        version: '0.4.41',
+        folder_name: '3747602295',
+        mod_id: 'STS2-RitsuLib',
+        enabled: true,
+        source: workshopUrl,
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747602295',
+        workshop_url: workshopUrl,
+      }),
+      mkModInfo({
+        mod_version_id: 'ritsu-local-0441',
+        name: 'RitsuLib',
+        version: '0.4.41',
+        folder_name: 'STS2-RitsuLib',
+        mod_id: 'STS2-RitsuLib',
+        enabled: false,
+        source: 'github:BAKAOLC/STS2-RitsuLib',
+        github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+        install_source: 'local',
+      }),
+    ]);
+
+    const user = userEvent.setup();
+    render(<Wrap modpackName={null} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('library-row')).toHaveLength(1);
+    });
+    const picker = screen.getByRole('combobox', { name: /Choose version/i });
+    expect(picker).toHaveTextContent(/Steam Workshop/i);
+
+    await user.click(picker);
+    const listbox = await screen.findByRole('listbox');
+    expect(
+      within(listbox).getAllByRole('option', { name: /Steam Workshop/i }),
+    ).toHaveLength(1);
+    expect(
+      within(listbox).getByRole('option', { name: /GitHub \+ Nexus/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('dedupes exact duplicate Workshop rows without splitting the modpack view', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'TesterW' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'TesterW', editable: true }],
+      mods: [
+        {
+          mod_version_id: 'ritsu-steam-current',
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: '3747602295',
+          mod_id: 'STS2-RitsuLib',
+          source: workshopUrl,
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+          installed_enabled: true,
+          profiles: [{ profile_name: 'TesterW', included: true, enabled: true, editable: true }],
+        },
+        {
+          mod_version_id: 'ritsu-steam-stale',
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: '3747602295',
+          mod_id: 'STS2-RitsuLib',
+          source: workshopUrl,
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+          installed_enabled: true,
+          profiles: [{ profile_name: 'TesterW', included: true, enabled: true, editable: true }],
+        },
+      ],
+    }));
+
+    render(<Wrap modpackName="TesterW" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('library-row')).toHaveLength(1);
+    });
+    expect(screen.queryByRole('combobox', { name: /Choose version/i })).toBeNull();
+    expect(screen.getAllByText('RitsuLib').length).toBeGreaterThan(0);
+  });
+
+  it('keeps saved GitHub and Nexus source labels on stored version options', async () => {
+    registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          mod_version_id: 'ritsu-local-current',
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: 'STS2-RitsuLib',
+          mod_id: 'STS2-RitsuLib',
+          installed_enabled: true,
+          version_options: [
+            {
+              mod_version_id: 'ritsu-local-current',
+              name: 'RitsuLib',
+              version: '0.4.41',
+              folder_name: 'STS2-RitsuLib',
+              mod_id: 'STS2-RitsuLib',
+              source: 'github:BAKAOLC/STS2-RitsuLib',
+              github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib',
+              nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+              installed: true,
+              installed_enabled: true,
+              cached: true,
+              pinned: false,
+              used_by_profiles: [],
+            },
+            {
+              mod_version_id: 'ritsu-local-stored',
+              name: 'RitsuLib',
+              version: '0.4.26',
+              folder_name: 'STS2-RitsuLib',
+              mod_id: 'STS2-RitsuLib',
+              source: 'github:BAKAOLC/STS2-RitsuLib',
+              installed: false,
+              installed_enabled: false,
+              cached: true,
+              pinned: false,
+              used_by_profiles: [],
+            },
+          ],
+          profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+        },
+      ],
+    }));
+    const modInfoByKey = new Map<string, ModInfo>([
+      [
+        'ritsu-local-current',
+        mkModInfo({
+          mod_version_id: 'ritsu-local-current',
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: 'STS2-RitsuLib',
+          mod_id: 'STS2-RitsuLib',
+          source: 'github:BAKAOLC/STS2-RitsuLib',
+          github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib',
+          nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+        }),
+      ],
+    ]);
+
+    const user = userEvent.setup();
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+
+    const picker = await screen.findByRole('combobox', { name: /Choose version/i });
+    await user.click(picker);
+    const listbox = await screen.findByRole('listbox');
+    expect(
+      within(listbox).getByRole('option', {
+        name: /0\.4\.26 \(stored\).*GitHub \+ Nexus/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
   it('keeps the selected Library version visible while the switch refresh is pending', async () => {
     registerInvokeHandler('get_installed_mods', () => [
       mkModInfo({
@@ -2092,6 +2441,58 @@ describe('<LibraryTable modpackName={null}>', () => {
       expect(getInvokeCalls().some((call) => call.cmd === 'select_profile_mod_version')).toBe(false);
     });
 
+    it('shows SlayTheStats filename source versions instead of manifest zero in the selector', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'slaythestats-122',
+            name: 'SlayTheStats',
+            version: '1.2.2',
+            folder_name: 'SlayTheStats',
+            mod_id: 'SlayTheStats',
+            installed_enabled: true,
+            version_options: [
+              {
+                mod_version_id: 'slaythestats-122',
+                name: 'SlayTheStats',
+                version: '1.2.2',
+                folder_name: 'SlayTheStats',
+                mod_id: 'SlayTheStats',
+                installed: true,
+                installed_enabled: true,
+                cached: true,
+                pinned: false,
+                used_by_profiles: [],
+              },
+              {
+                mod_version_id: 'slaythestats-120',
+                name: 'SlayTheStats',
+                version: '1.2.0',
+                folder_name: 'SlayTheStats',
+                mod_id: 'SlayTheStats',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: [],
+              },
+            ],
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+
+      const listbox = await openSelect(user, /Choose version/i);
+      expect(within(listbox).getByRole('option', { name: /1\.2\.2 \(active\)/i })).toBeInTheDocument();
+      expect(within(listbox).getByRole('option', { name: /1\.2\.0 \(stored\)/i })).toBeInTheDocument();
+      expect(within(listbox).queryByRole('option', { name: /^0 \(stored\)$/i })).toBeNull();
+    });
+
     it('shows modpack usage with the pinned version for each local version option', async () => {
       registerInvokeHandler('list_profiles_cmd', () => [
         baseProfile({ name: 'Stable' }),
@@ -2261,6 +2662,84 @@ describe('<LibraryTable modpackName={null}>', () => {
         expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
           cmd: 'remove_library_mod_version',
           args: { modVersionId: 'watcher-150' },
+        }));
+      });
+    });
+
+    it('removes an unused saved version when the preview response omits legacy arrays', async () => {
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'stats-0162',
+            name: 'Stats the Spire',
+            version: '0.16.2',
+            folder_name: 'StatsTheSpire',
+            mod_id: 'StatsTheSpire',
+            installed_enabled: false,
+            version_options: [
+              {
+                mod_version_id: 'stats-v1',
+                name: 'Stats the Spire',
+                version: '1',
+                folder_name: 'StatsTheSpire-v1',
+                mod_id: 'StatsTheSpire',
+                installed: false,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: [],
+              },
+              {
+                mod_version_id: 'stats-0162',
+                name: 'Stats the Spire',
+                version: '0.16.2',
+                folder_name: 'StatsTheSpire',
+                mod_id: 'StatsTheSpire',
+                installed: true,
+                installed_enabled: false,
+                cached: true,
+                pinned: false,
+                used_by_profiles: ['TesterW'],
+              },
+            ],
+            profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+          },
+        ],
+      }));
+      registerInvokeHandler('preview_library_mod_version_removal', (args) => ({
+        target: {
+          modVersionId: args?.modVersionId as string,
+          name: 'Stats the Spire',
+          version: '1',
+          folderName: 'StatsTheSpire-v1',
+          modId: 'StatsTheSpire',
+          installed: false,
+          installedEnabled: false,
+          cached: true,
+          pinned: false,
+        },
+        active: false,
+        installed: false,
+        cached: true,
+        pinned: false,
+        canDeleteDirectly: true,
+      }));
+      registerInvokeHandler('remove_library_mod_version', () => true);
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+
+      await screen.findByRole('combobox', { name: /Choose version/i });
+      await user.click(screen.getByRole('button', { name: /Manage stored versions/i }));
+      const savedItem = screen.getByText('v1').closest('li') as HTMLElement;
+      await user.click(within(savedItem).getByRole('button', { name: /^Remove$/i }));
+      await user.click(await screen.findByRole('button', { name: /Remove version/i }));
+
+      await waitFor(() => {
+        expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
+          cmd: 'remove_library_mod_version',
+          args: { modVersionId: 'stats-v1' },
         }));
       });
     });

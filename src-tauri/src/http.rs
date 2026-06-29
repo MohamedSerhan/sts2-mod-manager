@@ -13,8 +13,3 @@
 pub fn https_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder().use_native_tls()
 }
-
-/// A blocking reqwest client builder pinned to the native-tls backend.
-pub fn https_blocking_client_builder() -> reqwest::blocking::ClientBuilder {
-    reqwest::blocking::Client::builder().use_native_tls()
-}

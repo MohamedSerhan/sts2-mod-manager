@@ -1,8 +1,78 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
+
+const ORIGINAL_INNER_HEIGHT = window.innerHeight;
+
+function makeRect({
+  top,
+  left = 0,
+  width = 0,
+  height,
+}: {
+  top: number;
+  left?: number;
+  width?: number;
+  height: number;
+}): DOMRect {
+  return {
+    x: left,
+    y: top,
+    top,
+    left,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function mockMenuGeometry({
+  triggerTop,
+  triggerHeight,
+  menuHeight,
+  viewportHeight,
+}: {
+  triggerTop: number;
+  triggerHeight: number;
+  menuHeight: number;
+  viewportHeight: number;
+}) {
+  Object.defineProperty(window, 'innerHeight', {
+    configurable: true,
+    value: viewportHeight,
+  });
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+    function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'menu') {
+        return makeRect({
+          top: triggerTop + triggerHeight + 4,
+          width: 240,
+          height: menuHeight,
+        });
+      }
+      if (this instanceof HTMLButtonElement) {
+        return makeRect({
+          top: triggerTop,
+          width: 36,
+          height: triggerHeight,
+        });
+      }
+      return makeRect({ top: 0, width: 0, height: 0 });
+    },
+  );
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  Object.defineProperty(window, 'innerHeight', {
+    configurable: true,
+    value: ORIGINAL_INNER_HEIGHT,
+  });
+});
 
 describe('<KebabMenu>', () => {
   it('renders the trigger button + uses default title "More actions"', () => {
@@ -37,6 +107,71 @@ describe('<KebabMenu>', () => {
     expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Pin this mod' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'More actions' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('keeps the menu below the trigger when there is viewport room', async () => {
+    mockMenuGeometry({
+      triggerTop: 80,
+      triggerHeight: 32,
+      menuHeight: 160,
+      viewportHeight: 500,
+    });
+    const user = userEvent.setup();
+    render(
+      <KebabMenu>
+        <KebabItem onClick={() => {}}>Pin this mod</KebabItem>
+      </KebabMenu>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+
+    const menu = screen.getByRole('menu');
+    await waitFor(() => expect(menu).not.toHaveClass('gf-kebab-top'));
+    expect(menu).not.toHaveClass('gf-kebab-scrollable');
+    expect(menu.style.getPropertyValue('--gf-kebab-max-height')).toBe('');
+  });
+
+  it('flips the menu above the trigger near the viewport bottom', async () => {
+    mockMenuGeometry({
+      triggerTop: 560,
+      triggerHeight: 32,
+      menuHeight: 160,
+      viewportHeight: 620,
+    });
+    const user = userEvent.setup();
+    render(
+      <KebabMenu>
+        <KebabItem onClick={() => {}}>Pin this mod</KebabItem>
+      </KebabMenu>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+
+    const menu = screen.getByRole('menu');
+    await waitFor(() => expect(menu).toHaveClass('gf-kebab-top'));
+    expect(menu).not.toHaveClass('gf-kebab-scrollable');
+  });
+
+  it('caps oversized menus to available viewport room and scrolls internally', async () => {
+    mockMenuGeometry({
+      triggerTop: 24,
+      triggerHeight: 32,
+      menuHeight: 640,
+      viewportHeight: 320,
+    });
+    const user = userEvent.setup();
+    render(
+      <KebabMenu>
+        <KebabItem onClick={() => {}}>Pin this mod</KebabItem>
+      </KebabMenu>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+
+    const menu = screen.getByRole('menu');
+    await waitFor(() => expect(menu).toHaveClass('gf-kebab-scrollable'));
+    expect(menu).not.toHaveClass('gf-kebab-top');
+    expect(menu.style.getPropertyValue('--gf-kebab-max-height')).toBe('252px');
   });
 
   it('elevates the wrapper (gf-kebab-open) only while the menu is open', async () => {

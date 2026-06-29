@@ -1,17 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { AboutCard } from './AboutCard';
 import { AllProviders } from '../__test__/providers';
-import { getInvokeCalls, registerInvokeHandler, setMockAppVersion } from '../__test__/setup';
-import { FEEDBACK_NEXUS_POSTS_URL } from '../lib/nexusUrl';
+import { setMockAppVersion } from '../__test__/setup';
 
 /** Wrap in the full provider stack so DiagnosticBundle's useApp resolves. */
-function Wrapped() {
+function Wrapped({
+  onCheckForAppUpdate,
+  checkingAppUpdate,
+}: {
+  onCheckForAppUpdate?: () => void | Promise<void>;
+  checkingAppUpdate?: boolean;
+} = {}) {
   return (
     <AllProviders>
-      <AboutCard />
+      <AboutCard
+        onCheckForAppUpdate={onCheckForAppUpdate}
+        checkingAppUpdate={checkingAppUpdate}
+      />
     </AllProviders>
   );
 }
@@ -34,63 +42,25 @@ describe('<AboutCard>', () => {
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  it('"Check for updates" toasts when already on the latest version', async () => {
-    const updater = await import('@tauri-apps/plugin-updater');
-    (updater.check as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+  it('"Check for updates" delegates to the shared app-update checker', async () => {
+    const onCheckForAppUpdate = vi.fn();
     const user = userEvent.setup();
-    render(<Wrapped />);
+    render(<Wrapped onCheckForAppUpdate={onCheckForAppUpdate} />);
     await user.click(screen.getByRole('button', { name: 'Check for updates' }));
-    await waitFor(() => {
-      expect(screen.getByText(/latest version/i)).toBeInTheDocument();
-    });
+    expect(onCheckForAppUpdate).toHaveBeenCalledTimes(1);
   });
 
-  it('"Check for updates" toasts an error when the check throws', async () => {
-    const updater = await import('@tauri-apps/plugin-updater');
-    (updater.check as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('offline'));
-    const user = userEvent.setup();
-    render(<Wrapped />);
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
-    await waitFor(() => {
-      expect(screen.getByText(/Update check failed: offline/)).toBeInTheDocument();
-    });
-  });
-
-  it('button shows "Checking…" + is disabled while the check is in flight', async () => {
-    const updater = await import('@tauri-apps/plugin-updater');
-    let resolveCheck!: (v: unknown) => void;
-    (updater.check as ReturnType<typeof vi.fn>).mockImplementationOnce(
-      () => new Promise((r) => { resolveCheck = r; }),
-    );
-    const user = userEvent.setup();
-    render(<Wrapped />);
-    const btn = screen.getByRole('button', { name: 'Check for updates' });
-    await user.click(btn);
+  it('button shows "Checking…" and is disabled while the shared check is in flight', () => {
+    render(<Wrapped checkingAppUpdate />);
     expect(screen.getByRole('button', { name: 'Checking…' })).toBeDisabled();
-    resolveCheck(null);
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled();
-    });
   });
 
-  it('ignores a second update-check click while one is already in flight', async () => {
-    const updater = await import('@tauri-apps/plugin-updater');
-    (updater.check as ReturnType<typeof vi.fn>).mockClear();
-    let resolveCheck!: (v: unknown) => void;
-    (updater.check as ReturnType<typeof vi.fn>).mockImplementationOnce(
-      () => new Promise((r) => { resolveCheck = r; }),
-    );
-    render(<Wrapped />);
-    const btn = screen.getByRole('button', { name: 'Check for updates' });
-
-    fireEvent.click(btn);
-    fireEvent.click(btn);
-
-    expect(updater.check).toHaveBeenCalledTimes(1);
-    resolveCheck(null);
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled();
-    });
+  it('does not delegate while the shared check is in flight', async () => {
+    const onCheckForAppUpdate = vi.fn();
+    const user = userEvent.setup();
+    render(<Wrapped onCheckForAppUpdate={onCheckForAppUpdate} checkingAppUpdate />);
+    await user.click(screen.getByRole('button', { name: 'Checking…' }));
+    expect(onCheckForAppUpdate).not.toHaveBeenCalled();
   });
 
   it('"Report a bug" opens the bug-report modal', async () => {
@@ -140,46 +110,4 @@ describe('<AboutCard>', () => {
     });
   });
 
-  it('"Check for updates" stringifies a non-Error rejection', async () => {
-    const updater = await import('@tauri-apps/plugin-updater');
-    // Reject with a non-Error value to exercise the `String(e)` branch
-    // of the ternary in the catch handler.
-    (updater.check as ReturnType<typeof vi.fn>).mockRejectedValueOnce('rough-string');
-    const user = userEvent.setup();
-    render(<Wrapped />);
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
-    await waitFor(() => {
-      expect(screen.getByText(/Update check failed: rough-string/)).toBeInTheDocument();
-    });
-  });
-
-  it('"Check for updates" with an available update installs and relaunches', async () => {
-    const updater = await import('@tauri-apps/plugin-updater');
-    const proc = await import('@tauri-apps/plugin-process');
-    const downloadAndInstall = vi.fn(async () => {});
-    registerInvokeHandler('install_app_update', () => null);
-    (updater.check as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      version: '2.0.0',
-      currentVersion: '1.2.3',
-      downloadAndInstall,
-    } as never);
-    const user = userEvent.setup();
-    render(<Wrapped />);
-    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
-    await waitFor(() => {
-      expect(screen.getByText(/v2\.0\.0 available — installing/)).toBeInTheDocument();
-    });
-    expect(getInvokeCalls().some((c) => c.cmd === 'install_app_update')).toBe(true);
-    expect(downloadAndInstall).not.toHaveBeenCalled();
-    expect(proc.relaunch).toHaveBeenCalled();
-  });
-
-  it('"Send feedback" opens the Nexus Posts page (no GitHub needed)', async () => {
-    const user = userEvent.setup();
-    render(<Wrapped />);
-    await user.click(screen.getByRole('button', { name: 'Send feedback' }));
-    const opened = getInvokeCalls().filter((c) => c.cmd === 'open_external_url');
-    expect(opened).toHaveLength(1);
-    expect(opened[0].args).toEqual({ url: FEEDBACK_NEXUS_POSTS_URL });
-  });
 });

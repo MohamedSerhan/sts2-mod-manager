@@ -544,6 +544,38 @@ pub(crate) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo
         }
     }
 
+    let profile_workshop_item_id = crate::mods::workshop_item_id_from_reference(
+        pm.source.as_deref(),
+        pm.folder_name.as_deref(),
+    );
+    let installed_workshop_item_id = installed
+        .workshop_item_id
+        .clone()
+        .or_else(|| {
+            crate::mods::workshop_item_id_from_reference(
+                installed
+                    .workshop_url
+                    .as_deref()
+                    .or(installed.source.as_deref()),
+                None,
+            )
+        })
+        .or_else(|| {
+            if installed.install_source.is_workshop() {
+                crate::mods::workshop_item_id_from_reference(None, installed.folder_name.as_deref())
+            } else {
+                None
+            }
+        });
+    if profile_workshop_item_id.is_some()
+        || installed.install_source.is_workshop()
+        || installed_workshop_item_id.is_some()
+    {
+        return profile_workshop_item_id.is_some()
+            && installed.install_source.is_workshop()
+            && profile_workshop_item_id == installed_workshop_item_id;
+    }
+
     if profile_mod_matches_bundle_member(pm, installed) {
         return true;
     }
@@ -580,11 +612,29 @@ pub(crate) fn profile_mod_matches_installed(pm: &ProfileMod, installed: &ModInfo
         })
 }
 
+fn profile_or_installed_is_workshop(pm: &ProfileMod, installed: &ModInfo) -> bool {
+    crate::mods::workshop_item_id_from_reference(pm.source.as_deref(), pm.folder_name.as_deref())
+        .is_some()
+        || installed.install_source.is_workshop()
+        || installed.workshop_item_id.is_some()
+        || crate::mods::workshop_item_id_from_reference(
+            installed
+                .workshop_url
+                .as_deref()
+                .or(installed.source.as_deref()),
+            installed.folder_name.as_deref(),
+        )
+        .is_some()
+}
+
 pub(crate) fn profile_mod_matches_installed_with_registry(
     pm: &ProfileMod,
     installed: &ModInfo,
     config_path: &Path,
 ) -> bool {
+    if profile_or_installed_is_workshop(pm, installed) {
+        return profile_mod_matches_installed(pm, installed);
+    }
     if pm
         .mod_version_id
         .as_deref()
@@ -608,6 +658,9 @@ pub(crate) fn profile_mod_matches_installed_with_version_db(
     installed: &ModInfo,
     version_db: &crate::mod_versions::ModVersionsDb,
 ) -> bool {
+    if profile_or_installed_is_workshop(pm, installed) {
+        return profile_mod_matches_installed(pm, installed);
+    }
     if pm
         .mod_version_id
         .as_deref()
@@ -728,7 +781,10 @@ pub(crate) fn profile_mod_from_installed(installed: &ModInfo) -> ProfileMod {
         mod_version_id: installed.mod_version_id.clone(),
         name: installed.name.clone(),
         version: installed.version.clone(),
-        source: installed.source.clone(),
+        source: installed
+            .source
+            .clone()
+            .or_else(|| installed.workshop_url.clone()),
         hash: installed.hash.clone(),
         files: installed.files.clone(),
         folder_name: installed.folder_name.clone(),
@@ -872,6 +928,7 @@ mod profile_mod_registry_match_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         }
     }
 
@@ -1104,6 +1161,7 @@ mod profile_schema_compat_tests {
                 "Alice Defect Voice Bridge".into(),
             ],
             bundle_member_ids: vec!["AliceDefectSkin".into()],
+            ..Default::default()
         }
     }
 

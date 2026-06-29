@@ -33,6 +33,7 @@ pub mod bundle;
 mod install;
 mod scan;
 mod state;
+pub mod workshop;
 
 // Re-exports preserve the historic `crate::mods::strip_utf8_bom`,
 // `crate::mods::sanitize_path_segment`, etc. surface that the rest
@@ -48,13 +49,50 @@ pub use state::{
     delete_mod_files_by_info, disable_mod, enable_mod, move_directory, move_mod_by_info,
     path_is_inside, sanitize_path_segment,
 };
+pub use workshop::scan_workshop_mods;
+pub(crate) use workshop::{
+    scan_workshop_mods_for_mods_path, workshop_item_id_from_reference, workshop_item_id_from_url,
+    workshop_url,
+};
 
 // Crate-internal helpers used from within `mods/` itself.
 use scan::{normalize_name, scan_mods_inner, RawManifest};
 use state::{move_mod_files, safe_mod_relative_path, sanitize_for_filename};
 
+pub const SETTINGS_SOURCE_MODS_DIRECTORY: &str = "mods_directory";
+pub const SETTINGS_SOURCE_STEAM_WORKSHOP: &str = "steam_workshop";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModInstallSource {
+    #[default]
+    Local,
+    SteamWorkshop,
+}
+
+impl ModInstallSource {
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local)
+    }
+
+    pub fn is_workshop(&self) -> bool {
+        matches!(self, Self::SteamWorkshop)
+    }
+
+    pub fn settings_source(&self) -> &'static str {
+        match self {
+            Self::Local => SETTINGS_SOURCE_MODS_DIRECTORY,
+            Self::SteamWorkshop => SETTINGS_SOURCE_STEAM_WORKSHOP,
+        }
+    }
+}
+
+fn bool_is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Information about an installed mod.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModInfo {
     /// Stable manager-owned ID for this exact local/shared mod artifact.
     /// Missing for legacy scans until `mod_versions` enriches the row.
@@ -66,6 +104,18 @@ pub struct ModInfo {
     pub enabled: bool,
     pub files: Vec<String>,
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "ModInstallSource::is_local")]
+    pub install_source: ModInstallSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop_item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop_manifest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop_time_updated: Option<i64>,
+    #[serde(default, skip_serializing_if = "bool_is_false")]
+    pub workshop_update_pending: bool,
     pub hash: Option<String>,
     pub dependencies: Vec<String>,
     pub size_bytes: u64,
@@ -171,6 +221,16 @@ fn runtime_id_set(info: &ModInfo) -> std::collections::HashSet<String> {
         .into_iter()
         .map(|id| id.to_lowercase())
         .collect()
+}
+
+pub(crate) fn scan_installed_mods_with_workshop(
+    mods_path: &Path,
+    disabled_path: &Path,
+) -> Vec<ModInfo> {
+    let mut all_mods =
+        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    all_mods.extend(scan_workshop_mods_for_mods_path(mods_path));
+    all_mods
 }
 
 fn same_local_artifact(a: &ModInfo, b: &ModInfo) -> bool {
@@ -687,34 +747,12 @@ pub fn get_installed_mods(
         }
     }
 
-    let active_mods = mods_path.as_ref().map(|p| scan_mods(p)).unwrap_or_default();
-    let disabled_mods = disabled_mods_path
-        .as_ref()
-        .map(|p| scan_disabled_mods(p))
-        .unwrap_or_default();
-
-    // Build a lookup of active mods by FOLDER identity so the overlap
-    // check only fires when the SAME folder appears in both `mods/` and
-    // `mods_disabled/` (the half-toggled / interrupted-operation case).
-    //
-    // Keying by display name here would suppress legitimately distinct
-    // mods that happen to share a manifest `name` — e.g. two CardArtEditor
-    // installs where the user disabled one. We want both to appear in
-    // the UI as separate rows.
-    let active_keys: std::collections::HashSet<String> =
-        active_mods.iter().map(dedup_key).collect();
-
-    let mut all_mods = active_mods;
-    for d in disabled_mods {
-        if active_keys.contains(&dedup_key(&d)) {
-            log::warn!(
-                "Mod folder '{}' has files in BOTH active and disabled folders — showing the active copy only. Re-toggle or repair the profile to clean this up.",
-                dedup_key(&d)
-            );
-            continue;
+    let mut all_mods = match (mods_path.as_deref(), disabled_mods_path.as_deref()) {
+        (Some(mods_path), Some(disabled_path)) => {
+            scan_installed_mods_with_workshop(mods_path, disabled_path)
         }
-        all_mods.push(d);
-    }
+        _ => Vec::new(),
+    };
 
     all_mods.sort_by(|a, b| {
         a.name
@@ -1193,15 +1231,8 @@ pub fn install_mod_from_file(
             staged.source = crate::mod_versions::source_hint_for_mod(existing, &config_path)
                 .or_else(|| crate::mod_versions::source_hint_for_mod(&staged, &config_path));
         }
-        let source_version = crate::mods::bundle::nexus_file_version(&archive_path).or_else(|| {
-            crate::downloads_watcher::fetch_nexus_version_blocking(
-                &staged.name,
-                staged.folder_name.as_deref(),
-                staged.mod_id.as_deref(),
-                &config_path,
-                state.inner(),
-            )
-        });
+        let source_version =
+            crate::downloads_watcher::exact_download_source_version(&archive_path, &staged.version);
         let source_hint = staged
             .source
             .clone()
@@ -1295,12 +1326,21 @@ fn attach_pending_nexus_source_for_file(
 
     let Some(pending) = consumed else { return };
     let mod_id = pending.mod_id;
-    crate::mod_sources::attach_nexus_source(
+    let source_version = crate::mods::bundle::nexus_file_version(archive_path);
+    let mut file_identity =
+        crate::nexus::nexus_file_identity_from_download(archive_path, source_version.as_deref());
+    if file_identity.file_id.is_none() {
+        file_identity.file_id = pending.file_id;
+    }
+    crate::mod_sources::attach_nexus_source_with_file_identity(
         &installed.name,
         installed_folder,
         pending.nexus_url,
         pending.game_domain,
         pending.mod_id,
+        file_identity.file_id,
+        file_identity.file_name,
+        file_identity.lane_key,
         config_path,
     );
     log::info!(
@@ -1499,6 +1539,7 @@ mod pending_nexus_manual_install_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         }
     }
 
@@ -1555,6 +1596,7 @@ mod pending_nexus_manual_install_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         };
 
         attach_pending_nexus_source_for_file(
@@ -1569,6 +1611,11 @@ mod pending_nexus_manual_install_tests {
         assert_eq!(
             entry.nexus_url.as_deref(),
             Some("https://www.nexusmods.com/slaythespire2/mods/1073")
+        );
+        assert_eq!(entry.nexus_file_id, Some(1781082503));
+        assert_eq!(
+            entry.nexus_file_name.as_deref(),
+            Some("Flagellant 0.1.7-1073-0-1-7-1781082503.zip")
         );
         assert!(state.lock().unwrap().pending_nexus_installs.is_empty());
     }
@@ -1718,6 +1765,7 @@ mod pending_nexus_manual_install_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         };
 
         attach_pending_nexus_source_for_file(
@@ -2802,6 +2850,7 @@ mod profile_manifest_refresh_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         };
 
         let mod_dir = mods_path.join("BadManifest");

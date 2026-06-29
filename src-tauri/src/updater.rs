@@ -486,12 +486,46 @@ pub async fn check_all_updates(
                 .nexus_url
                 .clone()
                 .unwrap_or_else(|| format!("https://www.nexusmods.com/{}/mods/{}", domain, mod_id));
+            let source_record = config_path.and_then(|config_path| {
+                m.mod_version_id
+                    .as_deref()
+                    .and_then(|id| crate::mod_versions::record_by_id(config_path, id))
+            });
 
             match client.get_mod_info(domain, mod_id).await {
                 Ok(info) => {
-                    if let Some(ref nv) = info.version {
+                    let mut effective_version = info.version.clone();
+                    match client.get_mod_files(domain, mod_id).await {
+                        Ok(files) if !files.is_empty() => {
+                            effective_version = resolve_nexus_version_for_installed_lane(
+                                &files,
+                                Some(source_entry),
+                                source_record.as_ref(),
+                            );
+                            if effective_version.is_none() {
+                                log::info!(
+                                    "Skipping Nexus update for {}: multiple files on the page but no installed file lane could be resolved",
+                                    m.name
+                                );
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            log::warn!(
+                                "Nexus files lookup failed for '{}' (mod {}): {} - falling back to page version",
+                                m.name,
+                                mod_id,
+                                e
+                            );
+                        }
+                    }
+                    if let Some(ref nv) = effective_version {
                         // Best known installed version (same logic as audit)
-                        let sources_ver = source_entry.installed_version.as_deref().unwrap_or("");
+                        let sources_ver = source_record
+                            .as_ref()
+                            .and_then(|record| record.source_version.as_deref())
+                            .or(source_entry.installed_version.as_deref())
+                            .unwrap_or("");
                         let manifest_ver = strip_version_prefix(&m.version);
                         let current_ver = if !sources_ver.is_empty() {
                             let sv = strip_version_prefix(sources_ver);
@@ -684,7 +718,7 @@ fn delete_old_mod_install(old_info: &ModInfo, mods_path: &std::path::Path, label
 
 fn usable_version(raw: &str) -> Option<semver::Version> {
     let trimmed = raw.trim().trim_start_matches('v');
-    if trimmed.is_empty() || trimmed == "unknown" || trimmed == "0.0.0" {
+    if trimmed.is_empty() || trimmed == "unknown" || trimmed == "0" || trimmed == "0.0.0" {
         return None;
     }
     parse_version(raw)
@@ -723,10 +757,7 @@ fn installed_source_version_for_display(
         mod_info.mod_id.as_deref(),
     )
     .and_then(|entry| entry.installed_version.as_deref())
-    .map(str::trim)
-    .filter(|version| {
-        !version.is_empty() && !version.eq_ignore_ascii_case("unknown") && *version != "0.0.0"
-    })
+    .and_then(crate::mod_versions::usable_source_version_label)
     .map(|version| version.trim_start_matches(['v', 'V']).to_string())
 }
 
@@ -819,21 +850,154 @@ pub(crate) struct PromotionOutcome {
 }
 
 fn existing_source_version(existing: &ModInfo, config_path: &Path) -> Option<String> {
-    existing
-        .mod_version_id
-        .as_deref()
-        .and_then(|id| crate::mod_versions::record_by_id(config_path, id))
-        .and_then(|record| record.source_version)
+    crate::mod_versions::installed_source_version_label_for_mod(existing, config_path)
+}
+
+fn nexus_identity_from_source_entry(entry: &ModSourceEntry) -> crate::nexus::NexusFileIdentity {
+    crate::nexus::NexusFileIdentity {
+        file_id: entry.nexus_file_id,
+        file_name: entry.nexus_file_name.clone(),
+        lane_key: entry.nexus_file_lane_key.clone(),
+    }
+}
+
+fn identity_has_any_nexus_file_data(identity: &crate::nexus::NexusFileIdentity) -> bool {
+    identity.file_id.is_some() || identity.file_name.is_some() || identity.lane_key.is_some()
+}
+
+fn remember_record_nexus_identity(
+    config_path: &Path,
+    record_id: Option<&str>,
+    identity: &crate::nexus::NexusFileIdentity,
+) {
+    if !identity_has_any_nexus_file_data(identity) {
+        return;
+    }
+    let Some(record_id) = record_id else { return };
+    if let Err(e) =
+        crate::mod_versions::set_record_nexus_file_identity(config_path, record_id, identity)
+    {
+        log::warn!(
+            "Failed to store Nexus file identity for mod version '{}': {}",
+            record_id,
+            e
+        );
+    }
+}
+
+fn nexus_file_update_sort_key(file: &crate::nexus::NexusFile) -> (i64, i64, u64) {
+    let category_score = match file.category_id {
+        Some(1) => 300,            // MAIN
+        Some(2) => 200,            // UPDATE
+        Some(3) => 180,            // OPTIONAL
+        Some(4) | Some(7) => -500, // OLD / ARCHIVED
+        Some(6) => -50,            // MISC
+        _ => 0,
+    };
+    (
+        category_score,
+        file.uploaded_timestamp.unwrap_or_default(),
+        file.file_id,
+    )
+}
+
+fn latest_nexus_file_for_lane<'a>(
+    files: &'a [crate::nexus::NexusFile],
+    lane_key: &str,
+) -> Option<&'a crate::nexus::NexusFile> {
+    files
+        .iter()
+        .filter(|file| crate::nexus::nexus_file_lane_key(file).as_deref() == Some(lane_key))
+        .max_by_key(|file| nexus_file_update_sort_key(file))
+}
+
+fn source_versions_match(left: Option<&str>, right: Option<&str>) -> bool {
+    match (
+        left.and_then(crate::mod_versions::usable_source_version_label),
+        right.and_then(crate::mod_versions::usable_source_version_label),
+    ) {
+        (Some(left), Some(right)) => left.eq_ignore_ascii_case(&right),
+        _ => false,
+    }
+}
+
+fn resolve_nexus_file_for_installed_lane<'a>(
+    files: &'a [crate::nexus::NexusFile],
+    source_entry: Option<&ModSourceEntry>,
+    record: Option<&crate::mod_versions::ModVersionRecord>,
+) -> Option<&'a crate::nexus::NexusFile> {
+    let entry_identity = source_entry.map(nexus_identity_from_source_entry);
+    let record_identity = record.map(|record| crate::nexus::NexusFileIdentity {
+        file_id: record.nexus_file_id,
+        file_name: record.nexus_file_name.clone(),
+        lane_key: record.nexus_file_lane_key.clone(),
+    });
+    let file_id = entry_identity
+        .as_ref()
+        .and_then(|identity| identity.file_id)
         .or_else(|| {
-            let sources = load_sources(config_path);
-            lookup_entry(
-                &sources.mods,
-                existing.folder_name.as_deref(),
-                &existing.name,
-                existing.mod_id.as_deref(),
-            )
-            .and_then(|entry| entry.installed_version.clone())
-        })
+            record_identity
+                .as_ref()
+                .and_then(|identity| identity.file_id)
+        });
+    let stored_lane = entry_identity
+        .as_ref()
+        .and_then(|identity| identity.lane_key.as_deref())
+        .or_else(|| {
+            record_identity
+                .as_ref()
+                .and_then(|identity| identity.lane_key.as_deref())
+        });
+
+    if let Some(file_id) = file_id {
+        if let Some(saved_file) = files.iter().find(|file| file.file_id == file_id) {
+            let lane = crate::nexus::nexus_file_lane_key(saved_file)
+                .or_else(|| stored_lane.map(str::to_string));
+            if let Some(lane) = lane {
+                return latest_nexus_file_for_lane(files, &lane).or(Some(saved_file));
+            }
+            return Some(saved_file);
+        }
+    }
+
+    if let Some(lane) = stored_lane {
+        return latest_nexus_file_for_lane(files, lane);
+    }
+
+    let installed_source_version = record
+        .and_then(|record| record.source_version.as_deref())
+        .or_else(|| source_entry.and_then(|entry| entry.installed_version.as_deref()));
+    if installed_source_version.is_some() {
+        let exact_matches: Vec<&crate::nexus::NexusFile> = files
+            .iter()
+            .filter(|file| source_versions_match(file.version.as_deref(), installed_source_version))
+            .collect();
+        if exact_matches.len() == 1 {
+            let matched = exact_matches[0];
+            if let Some(lane) = crate::nexus::nexus_file_lane_key(matched) {
+                return latest_nexus_file_for_lane(files, &lane).or(Some(matched));
+            }
+            return Some(matched);
+        }
+        if exact_matches.len() > 1 {
+            return None;
+        }
+    }
+
+    if files.len() == 1 {
+        return files.first();
+    }
+    None
+}
+
+fn resolve_nexus_version_for_installed_lane(
+    files: &[crate::nexus::NexusFile],
+    source_entry: Option<&ModSourceEntry>,
+    record: Option<&crate::mod_versions::ModVersionRecord>,
+) -> Option<String> {
+    resolve_nexus_file_for_installed_lane(files, source_entry, record)
+        .and_then(|file| file.version.clone())
+        .filter(|version| !version.trim().is_empty())
 }
 
 fn merged_installed_mods(mods_path: &Path, disabled_path: Option<&Path>) -> Vec<ModInfo> {
@@ -870,6 +1034,8 @@ pub(crate) fn promote_archive_to_library(
     };
     let source_hint =
         source_hint.or_else(|| crate::mod_versions::source_hint_for_mod(existing, config_path));
+    let nexus_file_identity = (source_type == "nexus")
+        .then(|| crate::nexus::nexus_file_identity_from_download(archive_path, source_version));
 
     let staging = tempfile::tempdir().map_err(|e| e.to_string())?;
     let mut staged = crate::mods::install_mod_from_archive(archive_path, staging.path())
@@ -893,6 +1059,19 @@ pub(crate) fn promote_archive_to_library(
         old_source_version.as_deref(),
     )
     .ok_or_else(|| format!("Failed to cache '{}' v{}", existing.name, existing.version))?;
+    let sources_db = load_sources(config_path);
+    if let Some(old_entry) = lookup_entry(
+        &sources_db.mods,
+        existing.folder_name.as_deref(),
+        &existing.name,
+        existing.mod_id.as_deref(),
+    ) {
+        remember_record_nexus_identity(
+            config_path,
+            old_cached.mod_version_id.as_deref(),
+            &nexus_identity_from_source_entry(old_entry),
+        );
+    }
 
     crate::mod_versions::cache_mod_version_by_id_with_source_version(
         &mut staged,
@@ -902,6 +1081,9 @@ pub(crate) fn promote_archive_to_library(
         source_version,
     )
     .ok_or_else(|| format!("Failed to cache '{}' v{}", staged.name, staged.version))?;
+    if let Some(identity) = nexus_file_identity.as_ref() {
+        remember_record_nexus_identity(config_path, staged.mod_version_id.as_deref(), identity);
+    }
 
     let old_folder = existing
         .folder_name
@@ -954,6 +1136,9 @@ pub(crate) fn promote_archive_to_library(
             installed.name, installed.version
         ));
     }
+    if let Some(identity) = nexus_file_identity.as_ref() {
+        remember_record_nexus_identity(config_path, installed.mod_version_id.as_deref(), identity);
+    }
 
     stashed_existing.discard();
 
@@ -966,21 +1151,33 @@ pub(crate) fn promote_archive_to_library(
     );
 
     let version_to_store = source_version
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(installed.version.as_str())
-        .to_string();
-    if version_to_store != "unknown" && version_to_store != "0.0.0" {
+        .and_then(crate::mod_versions::usable_source_version_label)
+        .or_else(|| crate::mod_versions::usable_source_version_label(&installed.version));
+    if let Some(version_to_store) = version_to_store.as_deref() {
         let install_key = installed
             .folder_name
             .as_deref()
             .unwrap_or(installed.name.as_str());
-        crate::mod_sources::update_installed_version_from_source(
-            install_key,
-            &version_to_store,
-            source_type,
-            config_path,
-        );
+        if !existing.install_source.is_workshop() && !installed.install_source.is_workshop() {
+            crate::mod_sources::update_installed_version_from_source(
+                install_key,
+                &version_to_store,
+                source_type,
+                config_path,
+            );
+            if let Some(identity) = nexus_file_identity.as_ref() {
+                crate::mod_sources::set_nexus_file_identity_for_key(
+                    install_key,
+                    identity,
+                    config_path,
+                );
+            }
+        } else {
+            log::info!(
+                "Skipping installed_version write for Steam Workshop-owned update '{}'",
+                existing.name
+            );
+        }
     }
 
     if source_type == "nexus" || !installed.bundle_member_ids.is_empty() {
@@ -1003,8 +1200,7 @@ pub(crate) fn promote_archive_to_library(
                     entry.nexus_mod_id,
                 )
             });
-        let bundle_version = (version_to_store != "unknown" && version_to_store != "0.0.0")
-            .then_some(version_to_store.clone());
+        let bundle_version = version_to_store.clone();
         crate::mods::bundle::enrich_bundle_sidecar(
             lane_base,
             archive_path,
@@ -1054,10 +1250,19 @@ pub(crate) fn promote_archive_to_library(
         .into_iter()
         .flatten()
         .collect();
-        let keep_ids: Vec<String> = [old_cached.mod_version_id.clone(), Some(new_id)]
+        let mut keep_ids: Vec<String> = [old_cached.mod_version_id.clone(), Some(new_id)]
             .into_iter()
             .flatten()
             .collect();
+        for id in crate::mod_versions::cached_source_version_ids_for_mod_family(
+            config_path,
+            cache_path,
+            &installed,
+        ) {
+            if !keep_ids.iter().any(|keep_id| keep_id == &id) {
+                keep_ids.push(id);
+            }
+        }
         let _ = crate::mod_versions::prune_cached_versions_around(
             config_path,
             cache_path,
@@ -1397,19 +1602,26 @@ pub async fn repair_mod(
     if install_healthy {
         // Folder-first key for the same reason as update_mod above.
         let install_key = info.folder_name.as_deref().unwrap_or(name.as_str());
-        crate::mod_sources::update_installed_version_from_source(
-            install_key,
-            &chosen.tag,
-            "github",
-            &config_path,
-        );
-        if info.name != name {
-            crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
+        if !mod_info.install_source.is_workshop() {
             crate::mod_sources::update_installed_version_from_source(
-                &info.name,
+                install_key,
                 &chosen.tag,
                 "github",
                 &config_path,
+            );
+            if info.name != name {
+                crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
+                crate::mod_sources::update_installed_version_from_source(
+                    &info.name,
+                    &chosen.tag,
+                    "github",
+                    &config_path,
+                );
+            }
+        } else {
+            log::info!(
+                "repair_mod: skipping installed_version write for Steam Workshop-owned '{}'",
+                name
             );
         }
 
@@ -1526,19 +1738,26 @@ pub async fn rollback_mod(
     let install_healthy = info.version != "unknown" && !info.version.is_empty();
     if install_healthy {
         let install_key = info.folder_name.as_deref().unwrap_or(name.as_str());
-        crate::mod_sources::update_installed_version_from_source(
-            install_key,
-            &chosen.tag,
-            "github",
-            &config_path,
-        );
-        if info.name != name {
-            crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
+        if !mod_info.install_source.is_workshop() {
             crate::mod_sources::update_installed_version_from_source(
-                &info.name,
+                install_key,
                 &chosen.tag,
                 "github",
                 &config_path,
+            );
+            if info.name != name {
+                crate::mod_sources::migrate_source_entry(&name, &info.name, &config_path);
+                crate::mod_sources::update_installed_version_from_source(
+                    &info.name,
+                    &chosen.tag,
+                    "github",
+                    &config_path,
+                );
+            }
+        } else {
+            log::info!(
+                "rollback_mod: skipping installed_version write for Steam Workshop-owned '{}'",
+                name
             );
         }
 
@@ -2058,6 +2277,7 @@ mod version_helper_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         };
         overrides(&mut info);
         info
@@ -2190,6 +2410,7 @@ mod version_helper_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         };
         assert!(install_is_incompatible(
             &mk(Some("0.110.0")),
@@ -2739,6 +2960,235 @@ mod version_helper_tests {
     }
 
     #[test]
+    fn promote_nexus_update_does_not_relabel_workshop_owned_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let profiles_path = tmp.path().join("profiles");
+        let cache_path = tmp.path().join("cache");
+        let config_path = tmp.path().join("config");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+        std::fs::create_dir_all(&cache_path).unwrap();
+        std::fs::create_dir_all(&config_path).unwrap();
+
+        write_mod_folder(
+            &mods_path,
+            "Watcher",
+            "Watcher",
+            "Watcher",
+            "1.4.3",
+            "steam-owned",
+        );
+        let mut installed = enriched_installed(&mods_path, &disabled_path, &config_path);
+        let mut old_info = installed.remove(0);
+        old_info.install_source = crate::mods::ModInstallSource::SteamWorkshop;
+        old_info.workshop_item_id = Some("3747602295".into());
+        old_info.workshop_url = Some(crate::mods::workshop_url("3747602295"));
+        crate::mod_sources::save_sources(
+            &crate::mod_sources::ModSourcesDb {
+                mods: [(
+                    "Watcher".into(),
+                    ModSourceEntry {
+                        workshop_item_id: Some("3747602295".into()),
+                        workshop_url: Some(crate::mods::workshop_url("3747602295")),
+                        installed_version: Some("steam-current".into()),
+                        installed_version_source: Some("steam_workshop".into()),
+                        ..Default::default()
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            },
+            &config_path,
+        )
+        .unwrap();
+
+        let nexus_zip = tmp
+            .path()
+            .join("The Watcher - 1.4.22 - StS2 - v0.107.1-46-1-4-22-1780935880.zip");
+        write_archive(
+            &nexus_zip,
+            &[
+                (
+                    "Watcher/manifest.json",
+                    br#"{"id":"Watcher","name":"Watcher","version":"1.4.22"}"#,
+                ),
+                ("Watcher/Watcher.dll", b"nexus-bytes"),
+            ],
+        );
+
+        promote_archive_to_library(
+            &nexus_zip,
+            &old_info,
+            Some("https://www.nexusmods.com/slaythespire2/mods/46".into()),
+            Some("1.4.22"),
+            "nexus",
+            &mods_path,
+            Some(&disabled_path),
+            &profiles_path,
+            &cache_path,
+            &config_path,
+            None,
+        )
+        .unwrap();
+
+        let sources = crate::mod_sources::load_sources(&config_path);
+        let entry = sources.mods.get("Watcher").unwrap();
+        assert_eq!(entry.workshop_item_id.as_deref(), Some("3747602295"));
+        assert_eq!(entry.installed_version.as_deref(), Some("steam-current"));
+        assert_eq!(
+            entry.installed_version_source.as_deref(),
+            Some("steam_workshop")
+        );
+        assert_eq!(entry.nexus_file_id, None);
+    }
+
+    #[test]
+    fn promote_nexus_main_branch_version_keeps_cached_beta_versions_selectable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let profiles_path = tmp.path().join("profiles");
+        let cache_path = tmp.path().join("cache");
+        let config_path = tmp.path().join("config");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+        std::fs::create_dir_all(&cache_path).unwrap();
+        std::fs::create_dir_all(&config_path).unwrap();
+
+        let nexus_url = "https://www.nexusmods.com/slaythespire2/mods/46";
+        write_mod_folder(
+            &mods_path,
+            "Watcher",
+            "Watcher",
+            "Watcher",
+            "1.4.20",
+            "beta-current",
+        );
+        let mut installed = enriched_installed(&mods_path, &disabled_path, &config_path);
+        let mut old_info = installed.remove(0);
+        old_info.source = Some(nexus_url.into());
+        crate::mod_versions::cache_mod_version_by_id_with_source_version(
+            &mut old_info,
+            &mods_path,
+            &cache_path,
+            &config_path,
+            Some("1.4.20"),
+        )
+        .unwrap();
+        crate::mod_sources::update_installed_version_from_source(
+            "Watcher",
+            "1.4.20",
+            "nexus",
+            &config_path,
+        );
+
+        let beta_cache_base = tmp.path().join("beta-cache");
+        write_mod_folder(
+            &beta_cache_base,
+            "Watcher",
+            "Watcher",
+            "Watcher",
+            "1.4.22",
+            "beta-cached",
+        );
+        let mut cached_beta = scan_mods(&beta_cache_base).remove(0);
+        cached_beta.source = Some(nexus_url.into());
+        crate::mod_versions::cache_mod_version_by_id_with_source_version(
+            &mut cached_beta,
+            &beta_cache_base,
+            &cache_path,
+            &config_path,
+            Some("1.4.22"),
+        )
+        .expect("cached beta branch version should be written");
+
+        let main_zip = tmp
+            .path()
+            .join("The Watcher - 1.4.3 - StS2 - v0.103.2-46-1-4-3-1777364274.zip");
+        write_archive(
+            &main_zip,
+            &[
+                (
+                    "Watcher/manifest.json",
+                    br#"{"id":"Watcher","name":"Watcher","version":"1.4.3"}"#,
+                ),
+                ("Watcher/Watcher.dll", b"main-branch"),
+            ],
+        );
+
+        let outcome = promote_archive_to_library(
+            &main_zip,
+            &old_info,
+            Some(nexus_url.into()),
+            Some("1.4.3"),
+            "nexus",
+            &mods_path,
+            Some(&disabled_path),
+            &profiles_path,
+            &cache_path,
+            &config_path,
+            None,
+        )
+        .unwrap();
+        assert_eq!(outcome.mod_info.version, "1.4.3");
+        assert_eq!(
+            std::fs::read_to_string(mods_path.join("Watcher").join("Watcher.dll")).unwrap(),
+            "main-branch"
+        );
+
+        let mut refreshed = enriched_installed(&mods_path, &disabled_path, &config_path);
+        let current = refreshed.pop().unwrap();
+        let current_record = crate::mod_versions::record_by_id(
+            &config_path,
+            current.mod_version_id.as_deref().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(current_record.source_version.as_deref(), Some("1.4.3"));
+
+        let options = crate::mod_versions::local_version_options_for_target(
+            &[current.clone()],
+            &[],
+            &config_path,
+            &cache_path,
+            &current.name,
+            current.mod_version_id.as_deref(),
+            current.mod_id.as_deref(),
+        );
+        let versions = options
+            .iter()
+            .map(|option| option.version.as_str())
+            .collect::<Vec<_>>();
+        assert!(versions.contains(&"1.4.3"));
+        assert!(versions.contains(&"1.4.20"));
+        assert!(versions.contains(&"1.4.22"));
+        assert!(crate::mod_versions::has_local_version_for_mod(
+            &config_path,
+            &cache_path,
+            &current,
+            "1.4.3",
+        ));
+        assert!(crate::mod_versions::has_local_version_for_mod(
+            &config_path,
+            &cache_path,
+            &current,
+            "1.4.22",
+        ));
+        assert!(
+            !crate::mod_versions::has_local_version_for_mod(
+                &config_path,
+                &cache_path,
+                &current,
+                "1.4.21",
+            ),
+            "cached beta 1.4.22 must not suppress a different advertised file version"
+        );
+    }
+
+    #[test]
     fn promote_bundle_uses_nexus_source_version_and_keeps_members_in_container() {
         let tmp = tempfile::tempdir().unwrap();
         let mods_path = tmp.path().join("mods");
@@ -2903,6 +3353,126 @@ mod version_helper_tests {
             .collect::<Vec<_>>();
         assert!(versions.contains(&"2.1"));
         assert!(versions.contains(&"2.0"));
+    }
+
+    #[test]
+    fn promote_slaythestats_keeps_filename_versions_when_manifest_is_zero() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mods_path = tmp.path().join("mods");
+        let disabled_path = tmp.path().join("mods_disabled");
+        let profiles_path = tmp.path().join("profiles");
+        let cache_path = tmp.path().join("cache");
+        let config_path = tmp.path().join("config");
+        std::fs::create_dir_all(&mods_path).unwrap();
+        std::fs::create_dir_all(&disabled_path).unwrap();
+        std::fs::create_dir_all(&profiles_path).unwrap();
+        std::fs::create_dir_all(&cache_path).unwrap();
+        std::fs::create_dir_all(&config_path).unwrap();
+
+        let nexus_url = "https://www.nexusmods.com/slaythespire2/mods/349";
+        let old_zip = tmp
+            .path()
+            .join("SlayTheStats v1.2.0-349-v1-2-0-1780935880.zip");
+        write_archive(
+            &old_zip,
+            &[
+                (
+                    "SlayTheStats/manifest.json",
+                    br#"{"id":"SlayTheStats","name":"SlayTheStats","version":"0"}"#,
+                ),
+                ("SlayTheStats/SlayTheStats.dll", b"old-stats"),
+            ],
+        );
+        let mut old_info = crate::mods::install_mod_from_archive(&old_zip, &mods_path).unwrap();
+        old_info.source = Some(nexus_url.into());
+        let old_source_version =
+            crate::downloads_watcher::exact_download_source_version(&old_zip, &old_info.version)
+                .expect("old filename should expose the Nexus file version");
+        assert_eq!(old_source_version, "1.2.0");
+        crate::mod_versions::cache_mod_version_by_id_with_source_version(
+            &mut old_info,
+            &mods_path,
+            &cache_path,
+            &config_path,
+            Some(&old_source_version),
+        )
+        .unwrap();
+        crate::mod_sources::update_installed_version_from_source(
+            "SlayTheStats",
+            "0",
+            "nexus",
+            &config_path,
+        );
+
+        let new_zip = tmp
+            .path()
+            .join("SlayTheStats v1.2.2-349-v1-2-2-1781935880.zip");
+        write_archive(
+            &new_zip,
+            &[
+                (
+                    "SlayTheStats/manifest.json",
+                    br#"{"id":"SlayTheStats","name":"SlayTheStats","version":"0"}"#,
+                ),
+                ("SlayTheStats/SlayTheStats.dll", b"new-stats"),
+            ],
+        );
+        let new_source_version =
+            crate::downloads_watcher::exact_download_source_version(&new_zip, "0")
+                .expect("new filename should expose the Nexus file version");
+        assert_eq!(new_source_version, "1.2.2");
+
+        let outcome = promote_archive_to_library(
+            &new_zip,
+            &old_info,
+            Some(nexus_url.into()),
+            Some(&new_source_version),
+            "nexus",
+            &mods_path,
+            Some(&disabled_path),
+            &profiles_path,
+            &cache_path,
+            &config_path,
+            None,
+        )
+        .unwrap();
+        assert_eq!(outcome.mod_info.version, "0");
+
+        let mut refreshed = enriched_installed(&mods_path, &disabled_path, &config_path);
+        assert_eq!(refreshed.len(), 1);
+        let current = refreshed.pop().unwrap();
+        let current_record = crate::mod_versions::record_by_id(
+            &config_path,
+            current.mod_version_id.as_deref().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(current_record.source_version.as_deref(), Some("1.2.2"));
+        let old_record = crate::mod_versions::record_by_id(
+            &config_path,
+            old_info.mod_version_id.as_deref().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(old_record.source_version.as_deref(), Some("1.2.0"));
+
+        let options = crate::mod_versions::local_version_options_for_target(
+            &[current.clone()],
+            &[],
+            &config_path,
+            &cache_path,
+            &current.name,
+            current.mod_version_id.as_deref(),
+            current.mod_id.as_deref(),
+        );
+        let versions = options
+            .iter()
+            .map(|option| option.version.as_str())
+            .collect::<Vec<_>>();
+        assert!(versions.contains(&"1.2.2"));
+        assert!(versions.contains(&"1.2.0"));
+        assert!(
+            !versions.contains(&"0"),
+            "manifest version 0 must not become a stored version label"
+        );
     }
 
     #[test]
@@ -3161,6 +3731,93 @@ mod version_helper_tests {
         assert!(
             !is_newer_version(current_ver, strip_version_prefix("V29")),
             "a Nexus install tracked as 29 should not keep reporting upstream V29"
+        );
+    }
+
+    fn nexus_file(
+        file_id: u64,
+        name: &str,
+        version: &str,
+        uploaded_timestamp: i64,
+    ) -> crate::nexus::NexusFile {
+        crate::nexus::NexusFile {
+            file_id,
+            name: Some(name.into()),
+            file_name: Some(format!("{name}.zip")),
+            version: Some(version.into()),
+            category_id: Some(1),
+            uploaded_timestamp: Some(uploaded_timestamp),
+        }
+    }
+
+    #[test]
+    fn nexus_lane_resolver_keeps_watcher_release_off_beta_update() {
+        let files = vec![
+            nexus_file(1422, "The Watcher - 1.4.22 - StS2 - v0.107.1", "1.4.22", 300),
+            nexus_file(143, "The Watcher - 1.4.3 - StS2 - v0.103.2", "1.4.3", 200),
+        ];
+        let entry = ModSourceEntry {
+            installed_version: Some("1.4.3".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_nexus_version_for_installed_lane(&files, Some(&entry), None).as_deref(),
+            Some("1.4.3")
+        );
+    }
+
+    #[test]
+    fn nexus_lane_resolver_advances_watcher_beta_within_beta_lane() {
+        let files = vec![
+            nexus_file(1420, "The Watcher - 1.4.20 - StS2 - v0.107.1", "1.4.20", 200),
+            nexus_file(1422, "The Watcher - 1.4.22 - StS2 - v0.107.1", "1.4.22", 300),
+            nexus_file(143, "The Watcher - 1.4.3 - StS2 - v0.103.2", "1.4.3", 250),
+        ];
+        let entry = ModSourceEntry {
+            installed_version: Some("1.4.20".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_nexus_version_for_installed_lane(&files, Some(&entry), None).as_deref(),
+            Some("1.4.22")
+        );
+    }
+
+    #[test]
+    fn nexus_lane_resolver_uses_saved_file_id_to_find_newer_same_lane_file() {
+        let files = vec![
+            nexus_file(1420, "The Watcher - 1.4.20 - StS2 - v0.107.1", "1.4.20", 200),
+            nexus_file(1422, "The Watcher - 1.4.22 - StS2 - v0.107.1", "1.4.22", 300),
+            nexus_file(143, "The Watcher - 1.4.3 - StS2 - v0.103.2", "1.4.3", 250),
+        ];
+        let entry = ModSourceEntry {
+            nexus_file_id: Some(1420),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_nexus_version_for_installed_lane(&files, Some(&entry), None).as_deref(),
+            Some("1.4.22")
+        );
+    }
+
+    #[test]
+    fn nexus_lane_resolver_suppresses_same_version_multi_file_ambiguity() {
+        let files = vec![
+            nexus_file(1, "Necro Icons", "0.0.1", 300),
+            nexus_file(2, "Silent_Icons", "0.0.1", 250),
+            nexus_file(3, "Princess Text", "0.0.1", 200),
+        ];
+        let entry = ModSourceEntry {
+            installed_version: Some("0.0.1".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_nexus_version_for_installed_lane(&files, Some(&entry), None),
+            None
         );
     }
 
@@ -3801,6 +4458,10 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
     // --- Nexus version check ---
     let mut nexus_version: Option<String> = None;
     let mut nexus_update_available = false;
+    let source_record = m
+        .mod_version_id
+        .as_deref()
+        .and_then(|id| crate::mod_versions::record_by_id(ctx.config_path, id));
 
     if let (Some(ref domain), Some(mod_id)) = (nexus_game_domain, nexus_mod_id) {
         if let Some(nkey) = ctx.nexus_api_key {
@@ -3817,22 +4478,29 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                     // non-lite version and shows a bogus mismatch.
                     let mut effective_version = info.version.clone();
                     match client.get_mod_files(domain, mod_id).await {
-                        Ok(files) => {
-                            if let Some(picked) =
-                                crate::nexus::pick_version_for_local_mod(&files, &m.name)
-                            {
-                                if effective_version.as_deref() != Some(picked.as_str()) {
-                                    log::debug!(
-                                        "Nexus variant pick for '{}' (mod_id {}): page version {:?} → file version {:?}",
-                                        m.name, mod_id, info.version, picked
-                                    );
-                                }
-                                effective_version = Some(picked);
+                        Ok(files) if !files.is_empty() => {
+                            effective_version = resolve_nexus_version_for_installed_lane(
+                                &files,
+                                source_entry,
+                                source_record.as_ref(),
+                            );
+                            if effective_version.is_none() {
+                                log::info!(
+                                    "audit: suppressing Nexus update for '{}' because the page has multiple files and no installed file lane could be resolved",
+                                    m.name
+                                );
                             }
+                        }
+                        Ok(_) => {
+                            log::debug!(
+                                "Nexus files lookup for '{}' (mod {}) returned no files; using page version",
+                                m.name,
+                                mod_id
+                            );
                         }
                         Err(e) => {
                             log::warn!(
-                                "Nexus files lookup failed for '{}' (mod {}): {} — falling back to page version",
+                                "Nexus files lookup failed for '{}' (mod {}): {} - falling back to page version",
                                 m.name, mod_id, e
                             );
                         }
@@ -3840,11 +4508,16 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
 
                     if let Some(ref nv) = effective_version {
                         nexus_version = Some(nv.clone());
-                        // Use the best known version: check mod_sources installed_version
-                        // first (tracks what was actually downloaded), then fall back to
-                        // the manifest version on disk (which mod authors don't always update).
-                        let sources_ver = source_entry
-                            .and_then(|e| e.installed_version.as_deref())
+                        // Use the current artifact's saved source version first,
+                        // then the source-entry cache, then the manifest version
+                        // on disk (which mod authors don't always update).
+                        let sources_ver = source_record
+                            .as_ref()
+                            .and_then(|record| record.source_version.as_deref())
+                            .or_else(|| {
+                                source_entry
+                                    .and_then(|e| e.installed_version.as_deref())
+                            })
                             .unwrap_or("");
                         let manifest_ver = strip_version_prefix(&m.version);
                         let current_ver = if !sources_ver.is_empty() {
@@ -4098,6 +4771,7 @@ mod repair_stash_on_failed_extract_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         }
     }
 

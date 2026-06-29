@@ -61,6 +61,7 @@ import { profileDisplayName } from '../lib/profileDisplay';
 import type {
   ModAuditEntry,
   ModInfo,
+  ModInstallSource,
   ProfileMembershipMod,
   ProfileMembershipState,
 } from '../types';
@@ -75,6 +76,33 @@ export function membershipDisplayName(row: ProfileMembershipMod): string {
 
 export function libraryStorageKey(row: ProfileMembershipMod): string {
   return `storage::${membershipRowKey(row)}`;
+}
+
+function hasWorkshopSource(row: ProfileMembershipMod, mod?: ModInfo | null): boolean {
+  const source = mod?.source ?? row.source ?? '';
+  return (
+    mod?.install_source === 'steam_workshop' ||
+    row.install_source === 'steam_workshop' ||
+    !!mod?.workshop_item_id ||
+    !!row.workshop_item_id ||
+    !!mod?.workshop_url ||
+    !!row.workshop_url ||
+    source.includes('steamcommunity.com/sharedfiles') ||
+    source.startsWith('steam://')
+  );
+}
+
+function isWorkshopOwned(row: ProfileMembershipMod, mod?: ModInfo | null): boolean {
+  return mod?.install_source === 'steam_workshop' || row.install_source === 'steam_workshop';
+}
+
+function workshopUrlFor(row: ProfileMembershipMod, mod?: ModInfo | null): string | null {
+  const source = mod?.source ?? row.source ?? null;
+  return mod?.workshop_url ?? row.workshop_url ?? (
+    source?.includes('steamcommunity.com/sharedfiles') || source?.startsWith('steam://')
+      ? source
+      : null
+  );
 }
 
 /**
@@ -110,10 +138,17 @@ export interface LibraryRowVersionOption {
   key: string;
   version: string;
   label: string;
+  sourceLabel?: string;
   installed?: boolean;
   installedEnabled?: boolean;
   cached?: boolean;
   pinned?: boolean;
+  source?: string | null;
+  githubUrl?: string | null;
+  nexusUrl?: string | null;
+  installSource?: ModInstallSource;
+  workshopItemId?: string | null;
+  workshopUrl?: string | null;
   usedByProfiles?: string[];
 }
 
@@ -224,6 +259,7 @@ export interface LibraryRowProps {
   onFindGithubFromNexus?: () => void;
   onOpenExternalUrl?: (url: string) => void;
   onAutoDetectSource?: () => void;
+  sourceConflict?: boolean;
   /** Optional slot rendered inside the row (currently used by the
    *  Library view to attach the inline SourceEditor below the row). */
   sourceEditorSlot?: ReactNode;
@@ -280,6 +316,7 @@ export function LibraryRow({
   onFindGithubFromNexus = noop,
   onOpenExternalUrl = noop,
   onAutoDetectSource = noop,
+  sourceConflict = false,
   sourceEditorSlot,
 }: LibraryRowProps) {
   const { t } = useTranslation();
@@ -293,6 +330,10 @@ export function LibraryRow({
     : null;
   const saving = membershipKey != null && membershipSaving === membershipKey;
   const displayName = mod?.display_name?.trim() || membershipDisplayName(row);
+  const workshopRow = hasWorkshopSource(row, mod);
+  const workshopOwned = isWorkshopOwned(row, mod);
+  const workshopUrl = workshopUrlFor(row, mod);
+  const rowCanEditSources = !!mod;
   // Per-row storage (active/stored) mutation in flight. Drives the small
   // spinner beside the active/stored toggle. `storageSaving` carries the
   // libraryStorageKey of the row being flipped (or BULK_STORAGE_KEY).
@@ -354,6 +395,7 @@ export function LibraryRow({
   const showUpdatePill =
     !!audit &&
     audit.needs_update &&
+    !workshopOwned &&
     !audit.pinned &&
     !audit.snoozed &&
     !audit.game_version_too_old &&
@@ -387,8 +429,16 @@ export function LibraryRow({
     if (option.cached) return t('mods.versionSavedStatus');
     return t('mods.versionStoredStatus');
   };
+  const versionWorkshopUrl = (option: LibraryRowVersionOption) =>
+    option.workshopUrl ??
+    (option.workshopItemId
+      ? `https://steamcommunity.com/sharedfiles/filedetails/?id=${option.workshopItemId}`
+      : null);
   const versionRemoveBlockReason = (option: LibraryRowVersionOption) => {
     const usedByProfiles = option.usedByProfiles ?? [];
+    if (option.installSource === 'steam_workshop' && option.installed) {
+      return t('mods.versionRemoveWorkshopReason');
+    }
     if (option.installedEnabled) return t('mods.versionRemoveActiveReason');
     if (option.pinned) return t('mods.versionRemovePinnedReason');
     if (usedByProfiles.length > 0) {
@@ -402,7 +452,7 @@ export function LibraryRow({
   return (
     <>
       <Card
-        className={`gf-profile-library-row${(!packScoped || packActive) && row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${isDragging ? ' dragging' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${mod ? ' is-clickable' : ''}`}
+        className={`gf-profile-library-row${(!packScoped || packActive) && row.installed_enabled ? ' is-active' : ''}${isDragOver ? ' drag-over' : ''}${isDragging ? ' dragging' : ''}${mod?.pinned ? ' gf-mod-pinned' : ''}${rowCanEditSources ? ' is-clickable' : ''}`}
         draggable={reorderable && !loadOrderSaving}
         onDragStart={(event) => onDragStart(event, inPackIndex)}
         onDragOver={(event) => onDragOver(event, inPackIndex)}
@@ -412,9 +462,9 @@ export function LibraryRow({
         // 4.4 — clicking the row opens its inline Edit-sources editor.
         // Interactive children (toggle, kebab, source links) stop
         // propagation so they don't also trigger this.
-        onClick={mod ? () => onEditSources() : undefined}
+        onClick={rowCanEditSources ? () => onEditSources() : undefined}
         onKeyDown={
-          mod
+          rowCanEditSources
             ? (event) => {
                 // Only the row itself should activate on Enter/Space. A keydown
                 // from a focused child control (toggle, kebab, source link)
@@ -430,15 +480,21 @@ export function LibraryRow({
               }
             : undefined
         }
-        role={mod ? 'button' : undefined}
-        tabIndex={mod ? 0 : undefined}
+        role={rowCanEditSources ? 'button' : undefined}
+        tabIndex={rowCanEditSources ? 0 : undefined}
         // Explicit accessible name so the row-button doesn't absorb its
         // children's text (which would make every inner pill/badge match a
         // getByRole('button', { name }) lookup for the row too).
         aria-label={
-          mod ? t('mods.rowEditSourcesAria', { mod: displayName }) : undefined
+          rowCanEditSources
+            ? t('mods.rowEditSourcesAria', { mod: displayName })
+            : undefined
         }
-        title={mod ? t('mods.rowClickEditSources') : undefined}
+        title={
+          rowCanEditSources
+            ? t('mods.rowClickEditSources')
+            : undefined
+        }
         data-testid="library-row"
       >
         <div className="gf-profile-library-main">
@@ -474,14 +530,16 @@ export function LibraryRow({
                 // double-clicks are already guarded inside handleToggleStorage
                 // (`if (storageSaving || membershipSaving) return`), so the
                 // disabled attribute was only ever redundant insurance.
-                disabled={gameRunning}
+                disabled={gameRunning || workshopOwned}
                 ariaLabel={t('modpack.storage.toggleAria', {
                   mod: displayName,
                 })}
                 title={
-                  row.installed_enabled
-                    ? t('modpack.storage.active')
-                    : t('modpack.storage.storedHint')
+                  workshopOwned
+                    ? t('mods.workshopManagedTitle')
+                    : row.installed_enabled
+                      ? t('modpack.storage.active')
+                      : t('modpack.storage.storedHint')
                 }
               />
               <span className="gf-row-status-label">
@@ -509,6 +567,24 @@ export function LibraryRow({
                     {tag}
                   </span>
                 ))}
+                {workshopRow && workshopUrl && (
+                  <a
+                    href={workshopUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="gf-source-link"
+                    title={t('mods.viewOnSteamWorkshop', { url: workshopUrl })}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Badge variant="default">
+                      <ExternalLink size={10} className="mr-1" />
+                      {t('mods.steamWorkshop')}
+                    </Badge>
+                  </a>
+                )}
+                {workshopRow && !workshopUrl && (
+                  <Badge variant="default">{t('mods.steamWorkshop')}</Badge>
+                )}
                 {mod?.github_url && (
                   <a
                     href={mod.github_url}
@@ -552,6 +628,7 @@ export function LibraryRow({
                   </a>
                 )}
                 {mod &&
+                  !workshopRow &&
                   !mod.github_url &&
                   !mod.nexus_url &&
                   !mod.custom_url && (
@@ -732,7 +809,18 @@ export function LibraryRow({
                       onClick={(event) => event.stopPropagation()}
                       options={versionOptions.map((option) => ({
                         value: option.key,
-                        label: option.label,
+                        label: (
+                          <span className="gf-version-option-label">
+                            <span className="gf-version-option-main">
+                              {option.label}
+                            </span>
+                            {option.sourceLabel && (
+                              <span className="gf-version-option-source">
+                                {option.sourceLabel}
+                              </span>
+                            )}
+                          </span>
+                        ),
                       }))}
                     />
                   </label>
@@ -793,7 +881,10 @@ export function LibraryRow({
               note. Both render outside the drawer because they're part
               of the row's identity. */}
             {mod &&
-              (mod.display_description || mod.description || mod.note) && (
+              (mod.display_description ||
+                mod.description ||
+                mod.note ||
+                sourceConflict) && (
                 <div className="gf-modrow-meta">
                   {(mod.display_description || mod.description) && (
                     <p
@@ -806,6 +897,14 @@ export function LibraryRow({
                   {mod.note && (
                     <p className="gf-modrow-note" title={mod.note}>
                       {t('mods.notePrefix')} {mod.note}
+                    </p>
+                  )}
+                  {sourceConflict && (
+                    <p
+                      className="gf-modrow-note gf-source-conflict-warning"
+                      title={t('mods.duplicateSourceWarning')}
+                    >
+                      <AlertTriangle size={11} /> {t('mods.duplicateSourceWarning')}
                     </p>
                   )}
                 </div>
@@ -974,6 +1073,9 @@ export function LibraryRow({
                 {versionOptions.map((option) => {
                   const reason = versionRemoveBlockReason(option);
                   const removing = removingVersionKey === option.key;
+                  const managedBySteam =
+                    option.installSource === 'steam_workshop' && option.installed;
+                  const workshopVersionUrl = versionWorkshopUrl(option);
                   return (
                     <li key={option.key} className="gf-version-manager-item">
                       <div className="gf-version-manager-copy">
@@ -986,22 +1088,42 @@ export function LibraryRow({
                         <span className="gf-version-manager-state">
                           {versionStateLabel(option)}
                         </span>
+                        {option.sourceLabel && (
+                          <span className="gf-version-manager-source">
+                            {option.sourceLabel}
+                          </span>
+                        )}
                         {reason && (
                           <span className="gf-version-manager-reason">
                             {reason}
                           </span>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        className="gf-btn-3 gf-btn-danger gf-version-manager-remove"
-                        disabled={removing}
-                        onClick={() => onRemoveVersion(option)}
-                      >
-                        {removing
-                          ? t('mods.versionRemoving')
-                          : t('mods.versionRemove')}
-                      </button>
+                      {managedBySteam ? (
+                        <button
+                          type="button"
+                          className="gf-btn-3 gf-version-manager-remove"
+                          disabled={!workshopVersionUrl}
+                          onClick={() => {
+                            if (workshopVersionUrl) onOpenExternalUrl(workshopVersionUrl);
+                          }}
+                        >
+                          {workshopVersionUrl
+                            ? t('mods.versionOpenWorkshop')
+                            : t('mods.versionSteamManaged')}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="gf-btn-3 gf-btn-danger gf-version-manager-remove"
+                          disabled={removing}
+                          onClick={() => onRemoveVersion(option)}
+                        >
+                          {removing
+                            ? t('mods.versionRemoving')
+                            : t('mods.versionRemove')}
+                        </button>
+                      )}
                     </li>
                   );
                 })}
@@ -1106,6 +1228,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
   const canSnooze =
     !!audit?.snoozed || (!!audit?.needs_update && !!snoozeTargetVersion);
   const hasUserConfirmedGithub = !!mod.github_url && !mod.github_auto_detected;
+  const workshopOwned = mod.install_source === 'steam_workshop';
 
   // Rebuilt per render — cheap, and the menu only mounts/opens on demand. Don't memoize (it would force listing every closure capture as a dep).
   // One descriptor per customizable id: contextual availability + how to render.
@@ -1191,7 +1314,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
         ),
     },
     autoDetect: {
-      available: true,
+      available: !workshopOwned,
       render: () => (
         <KebabItem
           key="autoDetect"
@@ -1227,7 +1350,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
       ),
     },
     findGithub: {
-      available: !!mod.nexus_url && !mod.github_url,
+      available: !!mod.nexus_url && !mod.github_url && !workshopOwned,
       render: () => (
         <KebabItem
           key="findGithub"
@@ -1268,10 +1391,13 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
             gameRunning ||
             anyRecoveryInFlight ||
             !hasUserConfirmedGithub ||
+            workshopOwned ||
             isUpdating
           }
           description={
-            hasUserConfirmedGithub
+            workshopOwned
+              ? t('mods.workshopManagedDesc')
+              : hasUserConfirmedGithub
               ? t('mods.repairDesc')
               : t('mods.repairNeedSource')
           }
@@ -1297,10 +1423,13 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
             gameRunning ||
             anyRecoveryInFlight ||
             !hasUserConfirmedGithub ||
+            workshopOwned ||
             isUpdating
           }
           description={
-            hasUserConfirmedGithub
+            workshopOwned
+              ? t('mods.workshopManagedDesc')
+              : hasUserConfirmedGithub
               ? t('mods.rollbackDesc')
               : t('mods.rollbackNeedSource')
           }
@@ -1333,8 +1462,12 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
                 danger
                 icon={<Trash2 size={12} />}
                 onClick={onDelete}
-                disabled={gameRunning}
-                description={t('mods.kebab.deleteFromDiskDesc')}
+                disabled={gameRunning || workshopOwned}
+                description={
+                  workshopOwned
+                    ? t('mods.workshopManagedDesc')
+                    : t('mods.kebab.deleteFromDiskDesc')
+                }
               >
                 {t('mods.kebab.deleteFromDisk')}
               </KebabItem>

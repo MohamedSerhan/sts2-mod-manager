@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { logicalModKey, modVersionSortValue } from './modGrouping';
 
 describe('logicalModKey', () => {
-  it('groups by mod id, then source plus name, then name', () => {
+  it('groups by mod id, then display name', () => {
     expect(logicalModKey({ name: 'Watcher', folder_name: 'Watcher', mod_id: 'Watcher' })).toBe('mod_id:watcher');
     expect(logicalModKey(
       { name: 'Lite', folder_name: 'Lite', mod_id: null },
       { name: 'Lite', source: null, github_url: null, nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/46' },
-    )).toBe('source:https://www.nexusmods.com/slaythespire2/mods/46|name:lite');
+    )).toBe('name:lite');
     expect(logicalModKey({ name: 'Manual', folder_name: 'Manual', mod_id: null })).toBe('name:manual');
   });
 
@@ -31,7 +31,7 @@ describe('logicalModKey', () => {
     );
     const memberKey = logicalModKey({ name: 'BaseLib', folder_name: 'BaseLib', mod_id: 'BaseLib' });
 
-    expect(bundleKey).toBe('source:https://www.nexusmods.com/slaythespire2/mods/979|name:pretty pack');
+    expect(bundleKey).toBe('name:pretty pack');
     expect(bundleKey).not.toBe(memberKey);
   });
 });

@@ -403,6 +403,55 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(within(titlerow).getByText(/Latest/i)).toBeInTheDocument();
   });
 
+  it('shows Steam Workshop rows as Steam-owned, opens source editing, and blocks manager-owned actions', async () => {
+    const user = userEvent.setup();
+    const onEditSources = vi.fn();
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    renderRow({
+      packScoped: true,
+      packActive: true,
+      onEditSources,
+      row: baseMod({
+        name: 'RitsuLib',
+        folder_name: '3747602295',
+        mod_id: 'STS2-RitsuLib',
+        source: workshopUrl,
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747602295',
+        workshop_url: workshopUrl,
+      }),
+      mod: baseModInfo({
+        name: 'RitsuLib',
+        folder_name: '3747602295',
+        mod_id: 'STS2-RitsuLib',
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747602295',
+        workshop_url: workshopUrl,
+        github_url: 'https://github.com/example/RitsuLib',
+      }),
+    });
+
+    expect(screen.getByText('Steam Workshop')).toBeInTheDocument();
+    await user.click(screen.getByTestId('library-row'));
+    expect(onEditSources).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: /mod actions/i }));
+    expect(screen.queryByRole('menuitem', { name: /auto-detect source/i })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: /repair this mod/i })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: /delete from disk/i })).toBeDisabled();
+  });
+
+  it('shows duplicate-source warning when the table flags a local plus Workshop conflict', () => {
+    renderRow({
+      sourceConflict: true,
+      mod: baseModInfo({ name: 'RitsuLib', mod_id: 'STS2-RitsuLib' }),
+      row: baseMod({ name: 'RitsuLib', mod_id: 'STS2-RitsuLib' }),
+    });
+    expect(
+      screen.getByText(/STS2 may prefer the local mods folder copy/i),
+    ).toBeInTheDocument();
+  });
+
   it('renders the kebab trigger when a mod prop is supplied', () => {
     renderRow({ mod: baseModInfo() });
     expect(screen.getByRole('button', { name: /mod actions/i })).toBeInTheDocument();
@@ -1290,6 +1339,66 @@ describe('<LibraryRow> bundle_members', () => {
     expect(screen.getByText('PackContainer')).toBeInTheDocument();
     // The bundle badge must still show.
     expect(screen.getByText(/2 mods/i)).toBeInTheDocument();
+  });
+
+  it('Manage versions opens installed Workshop entries in Steam and only removes stale metadata', async () => {
+    const onOpenExternalUrl = vi.fn();
+    const onRemoveVersion = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      row: baseMod({
+        name: 'RitsuLib',
+        folder_name: '3747602295',
+        mod_id: 'STS2-RitsuLib',
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747602295',
+        workshop_url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295',
+      }),
+      mod: baseModInfo({
+        name: 'RitsuLib',
+        folder_name: '3747602295',
+        mod_id: 'STS2-RitsuLib',
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747602295',
+        workshop_url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295',
+      }),
+      versionOptions: [
+        {
+          key: 'steam-active',
+          version: '0.4.41',
+          label: '0.4.41 (active)',
+          installed: true,
+          installedEnabled: true,
+          installSource: 'steam_workshop',
+          workshopItemId: '3747602295',
+          workshopUrl: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295',
+        },
+        {
+          key: 'steam-stale',
+          version: '0.2.26',
+          label: '0.2.26 (stored)',
+          installed: false,
+          cached: false,
+          installSource: 'steam_workshop',
+          workshopItemId: '3747602295',
+          workshopUrl: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295',
+        },
+      ],
+      onOpenExternalUrl,
+      onRemoveVersion,
+    });
+
+    await user.click(screen.getByRole('button', { name: /manage stored versions/i }));
+    expect(screen.getByText(/Managed by Steam Workshop/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /open workshop/i }));
+    expect(onOpenExternalUrl).toHaveBeenCalledWith(
+      'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295',
+    );
+
+    await user.click(screen.getByRole('button', { name: /^remove$/i }));
+    expect(onRemoveVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'steam-stale', installSource: 'steam_workshop' }),
+    );
   });
 });
 

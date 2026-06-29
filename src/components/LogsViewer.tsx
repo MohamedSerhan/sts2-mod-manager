@@ -4,7 +4,6 @@ import { readLogTail, openLogFile, openExternalUrl, getLaunchDiagnostics, quaran
 import { useTranslation } from 'react-i18next';
 import { useToast } from '../contexts/ToastContext';
 import { buildGitHubIssueUrl } from '../lib/githubLinks';
-import { useOpenFeedback } from '../hooks/useOpenFeedback';
 import type { LaunchDiagnostics } from '../types';
 
 // v5 batch 4 — in-app logs viewer (Settings → Advanced).
@@ -53,7 +52,6 @@ interface Props {
 export function LogsViewer({ onClose }: Props) {
   const { t } = useTranslation();
   const toast = useToast();
-  const openFeedback = useOpenFeedback();
   const [raw, setRaw] = useState<string>('');
   const [launchDiagnostics, setLaunchDiagnostics] = useState<LaunchDiagnostics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -202,9 +200,6 @@ export function LogsViewer({ onClose }: Props) {
         </button>
         <button className="gf-btn-2 gf-btn-2-sm" onClick={sendToSupport}>
           <Upload size={11} /> {t('logsViewer.sendToSupport')}
-        </button>
-        <button className="gf-btn-3 gf-btn-2-sm" onClick={openFeedback} title={t('feedback.nexusCta')}>
-          {t('feedback.sendFeedback')}
         </button>
         {onClose && (
           <button className="gf-btn-3 gf-btn-2-sm" onClick={onClose}>{t('common.close')}</button>

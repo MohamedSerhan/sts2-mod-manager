@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, Result};
-use crate::mods::ModInfo;
+use crate::mods::{ModInfo, ModInstallSource};
 use crate::profiles::ProfileMod;
 
 const DB_FILE: &str = "mod_versions.json";
@@ -24,6 +24,12 @@ pub struct ModVersionRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nexus_file_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nexus_file_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nexus_file_lane_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mod_id: Option<String>,
@@ -31,6 +37,16 @@ pub struct ModVersionRecord {
     pub bundle_member_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "ModInstallSource::is_local")]
+    pub install_source: ModInstallSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop_item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop_manifest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop_time_updated: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -60,6 +76,18 @@ pub struct LocalModVersionOption {
     pub mod_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nexus_url: Option<String>,
+    #[serde(default, skip_serializing_if = "ModInstallSource::is_local")]
+    pub install_source: ModInstallSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop_item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop_url: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bundle_member_ids: Vec<String>,
     pub installed: bool,
@@ -135,27 +163,124 @@ pub fn artifact_identity_key(
 }
 
 fn source_for_mod(info: &ModInfo) -> Option<String> {
+    if info.install_source.is_workshop() {
+        return info.workshop_url.clone().or_else(|| {
+            info.workshop_item_id
+                .as_deref()
+                .map(crate::mods::workshop_url)
+        });
+    }
     info.source
         .clone()
         .or_else(|| info.github_url.clone())
         .or_else(|| info.nexus_url.clone())
 }
 
-fn key_for_mod_with_version(info: &ModInfo, version: &str) -> String {
+fn source_as_github_url(source: Option<&str>) -> Option<String> {
+    let trimmed = source?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with("github:") {
+        let repo = trimmed.trim_start_matches("github:").trim();
+        if repo.contains('/') {
+            return Some(format!("https://github.com/{repo}"));
+        }
+    }
+    if trimmed.contains("github.com") {
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
+fn source_as_nexus_url(source: Option<&str>) -> Option<String> {
+    let trimmed = source?.trim();
+    if trimmed.contains("nexusmods.com") {
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
+#[derive(Debug, Clone, Default)]
+struct VersionSourceHints {
+    source: Option<String>,
+    github_url: Option<String>,
+    nexus_url: Option<String>,
+}
+
+fn add_local_source_hints(hints: &mut VersionSourceHints, info: &ModInfo) {
+    if info.install_source.is_workshop() {
+        return;
+    }
+    if hints.source.is_none() {
+        hints.source = info.source.clone();
+    }
+    if hints.github_url.is_none() {
+        hints.github_url = info
+            .github_url
+            .clone()
+            .or_else(|| source_as_github_url(info.source.as_deref()));
+    }
+    if hints.nexus_url.is_none() {
+        hints.nexus_url = info
+            .nexus_url
+            .clone()
+            .or_else(|| source_as_nexus_url(info.source.as_deref()));
+    }
+}
+
+fn enrich_local_option_with_source_hints(
+    option: &mut LocalModVersionOption,
+    hints: Option<&VersionSourceHints>,
+) {
+    if option.install_source.is_workshop() {
+        return;
+    }
+    if option.source.is_none() {
+        option.source = hints.and_then(|hints| hints.source.clone());
+    }
+    if option.github_url.is_none() {
+        option.github_url = source_as_github_url(option.source.as_deref())
+            .or_else(|| hints.and_then(|hints| hints.github_url.clone()));
+    }
+    if option.nexus_url.is_none() {
+        option.nexus_url = source_as_nexus_url(option.source.as_deref())
+            .or_else(|| hints.and_then(|hints| hints.nexus_url.clone()));
+    }
+}
+
+fn content_identity_for_mod(info: &ModInfo) -> Option<String> {
     let source = source_for_mod(info);
+    if info.install_source.is_workshop() {
+        return match (info.hash.as_deref(), source) {
+            (Some(hash), Some(source)) => Some(format!("{hash}|source:{source}")),
+            (Some(hash), None) => Some(hash.to_string()),
+            (None, Some(source)) => Some(source),
+            (None, None) => info.workshop_item_id.clone(),
+        };
+    }
+    info.hash.clone().or(source)
+}
+
+fn key_for_mod_with_version(info: &ModInfo, version: &str) -> String {
     let mod_id = if info.bundle_member_ids.is_empty() {
         info.mod_id.as_deref()
     } else {
         None
     };
+    let content_identity = content_identity_for_mod(info);
     artifact_identity_key(
         &info.name,
         info.folder_name.as_deref(),
         mod_id,
         version,
-        info.hash.as_deref(),
-        source.as_deref(),
+        content_identity.as_deref(),
+        None,
     )
+}
+
+fn mod_info_matches_record_identity(info: &ModInfo, record: &ModVersionRecord) -> bool {
+    key_for_mod_with_version(info, &info.version) == record.identity_key
 }
 
 fn normalize_family_part(raw: Option<&str>) -> Option<String> {
@@ -180,14 +305,8 @@ fn family_key_for_mod(info: &ModInfo) -> String {
     } else {
         None
     };
-    family_key(
-        &info.name,
-        mod_id,
-        info.source
-            .as_deref()
-            .or(info.github_url.as_deref())
-            .or(info.nexus_url.as_deref()),
-    )
+    let source = source_for_mod(info);
+    family_key(&info.name, mod_id, source.as_deref())
 }
 
 fn family_key_for_record(record: &ModVersionRecord) -> String {
@@ -219,13 +338,36 @@ fn key_for_profile_mod(pm: &ProfileMod) -> String {
     } else {
         None
     };
+    let source = pm.source.as_deref().or(pm.bundle_url.as_deref());
+    let workshop_item_id =
+        crate::mods::workshop_item_id_from_reference(source, pm.folder_name.as_deref());
+    let source_owned;
+    let source = if source.is_none() {
+        source_owned = workshop_item_id.as_deref().map(crate::mods::workshop_url);
+        source_owned.as_deref()
+    } else {
+        source
+    };
+    let is_workshop = workshop_item_id.is_some();
+    let content_owned;
+    let content = if is_workshop {
+        content_owned = match (pm.hash.as_deref().or(pm.bundle_sha256.as_deref()), source) {
+            (Some(hash), Some(source)) => Some(format!("{hash}|source:{source}")),
+            (Some(hash), None) => Some(hash.to_string()),
+            (None, Some(source)) => Some(source.to_string()),
+            (None, None) => workshop_item_id.clone(),
+        };
+        content_owned.as_deref()
+    } else {
+        pm.hash.as_deref().or(pm.bundle_sha256.as_deref())
+    };
     artifact_identity_key(
         &pm.name,
         pm.folder_name.as_deref(),
         mod_id,
         &pm.version,
-        pm.hash.as_deref().or(pm.bundle_sha256.as_deref()),
-        pm.source.as_deref().or(pm.bundle_url.as_deref()),
+        content,
+        if is_workshop { None } else { source },
     )
 }
 
@@ -249,6 +391,12 @@ pub(crate) fn canonical_profile_mod_artifact_id(
 }
 
 pub(crate) fn artifact_key_for_profile_mod(pm: &ProfileMod, db: &ModVersionsDb) -> String {
+    if let Some(item_id) = crate::mods::workshop_item_id_from_reference(
+        pm.source.as_deref(),
+        pm.folder_name.as_deref(),
+    ) {
+        return format!("workshop:{item_id}");
+    }
     canonical_profile_mod_artifact_id(pm, db)
         .map(|id| format!("artifact:{id}"))
         .unwrap_or_else(|| key_for_profile_mod(pm))
@@ -350,10 +498,7 @@ fn upsert_record_for_mod_with_source_version(
     requested_id: Option<&str>,
     source_version: Option<&str>,
 ) -> (String, bool) {
-    let source_version = source_version
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
+    let source_version = source_version.and_then(usable_source_version_label);
     let identity_key = key_for_mod_with_version(
         info,
         source_version.as_deref().unwrap_or(info.version.as_str()),
@@ -387,10 +532,18 @@ fn upsert_record_for_mod_with_source_version(
             name: info.name.clone(),
             version: info.version.clone(),
             source_version: source_version.clone(),
+            nexus_file_id: None,
+            nexus_file_name: None,
+            nexus_file_lane_key: None,
             folder_name: info.folder_name.clone(),
             mod_id: info.mod_id.clone(),
             bundle_member_ids: info.bundle_member_ids.clone(),
             source: source.clone(),
+            install_source: info.install_source,
+            workshop_item_id: info.workshop_item_id.clone(),
+            workshop_url: info.workshop_url.clone(),
+            workshop_manifest: info.workshop_manifest.clone(),
+            workshop_time_updated: info.workshop_time_updated,
             content_hash: info.hash.clone(),
             archive_sha256: None,
             cache_relpath: Some(cache_relpath_for_id(&id)),
@@ -421,12 +574,35 @@ fn upsert_record_for_mod_with_source_version(
         record.bundle_member_ids = info.bundle_member_ids.clone();
         changed = true;
     }
-    if source_version.is_some() && record.source_version != source_version {
+    if info.install_source.is_workshop() && record.source_version.is_some() {
+        record.source_version = None;
+        changed = true;
+    } else if source_version.is_some() && record.source_version != source_version {
         record.source_version = source_version;
         changed = true;
     }
     if record.source.is_none() && source.is_some() {
         record.source = source;
+        changed = true;
+    }
+    if record.install_source != info.install_source {
+        record.install_source = info.install_source;
+        changed = true;
+    }
+    if record.workshop_item_id != info.workshop_item_id {
+        record.workshop_item_id = info.workshop_item_id.clone();
+        changed = true;
+    }
+    if record.workshop_url != info.workshop_url {
+        record.workshop_url = info.workshop_url.clone();
+        changed = true;
+    }
+    if record.workshop_manifest != info.workshop_manifest {
+        record.workshop_manifest = info.workshop_manifest.clone();
+        changed = true;
+    }
+    if record.workshop_time_updated != info.workshop_time_updated {
+        record.workshop_time_updated = info.workshop_time_updated;
         changed = true;
     }
     if record.content_hash.is_none() && info.hash.is_some() {
@@ -463,18 +639,109 @@ pub fn ensure_mod_info_id(info: &mut ModInfo, config_path: &Path) -> Option<Stri
     Some(id)
 }
 
+pub(crate) fn usable_source_version_label(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("unknown") {
+        return None;
+    }
+    let unprefixed = trimmed.trim_start_matches(['v', 'V']);
+    if unprefixed == "0" || unprefixed == "0.0.0" {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn parse_source_version_label(raw: &str) -> Option<semver::Version> {
+    let label = usable_source_version_label(raw)?;
+    let stripped = label.trim_start_matches(['v', 'V']);
+    if let Ok(version) = semver::Version::parse(stripped) {
+        return Some(version);
+    }
+    let parts: Vec<&str> = stripped.split('.').collect();
+    match parts.len() {
+        1 => semver::Version::parse(&format!("{}.0.0", stripped)).ok(),
+        2 => semver::Version::parse(&format!("{}.0", stripped)).ok(),
+        _ => None,
+    }
+}
+
+pub(crate) fn compare_source_version_labels(
+    current: &str,
+    candidate: &str,
+) -> Option<std::cmp::Ordering> {
+    Some(parse_source_version_label(current)?.cmp(&parse_source_version_label(candidate)?))
+}
+
+fn best_source_version_label<'a>(versions: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    let mut first_usable: Option<String> = None;
+    let mut best_parseable: Option<(semver::Version, String)> = None;
+
+    for raw in versions {
+        let Some(label) = usable_source_version_label(raw) else {
+            continue;
+        };
+        if first_usable.is_none() {
+            first_usable = Some(label.clone());
+        }
+        if let Some(parsed) = parse_source_version_label(&label) {
+            match best_parseable.as_ref() {
+                Some((best, _)) if parsed <= *best => {}
+                _ => best_parseable = Some((parsed, label)),
+            }
+        }
+    }
+
+    best_parseable.map(|(_, label)| label).or(first_usable)
+}
+
+pub(crate) fn installed_source_version_label_for_mod(
+    info: &ModInfo,
+    config_path: &Path,
+) -> Option<String> {
+    if info.install_source.is_workshop() {
+        return usable_source_version_label(&info.version);
+    }
+
+    let record_version = info
+        .mod_version_id
+        .as_deref()
+        .and_then(|id| record_by_id(config_path, id))
+        .and_then(|record| record.source_version);
+    let sources = crate::mod_sources::load_sources(config_path);
+    let source_entry_version = crate::mod_sources::lookup_entry(
+        &sources.mods,
+        info.folder_name.as_deref(),
+        &info.name,
+        info.mod_id.as_deref(),
+    )
+    .and_then(|entry| entry.installed_version.as_deref().map(str::to_string));
+    best_source_version_label(
+        [
+            record_version.as_deref(),
+            source_entry_version.as_deref(),
+            Some(info.version.as_str()),
+        ]
+        .into_iter()
+        .flatten(),
+    )
+}
+
 pub fn enrich_mods_with_versions(mods: &mut [ModInfo], config_path: &Path) {
     let mut db = load(config_path);
     let sources = crate::mod_sources::load_sources(config_path);
     let mut changed = false;
     for info in mods.iter_mut() {
-        let installed_source_version = crate::mod_sources::lookup_entry(
-            &sources.mods,
-            info.folder_name.as_deref(),
-            &info.name,
-            info.mod_id.as_deref(),
-        )
-        .and_then(|entry| entry.installed_version.as_deref());
+        let installed_source_version = if info.install_source.is_workshop() {
+            None
+        } else {
+            crate::mod_sources::lookup_entry(
+                &sources.mods,
+                info.folder_name.as_deref(),
+                &info.name,
+                info.mod_id.as_deref(),
+            )
+            .and_then(|entry| entry.installed_version.as_deref())
+        };
         let (id, did_change) = upsert_record_for_mod_with_source_version(
             &mut db,
             info,
@@ -499,6 +766,16 @@ pub fn ensure_profile_mod_id(pm: &mut ProfileMod, config_path: &Path) -> Option<
     let mut db = load(config_path);
     let existing = record_by_identity(&db, &key).map(|record| record.id.clone());
     let id = existing.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let workshop_item_id = crate::mods::workshop_item_id_from_reference(
+        pm.source.as_deref(),
+        pm.folder_name.as_deref(),
+    );
+    let install_source = if workshop_item_id.is_some() {
+        ModInstallSource::SteamWorkshop
+    } else {
+        ModInstallSource::Local
+    };
+    let workshop_url = workshop_item_id.as_deref().map(crate::mods::workshop_url);
     if !db.records.contains_key(&id) {
         db.records.insert(
             id.clone(),
@@ -509,10 +786,22 @@ pub fn ensure_profile_mod_id(pm: &mut ProfileMod, config_path: &Path) -> Option<
                 name: pm.name.clone(),
                 version: pm.version.clone(),
                 source_version: None,
+                nexus_file_id: None,
+                nexus_file_name: None,
+                nexus_file_lane_key: None,
                 folder_name: pm.folder_name.clone(),
                 mod_id: pm.mod_id.clone(),
                 bundle_member_ids: pm.bundle_member_ids.clone(),
-                source: pm.source.clone().or_else(|| pm.bundle_url.clone()),
+                source: pm
+                    .source
+                    .clone()
+                    .or_else(|| workshop_url.clone())
+                    .or_else(|| pm.bundle_url.clone()),
+                install_source,
+                workshop_item_id,
+                workshop_url,
+                workshop_manifest: None,
+                workshop_time_updated: None,
                 content_hash: pm.hash.clone().or_else(|| pm.bundle_sha256.clone()),
                 archive_sha256: pm.bundle_sha256.clone(),
                 cache_relpath: Some(cache_relpath_for_id(&id)),
@@ -606,12 +895,40 @@ pub fn set_record_source_version(
     let mut db = load(config_path);
     let resolved = resolve_alias(&db, record_id.trim()).to_string();
     if let Some(record) = db.records.get_mut(&resolved) {
-        let next = source_version
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
+        let next = source_version.and_then(usable_source_version_label);
         if record.source_version != next {
             record.source_version = next;
+            save(&db, config_path)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn set_record_nexus_file_identity(
+    config_path: &Path,
+    record_id: &str,
+    identity: &crate::nexus::NexusFileIdentity,
+) -> Result<()> {
+    if identity.file_id.is_none() && identity.file_name.is_none() && identity.lane_key.is_none() {
+        return Ok(());
+    }
+    let mut db = load(config_path);
+    let resolved = resolve_alias(&db, record_id.trim()).to_string();
+    if let Some(record) = db.records.get_mut(&resolved) {
+        let mut changed = false;
+        if identity.file_id.is_some() && record.nexus_file_id != identity.file_id {
+            record.nexus_file_id = identity.file_id;
+            changed = true;
+        }
+        if identity.file_name.is_some() && record.nexus_file_name != identity.file_name {
+            record.nexus_file_name = identity.file_name.clone();
+            changed = true;
+        }
+        if identity.lane_key.is_some() && record.nexus_file_lane_key != identity.lane_key {
+            record.nexus_file_lane_key = identity.lane_key.clone();
+            changed = true;
+        }
+        if changed {
             save(&db, config_path)?;
         }
     }
@@ -722,12 +1039,12 @@ pub fn preview_local_mod_version_removal(
     let family = family_key_for_record(&record);
     let by_family = local_version_options_by_family(installed_mods, profiles, &db, cache_path);
     let family_options = by_family.get(&family).cloned().unwrap_or_default();
-    let active = family_options.iter().any(|option| {
-        resolve_alias(&db, &option.mod_version_id) == resolved_id && option.installed_enabled
-    });
-    let installed = family_options.iter().any(|option| {
-        resolve_alias(&db, &option.mod_version_id) == resolved_id && option.installed
-    });
+    let installed_matches: Vec<&ModInfo> = installed_mods
+        .iter()
+        .filter(|info| mod_info_matches_record_identity(info, &record))
+        .collect();
+    let active = installed_matches.iter().any(|info| info.enabled);
+    let installed = !installed_matches.is_empty();
     let cached = cached_record_path(cache_path, &record).is_some()
         || family_options.iter().any(|option| {
             resolve_alias(&db, &option.mod_version_id) == resolved_id && option.cached
@@ -735,30 +1052,35 @@ pub fn preview_local_mod_version_removal(
     let pinned = family_options
         .iter()
         .any(|option| resolve_alias(&db, &option.mod_version_id) == resolved_id && option.pinned)
+        || installed_matches.iter().any(|info| info.pinned)
         || installed_mods
             .iter()
             .any(|info| info.pinned && family_key_for_mod(info) == family);
-    let target = family_options
-        .iter()
-        .find(|option| resolve_alias(&db, &option.mod_version_id) == resolved_id)
-        .cloned()
-        .unwrap_or_else(|| LocalModVersionOption {
-            mod_version_id: record.id.clone(),
-            name: record.name.clone(),
-            version: record
-                .source_version
-                .clone()
-                .unwrap_or_else(|| record.version.clone()),
-            folder_name: record.folder_name.clone(),
-            mod_id: record.mod_id.clone(),
-            display_name: None,
-            bundle_member_ids: record.bundle_member_ids.clone(),
-            installed,
-            installed_enabled: active,
-            cached,
-            pinned,
-            used_by_profiles: Vec::new(),
-        });
+    let target = LocalModVersionOption {
+        mod_version_id: record.id.clone(),
+        name: record.name.clone(),
+        version: record
+            .source_version
+            .clone()
+            .unwrap_or_else(|| record.version.clone()),
+        folder_name: record.folder_name.clone(),
+        mod_id: record.mod_id.clone(),
+        display_name: installed_matches
+            .iter()
+            .find_map(|info| info.display_name.clone()),
+        source: record.source.clone(),
+        github_url: source_as_github_url(record.source.as_deref()),
+        nexus_url: source_as_nexus_url(record.source.as_deref()),
+        install_source: record.install_source,
+        workshop_item_id: record.workshop_item_id.clone(),
+        workshop_url: record.workshop_url.clone(),
+        bundle_member_ids: record.bundle_member_ids.clone(),
+        installed,
+        installed_enabled: active,
+        cached,
+        pinned,
+        used_by_profiles: Vec::new(),
+    };
 
     let affected_profiles = profiles
         .iter()
@@ -897,6 +1219,28 @@ fn local_version_options_by_family(
         })
         .collect();
 
+    let mut source_hints_by_family: HashMap<String, VersionSourceHints> = HashMap::new();
+    for info in installed_mods {
+        if info.install_source.is_workshop() {
+            continue;
+        }
+        let direct_family = family_key_for_mod(info);
+        add_local_source_hints(
+            source_hints_by_family.entry(direct_family).or_default(),
+            info,
+        );
+        if let Some(id) = info.mod_version_id.as_deref() {
+            if let Some(record) = db.records.get(resolve_alias(db, id)) {
+                add_local_source_hints(
+                    source_hints_by_family
+                        .entry(family_key_for_record(record))
+                        .or_default(),
+                    info,
+                );
+            }
+        }
+    }
+
     let mut options_by_family: HashMap<String, HashMap<String, LocalModVersionOption>> =
         HashMap::new();
     for info in installed_mods {
@@ -921,6 +1265,12 @@ fn local_version_options_by_family(
                 folder_name: info.folder_name.clone(),
                 mod_id: info.mod_id.clone(),
                 display_name: info.display_name.clone(),
+                source: info.source.clone(),
+                github_url: info.github_url.clone(),
+                nexus_url: info.nexus_url.clone(),
+                install_source: info.install_source,
+                workshop_item_id: info.workshop_item_id.clone(),
+                workshop_url: info.workshop_url.clone(),
                 bundle_member_ids: info.bundle_member_ids.clone(),
                 installed: true,
                 installed_enabled: info.enabled,
@@ -992,6 +1342,12 @@ fn local_version_options_by_family(
                     folder_name: record.folder_name.clone(),
                     mod_id: record.mod_id.clone(),
                     display_name: None,
+                    source: record.source.clone(),
+                    github_url: source_as_github_url(record.source.as_deref()),
+                    nexus_url: source_as_nexus_url(record.source.as_deref()),
+                    install_source: record.install_source,
+                    workshop_item_id: record.workshop_item_id.clone(),
+                    workshop_url: record.workshop_url.clone(),
                     bundle_member_ids: record.bundle_member_ids.clone(),
                     installed: false,
                     installed_enabled: false,
@@ -1005,7 +1361,14 @@ fn local_version_options_by_family(
     options_by_family
         .into_iter()
         .map(|(family, options)| {
-            let mut options: Vec<LocalModVersionOption> = options.into_values().collect();
+            let hints = source_hints_by_family.get(&family);
+            let mut options: Vec<LocalModVersionOption> = options
+                .into_values()
+                .map(|mut option| {
+                    enrich_local_option_with_source_hints(&mut option, hints);
+                    option
+                })
+                .collect();
             options.sort_by(|a, b| {
                 let version = b.version.to_lowercase().cmp(&a.version.to_lowercase());
                 version
@@ -1076,9 +1439,47 @@ pub fn has_local_version_for_mod(
     info: &ModInfo,
     version: &str,
 ) -> bool {
+    local_version_options_for_cached_comparison(config_path, cache_path, info)
+        .into_iter()
+        .any(|option| {
+            normalize_part(Some(&option.version)) == normalize_part(Some(version)) && option.cached
+        })
+}
+
+pub(crate) fn cached_source_version_ids_for_mod_family(
+    config_path: &Path,
+    cache_path: &Path,
+    info: &ModInfo,
+) -> Vec<String> {
+    let db = load(config_path);
+    let mut target_families = HashSet::from([family_key_for_mod(info)]);
+    if let Some(id) = info.mod_version_id.as_deref() {
+        if let Some(record) = db.records.get(resolve_alias(&db, id)) {
+            target_families.insert(family_key_for_record(record));
+        }
+    }
+    db.records
+        .values()
+        .filter(|record| target_families.contains(&family_key_for_record(record)))
+        .filter(|record| {
+            record
+                .source_version
+                .as_deref()
+                .and_then(usable_source_version_label)
+                .is_some()
+        })
+        .filter(|record| cached_record_path(cache_path, record).is_some())
+        .map(|record| record.id.clone())
+        .collect()
+}
+
+fn local_version_options_for_cached_comparison(
+    config_path: &Path,
+    cache_path: &Path,
+    info: &ModInfo,
+) -> Vec<LocalModVersionOption> {
     let mut candidate = info.clone();
     ensure_mod_info_id(&mut candidate, config_path);
-    let target_version = normalize_part(Some(version));
     local_version_options_for_target(
         &[candidate.clone()],
         &[],
@@ -1088,8 +1489,6 @@ pub fn has_local_version_for_mod(
         candidate.mod_version_id.as_deref(),
         candidate.mod_id.as_deref(),
     )
-    .into_iter()
-    .any(|option| normalize_part(Some(&option.version)) == target_version && option.cached)
 }
 
 pub fn source_hint_for_mod(info: &ModInfo, config_path: &Path) -> Option<String> {
@@ -1314,13 +1713,23 @@ pub(crate) fn remove_local_mod_version_with_policy(
 
     let installed_matches: Vec<&ModInfo> = installed_mods
         .iter()
-        .filter(|info| {
-            info.mod_version_id
-                .as_deref()
-                .map(|id| resolve_alias(&db, id) == resolved_id)
-                .unwrap_or(false)
-        })
+        .filter(|info| mod_info_matches_record_identity(info, &record))
         .collect();
+    let cached = cached_record_path(cache_path, &record).is_some();
+    let record_is_workshop = record.install_source == ModInstallSource::SteamWorkshop
+        || record.workshop_item_id.is_some();
+    if record_is_workshop && !installed_matches.is_empty() {
+        return Err(AppError::Other(
+            "Steam Workshop mods are managed by Steam. Unsubscribe or remove them in Steam instead."
+                .into(),
+        ));
+    }
+    if record_is_workshop && cached {
+        return Err(AppError::Other(
+            "This Workshop version still has a local cached archive. Switch away from it or remove affected modpacks first."
+                .into(),
+        ));
+    }
     if installed_matches.iter().any(|info| info.enabled) {
         if !allow_active {
             return Err(AppError::Other(
@@ -1605,7 +2014,19 @@ mod tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         }
+    }
+
+    fn workshop_mod_info(item_id: &str, version: &str) -> ModInfo {
+        let mut info = mod_info("RitsuLib", version, Some("workshop-hash"));
+        info.source = Some(crate::mods::workshop_url(item_id));
+        info.install_source = ModInstallSource::SteamWorkshop;
+        info.workshop_item_id = Some(item_id.into());
+        info.workshop_url = Some(crate::mods::workshop_url(item_id));
+        info.folder_name = Some(item_id.into());
+        info.mod_id = Some("STS2-RitsuLib".into());
+        info
     }
 
     #[test]
@@ -1661,6 +2082,7 @@ mod tests {
             content_hash: Some("hash".into()),
             archive_sha256: None,
             cache_relpath: Some(cache_relpath_for_id("canonical-id")),
+            ..ModVersionRecord::default()
         };
 
         assert_eq!(cached_record_path(cache.path(), &record), Some(alias_path));
@@ -1997,6 +2419,153 @@ mod tests {
     }
 
     #[test]
+    fn stale_installed_source_version_keeps_exact_cached_nexus_choices_distinct() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let source = "https://www.nexusmods.com/slaythespire2/mods/46";
+
+        write_manifest(base.path(), "1.4.3");
+        let mut installed = mod_info("Watcher", "1.4.3", Some("watcher-current"));
+        installed.source = Some(source.into());
+        let installed_id = ensure_mod_info_id(&mut installed, config.path()).unwrap();
+        set_record_source_version(config.path(), &installed_id, Some("1.4.3")).unwrap();
+        crate::mod_sources::attach_nexus_source(
+            "Watcher",
+            installed.folder_name.as_deref(),
+            source.into(),
+            "slaythespire2".into(),
+            46,
+            config.path(),
+        );
+        crate::mod_sources::update_installed_version_from_source(
+            installed.folder_name.as_deref().unwrap(),
+            "1.4.3",
+            "nexus",
+            config.path(),
+        );
+
+        write_manifest(base.path(), "1.4.22");
+        let mut cached = mod_info("Watcher", "1.4.22", Some("watcher-cached-1422"));
+        cached.source = Some(source.into());
+        let cached_path = cache_mod_version_by_id_with_source_version(
+            &mut cached,
+            base.path(),
+            cache.path(),
+            config.path(),
+            Some("1.4.22"),
+        )
+        .expect("cached beta Nexus artifact should be written");
+        let cached_id = cached.mod_version_id.clone().unwrap();
+        assert!(cached_path.exists());
+
+        let options = local_version_options_for_target(
+            &[installed.clone()],
+            &[],
+            config.path(),
+            cache.path(),
+            &installed.name,
+            installed.mod_version_id.as_deref(),
+            installed.mod_id.as_deref(),
+        );
+        assert!(
+            options
+                .iter()
+                .any(|option| option.mod_version_id == cached_id
+                    && option.version == "1.4.22"
+                    && option.cached
+                    && !option.installed),
+            "stale installed_version metadata must not hide the cached beta Nexus option"
+        );
+        assert!(
+            has_local_version_for_mod(config.path(), cache.path(), &installed, "1.4.22"),
+            "cached 1.4.22 should suppress the exact advertised 1.4.22 version"
+        );
+        assert!(
+            !has_local_version_for_mod(config.path(), cache.path(), &installed, "1.4.3"),
+            "cached 1.4.22 must not suppress a different main-branch 1.4.3 file"
+        );
+
+        write_manifest(base.path(), "1.4.3");
+        let mut cached_exact = mod_info("Watcher", "1.4.3", Some("watcher-cached-main-143"));
+        cached_exact.source = Some(source.into());
+        cache_mod_version_by_id_with_source_version(
+            &mut cached_exact,
+            base.path(),
+            cache.path(),
+            config.path(),
+            Some("1.4.3"),
+        )
+        .expect("exact cached Nexus artifact should be written");
+        assert!(
+            has_local_version_for_mod(config.path(), cache.path(), &installed, "1.4.3"),
+            "cached 1.4.3 should suppress only the exact advertised 1.4.3 version"
+        );
+    }
+
+    #[test]
+    fn nested_watcher_cached_archive_shape_stays_selectable() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let source = "https://www.nexusmods.com/slaythespire2/mods/46";
+
+        let mut installed = mod_info("Watcher", "1.4.3", Some("watcher-current"));
+        installed.folder_name = Some("Watcher".into());
+        installed.mod_id = Some("Watcher".into());
+        installed.source = Some(source.into());
+        installed.files = vec!["Watcher/Watcher.json".into()];
+        ensure_mod_info_id(&mut installed, config.path()).unwrap();
+
+        let nested_manifest = base.path().join("Watcher/Watcher/Watcher.json");
+        fs::create_dir_all(nested_manifest.parent().unwrap()).unwrap();
+        fs::write(
+            &nested_manifest,
+            r#"{"id":"Watcher","name":"Watcher","version":"1.4.20"}"#,
+        )
+        .unwrap();
+        let mut cached = mod_info("Watcher", "1.4.20", Some("watcher-nested-cache"));
+        cached.folder_name = Some("Watcher".into());
+        cached.mod_id = Some("Watcher".into());
+        cached.source = Some(source.into());
+        cached.files = vec!["Watcher/Watcher/Watcher.json".into()];
+
+        let cached_path = cache_mod_version_by_id_with_source_version(
+            &mut cached,
+            base.path(),
+            cache.path(),
+            config.path(),
+            Some("1.4.20"),
+        )
+        .expect("nested Watcher archive should be cached");
+        let cached_id = cached.mod_version_id.clone().unwrap();
+        let file = fs::File::open(&cached_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        assert!(
+            archive.by_name("Watcher/Watcher/Watcher.json").is_ok(),
+            "nested cache archive should preserve the real Watcher path shape"
+        );
+
+        let options = local_version_options_for_target(
+            &[installed.clone()],
+            &[],
+            config.path(),
+            cache.path(),
+            &installed.name,
+            installed.mod_version_id.as_deref(),
+            installed.mod_id.as_deref(),
+        );
+        assert!(
+            options
+                .iter()
+                .any(|option| option.mod_version_id == cached_id
+                    && option.version == "1.4.20"
+                    && option.cached),
+            "nested Watcher cache should become a selectable stored option"
+        );
+    }
+
+    #[test]
     fn local_options_collapse_duplicate_stored_artifacts() {
         let cache = tempfile::tempdir().unwrap();
         let config = tempfile::tempdir().unwrap();
@@ -2029,6 +2598,7 @@ mod tests {
                     content_hash: Some(hash.into()),
                     archive_sha256: None,
                     cache_relpath: Some(cache_relpath_for_id(id)),
+                    ..ModVersionRecord::default()
                 },
             );
             let path = cache_path_for_id(cache.path(), id);
@@ -2311,6 +2881,193 @@ mod tests {
         .unwrap();
 
         assert!(!stale_zip.exists());
+        assert!(record_by_id(config.path(), &stale_id).is_none());
+    }
+
+    #[test]
+    fn remove_local_mod_version_keeps_disabled_sibling_for_saved_source_version() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+
+        write_manifest(base.path(), "0.16.2");
+        let mut saved = mod_info("Test", "0.16.2", Some("same-content"));
+        let saved_zip = cache_mod_version_by_id_with_source_version(
+            &mut saved,
+            base.path(),
+            cache.path(),
+            config.path(),
+            Some("V1"),
+        )
+        .unwrap();
+        let saved_id = saved.mod_version_id.clone().unwrap();
+
+        write_manifest(disabled.path(), "0.16.2");
+        let mut stored = mod_info("Test", "0.16.2", Some("same-content"));
+        stored.enabled = false;
+        stored.mod_version_id = Some(saved_id.clone());
+
+        remove_local_mod_version(
+            config.path(),
+            cache.path(),
+            disabled.path(),
+            &[stored],
+            &[],
+            &saved_id,
+        )
+        .unwrap();
+
+        assert!(!saved_zip.exists());
+        assert!(record_by_id(config.path(), &saved_id).is_none());
+        assert!(
+            disabled.path().join("Mod/manifest.json").exists(),
+            "removing saved V1 must not delete the stored manifest-version copy"
+        );
+    }
+
+    #[test]
+    fn remove_local_mod_version_keeps_active_sibling_for_saved_source_version() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+
+        write_manifest(base.path(), "0.16.2");
+        let mut saved = mod_info("Test", "0.16.2", Some("same-content"));
+        let saved_zip = cache_mod_version_by_id_with_source_version(
+            &mut saved,
+            base.path(),
+            cache.path(),
+            config.path(),
+            Some("V1"),
+        )
+        .unwrap();
+        let saved_id = saved.mod_version_id.clone().unwrap();
+
+        let mut active = mod_info("Test", "0.16.2", Some("same-content"));
+        active.mod_version_id = Some(saved_id.clone());
+
+        remove_local_mod_version(
+            config.path(),
+            cache.path(),
+            disabled.path(),
+            &[active],
+            &[],
+            &saved_id,
+        )
+        .unwrap();
+
+        assert!(!saved_zip.exists());
+        assert!(record_by_id(config.path(), &saved_id).is_none());
+        assert!(
+            base.path().join("Mod/manifest.json").exists(),
+            "removing saved V1 must not delete the active manifest-version copy"
+        );
+    }
+
+    #[test]
+    fn preview_local_mod_version_removal_reports_saved_sibling_as_cache_only() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+
+        write_manifest(base.path(), "0.16.2");
+        let mut saved = mod_info("Test", "0.16.2", Some("same-content"));
+        cache_mod_version_by_id_with_source_version(
+            &mut saved,
+            base.path(),
+            cache.path(),
+            config.path(),
+            Some("V1"),
+        )
+        .unwrap();
+        let saved_id = saved.mod_version_id.clone().unwrap();
+
+        let mut active = mod_info("Test", "0.16.2", Some("same-content"));
+        active.mod_version_id = Some(saved_id.clone());
+
+        let preview = preview_local_mod_version_removal(
+            config.path(),
+            cache.path(),
+            &[active],
+            &[],
+            &saved_id,
+        )
+        .unwrap();
+
+        assert_eq!(preview.target.version, "V1");
+        assert!(preview.target.cached);
+        assert!(!preview.target.installed);
+        assert!(!preview.target.installed_enabled);
+        assert!(preview.can_delete_directly);
+    }
+
+    #[test]
+    fn workshop_manifest_version_ignores_stale_installed_source_metadata() {
+        let config = tempfile::tempdir().unwrap();
+        crate::mod_sources::update_installed_version_from_source(
+            "3747602295",
+            "0.2.26",
+            "nexus",
+            config.path(),
+        );
+
+        let mut workshop = workshop_mod_info("3747602295", "0.4.41");
+        enrich_mods_with_versions(std::slice::from_mut(&mut workshop), config.path());
+
+        assert_eq!(
+            installed_source_version_label_for_mod(&workshop, config.path()).as_deref(),
+            Some("0.4.41")
+        );
+        let record = record_by_id(config.path(), workshop.mod_version_id.as_deref().unwrap())
+            .expect("Workshop scan should create a version record");
+        assert_eq!(record.version, "0.4.41");
+        assert_eq!(record.source_version, None);
+    }
+
+    #[test]
+    fn remove_local_mod_version_blocks_installed_workshop_record() {
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+
+        let mut workshop = workshop_mod_info("3747602295", "0.4.41");
+        let workshop_id = ensure_mod_info_id(&mut workshop, config.path()).unwrap();
+
+        let err = remove_local_mod_version(
+            config.path(),
+            cache.path(),
+            disabled.path(),
+            &[workshop],
+            &[],
+            &workshop_id,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("Steam Workshop"));
+        assert!(record_by_id(config.path(), &workshop_id).is_some());
+    }
+
+    #[test]
+    fn remove_local_mod_version_prunes_stale_workshop_metadata_record() {
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+
+        let mut stale = workshop_mod_info("3747602295", "0.2.26");
+        let stale_id = ensure_mod_info_id(&mut stale, config.path()).unwrap();
+
+        remove_local_mod_version(
+            config.path(),
+            cache.path(),
+            disabled.path(),
+            &[],
+            &[],
+            &stale_id,
+        )
+        .unwrap();
+
         assert!(record_by_id(config.path(), &stale_id).is_none());
     }
 

@@ -61,15 +61,21 @@ describe('<SourceEditor>', () => {
     expect(input.value).toBe('https://www.nexusmods.com/sts2/mods/103');
   });
 
+  it('initial Steam Workshop URL stays verbatim', () => {
+    renderEditor(baseMod({ workshop_url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295' }));
+    const input = screen.getByPlaceholderText(/steamcommunity\.com\/sharedfiles/) as HTMLInputElement;
+    expect(input.value).toBe('https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295');
+  });
+
   it('"empty" badge shows when a field is blank, "OK" when filled', async () => {
     const user = userEvent.setup();
     renderEditor(baseMod());
-    // Three fields carry status badges: GitHub, Nexus, Other-link.
+    // Four fields carry status badges: GitHub, Nexus, Steam Workshop, Other-link.
     // (Note has hint text only — it's free-form, no "filled vs empty" UX.)
-    expect(screen.getAllByText('empty')).toHaveLength(3);
+    expect(screen.getAllByText('empty')).toHaveLength(4);
     await user.type(screen.getByPlaceholderText('owner/repo'), 'foo/bar');
     expect(screen.getByText(/OK/)).toBeInTheDocument();
-    expect(screen.getAllByText('empty')).toHaveLength(2);
+    expect(screen.getAllByText('empty')).toHaveLength(3);
   });
 
   it('clear button next to GitHub clears the field', async () => {
@@ -150,10 +156,15 @@ describe('<SourceEditor>', () => {
       screen.getByPlaceholderText(/nexusmods\.com\/sts2\/mods\/123/),
       'https://www.nexusmods.com/sts2/mods/99',
     );
+    await user.type(
+      screen.getByPlaceholderText(/steamcommunity\.com\/sharedfiles/),
+      'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295',
+    );
     await user.click(screen.getByRole('button', { name: /Save sources/ }));
     expect(onSave).toHaveBeenCalledWith(
       'foo/bar',
       'https://www.nexusmods.com/sts2/mods/99',
+      'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295',
       '',
       '',
       '',
@@ -178,6 +189,7 @@ describe('<SourceEditor>', () => {
     expect(onSave).toHaveBeenCalledWith(
       '',
       '',
+      '',
       'got this from a friend',
       'https://example.com/post/1',
       '',
@@ -198,6 +210,7 @@ describe('<SourceEditor>', () => {
       '',
       '',
       '',
+      '',
       'Friendly Base',
       'Readable description',
       '',
@@ -214,6 +227,7 @@ describe('<SourceEditor>', () => {
     await user.type(tagsEl, 'QoL, beta, UI');
     await user.click(screen.getByRole('button', { name: /Save sources/ }));
     expect(onSave).toHaveBeenCalledWith(
+      '',
       '',
       '',
       '',
@@ -343,6 +357,19 @@ describe('<SourceEditor>', () => {
     rerender(
       <SourceEditor
         mod={baseMod({ github_url: 'https://github.com/x/y' })}
+        saving={false}
+        findingGithub={false}
+        onClose={() => {}}
+        onClear={() => {}}
+        onFindGithub={async () => null}
+        onSave={() => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Clear all/i })).toBeInTheDocument();
+
+    rerender(
+      <SourceEditor
+        mod={baseMod({ workshop_url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295' })}
         saving={false}
         findingGithub={false}
         onClose={() => {}}

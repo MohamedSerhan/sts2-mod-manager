@@ -1452,6 +1452,7 @@ describe('<ModsView>', () => {
           folderName: 'route_planner',
           githubRepo: 'llzcx/STS2-RoutePlanner',
           nexusUrl: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+          workshopUrl: null,
         },
       });
     });
@@ -2394,6 +2395,7 @@ describe('<ModsView>', () => {
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     const btn = await screen.findByRole('button', { name: /Download update → v2\.0\.0/ });
     await user.click(btn);
+    await user.click(await screen.findByRole('button', { name: /Keep showing/ }));
     await waitFor(() => {
       expect(screen.getByText(/Update failed for 'UpdFail'.*release deleted/)).toBeInTheDocument();
     });
@@ -2682,6 +2684,7 @@ describe('<ModsView>', () => {
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     const btn = await screen.findByRole('button', { name: /Download update → v2\.0\.0/ });
     await user.click(btn);
+    await user.click(await screen.findByRole('button', { name: /Keep showing/ }));
     await waitFor(() => {
       expect(screen.getByText(/Update failed for 'UN'.*bare-upd/)).toBeInTheDocument();
     });

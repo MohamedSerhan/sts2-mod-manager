@@ -1193,6 +1193,7 @@ mod tests {
             tags: Vec::new(),
             display_name: None,
             display_description: None,
+            ..Default::default()
         }
     }
 

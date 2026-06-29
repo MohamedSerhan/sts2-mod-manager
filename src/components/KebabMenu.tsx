@@ -1,4 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { MoreHorizontal } from 'lucide-react';
 
@@ -26,6 +36,20 @@ interface KebabMenuProps {
   trigger?: ReactNode;
 }
 
+type KebabPlacement = 'bottom' | 'top';
+
+interface KebabMenuLayout {
+  placement: KebabPlacement;
+  maxHeight: number | null;
+}
+
+const DEFAULT_MENU_LAYOUT: KebabMenuLayout = {
+  placement: 'bottom',
+  maxHeight: null,
+};
+const MENU_GAP_PX = 4;
+const VIEWPORT_MARGIN_PX = 8;
+
 export function KebabMenu({
   children,
   size = 'md',
@@ -37,7 +61,44 @@ export function KebabMenu({
   const { t } = useTranslation();
   const resolvedTitle = title ?? t('common.moreActions');
   const [open, setOpen] = useState(false);
+  const [menuLayout, setMenuLayout] = useState<KebabMenuLayout>(DEFAULT_MENU_LAYOUT);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const updateMenuLayout = useCallback(() => {
+    const button = buttonRef.current;
+    const menu = menuRef.current;
+    if (!button || !menu) return;
+
+    const buttonRect = button.getBoundingClientRect();
+    const viewportHeight =
+      window.innerHeight || document.documentElement.clientHeight || 0;
+    const menuHeight = menu.scrollHeight || menu.getBoundingClientRect().height;
+    const availableBelow = Math.max(
+      0,
+      viewportHeight - buttonRect.bottom - MENU_GAP_PX - VIEWPORT_MARGIN_PX,
+    );
+    const availableAbove = Math.max(
+      0,
+      buttonRect.top - MENU_GAP_PX - VIEWPORT_MARGIN_PX,
+    );
+    const placement: KebabPlacement =
+      menuHeight > availableBelow && availableAbove > availableBelow
+        ? 'top'
+        : 'bottom';
+    const availableHeight =
+      placement === 'top' ? availableAbove : availableBelow;
+    const maxHeight =
+      menuHeight > availableHeight ? Math.floor(availableHeight) : null;
+
+    setMenuLayout((prev) => {
+      if (prev.placement === placement && prev.maxHeight === maxHeight) {
+        return prev;
+      }
+      return { placement, maxHeight };
+    });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -61,7 +122,35 @@ export function KebabMenu({
     };
   }, [open]);
 
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuLayout(DEFAULT_MENU_LAYOUT);
+      return;
+    }
+    updateMenuLayout();
+    window.addEventListener('resize', updateMenuLayout);
+    window.addEventListener('scroll', updateMenuLayout, true);
+    return () => {
+      window.removeEventListener('resize', updateMenuLayout);
+      window.removeEventListener('scroll', updateMenuLayout, true);
+    };
+  }, [children, open, updateMenuLayout]);
+
   const buttonClass = buttonClassName ?? (size === 'sm' ? 'gf-btn-3 gf-btn-icon gf-btn-2-sm' : 'gf-btn-3 gf-btn-icon');
+  const menuStyle: CSSProperties & { '--gf-kebab-max-height'?: string } =
+    align === 'left'
+      ? { insetInlineEnd: 'auto', insetInlineStart: 0 }
+      : {};
+  if (menuLayout.maxHeight !== null) {
+    menuStyle['--gf-kebab-max-height'] = `${menuLayout.maxHeight}px`;
+  }
+  const menuClassName = [
+    'gf-kebab',
+    menuLayout.placement === 'top' ? 'gf-kebab-top' : '',
+    menuLayout.maxHeight !== null ? 'gf-kebab-scrollable' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     // `gf-kebab-open` raises this wrapper's z-index while the menu is open so
@@ -78,8 +167,13 @@ export function KebabMenu({
       style={{ position: 'relative', display: 'inline-block' }}
     >
       <button
+        ref={buttonRef}
         className={buttonClass}
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!open) setMenuLayout(DEFAULT_MENU_LAYOUT);
+          setOpen((v) => !v);
+        }}
         title={resolvedTitle}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -88,9 +182,10 @@ export function KebabMenu({
       </button>
       {open && (
         <div
-          className="gf-kebab"
+          ref={menuRef}
+          className={menuClassName}
           role="menu"
-          style={align === 'left' ? { insetInlineEnd: 'auto', insetInlineStart: 0 } : undefined}
+          style={menuStyle}
           onClick={(e) => e.stopPropagation()}
         >
           <KebabContext.Provider value={{ close: () => setOpen(false) }}>
@@ -101,8 +196,6 @@ export function KebabMenu({
     </div>
   );
 }
-
-import { createContext, useContext } from 'react';
 
 interface KebabCtx {
   close: () => void;

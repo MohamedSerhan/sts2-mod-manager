@@ -25,6 +25,10 @@ const SAME_AS_ENGLISH_ALLOWED = new Set([
   'mods.versionOption',
   'mods.versionOptionVersion',
   'mods.versionReplacementOption',
+  'mods.versionSource.gitHub',
+  'mods.versionSource.nexus',
+  'mods.versionSource.steamWorkshop',
+  'mods.versionSource.joiner',
   'onboarding.step1.browsePlaceholderLinux',
   'onboarding.step1.browsePlaceholderMac',
   'onboarding.step1.browsePlaceholderWindows',
@@ -44,6 +48,7 @@ const SAME_AS_ENGLISH_ALLOWED = new Set([
   'settings.sts2Pck',
   'sourceEditor.githubPlaceholder',
   'sourceEditor.nexusPlaceholder',
+  'sourceEditor.workshopPlaceholder',
   'sourceEditor.ok',
 ]);
 

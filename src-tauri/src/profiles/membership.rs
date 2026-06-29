@@ -26,7 +26,9 @@ use serde_json::json;
 
 use crate::error::{AppError, Result};
 use crate::mods::{
-    merge_active_disabled_mods, move_mod_by_info, scan_disabled_mods, scan_mods, ModInfo,
+    merge_active_disabled_mods, move_mod_by_info, scan_disabled_mods,
+    scan_installed_mods_with_workshop, scan_mods, ModInfo, ModInstallSource,
+    SETTINGS_SOURCE_MODS_DIRECTORY, SETTINGS_SOURCE_STEAM_WORKSHOP,
 };
 
 use super::apply::disk_mod_matches_pin;
@@ -65,8 +67,7 @@ pub(crate) fn profile_membership_matrix(
         })
         .collect();
 
-    let mut installed_mods =
-        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    let mut installed_mods = scan_installed_mods_with_workshop(mods_path, disabled_path);
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
     crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
     let version_db = crate::mod_versions::load(config_path);
@@ -104,6 +105,12 @@ pub(crate) fn profile_membership_matrix(
                 folder_name: installed.folder_name.clone(),
                 mod_id: installed.mod_id.clone(),
                 display_name: installed.display_name.clone(),
+                install_source: installed.install_source,
+                source: installed.source.clone(),
+                workshop_item_id: installed.workshop_item_id.clone(),
+                workshop_url: installed.workshop_url.clone(),
+                workshop_time_updated: installed.workshop_time_updated,
+                workshop_update_pending: installed.workshop_update_pending,
                 bundle_members: installed.bundle_members.clone(),
                 bundle_member_ids: installed.bundle_member_ids.clone(),
                 installed: true,
@@ -179,6 +186,12 @@ pub(crate) fn profile_membership_matrix(
             folder_name: record.folder_name.clone(),
             mod_id: record.mod_id.clone(),
             display_name: None,
+            install_source: record.install_source,
+            source: record.source.clone(),
+            workshop_item_id: record.workshop_item_id.clone(),
+            workshop_url: record.workshop_url.clone(),
+            workshop_time_updated: record.workshop_time_updated,
+            workshop_update_pending: false,
             bundle_members: Vec::new(),
             bundle_member_ids: record.bundle_member_ids.clone(),
             installed: false,
@@ -223,8 +236,7 @@ pub(crate) fn set_profile_mod_membership_from_paths(
 
     if included {
         let source_hint = source_hint.and_then(crate::mod_sources::parse_source_url);
-        let mut installed_mods =
-            merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+        let mut installed_mods = scan_installed_mods_with_workshop(mods_path, disabled_path);
         crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
         crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
         let source_match_count = source_hint.as_ref().map_or(0, |hint| {
@@ -387,10 +399,16 @@ pub(crate) fn select_profile_mod_version_from_paths(
     current_mod_version_id: Option<&str>,
     current_folder_name: Option<&str>,
     current_mod_id: Option<&str>,
+    current_install_source: Option<ModInstallSource>,
+    current_workshop_item_id: Option<&str>,
+    current_workshop_url: Option<&str>,
     selected_name: &str,
     selected_mod_version_id: Option<&str>,
     selected_folder_name: Option<&str>,
     selected_mod_id: Option<&str>,
+    selected_install_source: Option<ModInstallSource>,
+    selected_workshop_item_id: Option<&str>,
+    selected_workshop_url: Option<&str>,
     mods_path: &Path,
     disabled_path: &Path,
     profiles_path: &Path,
@@ -406,38 +424,41 @@ pub(crate) fn select_profile_mod_version_from_paths(
     }
 
     let mut profile = load_profile(profile_name, profiles_path)?;
-    let mut installed_mods =
-        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    let mut installed_mods = scan_installed_mods_with_workshop(mods_path, disabled_path);
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
     crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
     let version_db = crate::mod_versions::load(config_path);
+    let current_target = VersionSelectionTarget {
+        name: current_name,
+        mod_version_id: current_mod_version_id,
+        folder_name: current_folder_name,
+        mod_id: current_mod_id,
+        install_source: current_install_source,
+        workshop_item_id: current_workshop_item_id,
+        workshop_url: current_workshop_url,
+    };
+    let selected_target = VersionSelectionTarget {
+        name: selected_name,
+        mod_version_id: selected_mod_version_id,
+        folder_name: selected_folder_name,
+        mod_id: selected_mod_id,
+        install_source: selected_install_source,
+        workshop_item_id: selected_workshop_item_id,
+        workshop_url: selected_workshop_url,
+    };
 
-    let index = find_profile_mod_for_version_switch(
-        &profile,
-        &installed_mods,
-        &version_db,
-        current_name,
-        current_mod_version_id,
-        current_folder_name,
-        current_mod_id,
-    )
-    .ok_or_else(|| {
-        AppError::ModNotFound(format!(
-            "Profile '{}' does not contain '{}'. Refresh the modpack and try again.",
-            profile_name, current_name
-        ))
-    })?;
+    let index =
+        find_profile_mod_for_version_switch(&profile, &installed_mods, &version_db, current_target)
+            .ok_or_else(|| {
+                AppError::ModNotFound(format!(
+                    "Profile '{}' does not contain '{}'. Refresh the modpack and try again.",
+                    profile_name, current_name
+                ))
+            })?;
 
     let enabled = profile.mods[index].enabled;
     let selected_installed = installed_mods.iter().find(|m| {
-        installed_mod_matches_target_with_version_db(
-            m,
-            selected_name,
-            selected_mod_version_id,
-            selected_folder_name,
-            selected_mod_id,
-            &version_db,
-        )
+        installed_mod_matches_version_target_with_version_db(m, selected_target, &version_db)
     });
     let selected_for_profile = if apply_to_disk {
         select_local_mod_version_on_disk(
@@ -446,6 +467,7 @@ pub(crate) fn select_profile_mod_version_from_paths(
             current_mod_id.or(selected_mod_id),
             selected_installed,
             selected_mod_version_id,
+            selected_install_source,
             enabled,
             mods_path,
             disabled_path,
@@ -510,25 +532,24 @@ fn find_profile_mod_for_version_switch(
     profile: &Profile,
     installed_mods: &[ModInfo],
     version_db: &crate::mod_versions::ModVersionsDb,
-    current_name: &str,
-    current_mod_version_id: Option<&str>,
-    current_folder_name: Option<&str>,
-    current_mod_id: Option<&str>,
+    current_target: VersionSelectionTarget<'_>,
 ) -> Option<usize> {
-    if let Some(index) = profile.mods.iter().position(|pm| {
-        profile_mod_matches_target(
-            pm,
-            current_name,
-            current_mod_version_id,
-            current_folder_name,
-            current_mod_id,
-        )
-    }) {
+    if let Some(index) = profile
+        .mods
+        .iter()
+        .position(|pm| profile_mod_matches_version_target(pm, current_target))
+    {
         return Some(index);
     }
 
     unique_profile_mod_index(profile.mods.iter().enumerate().filter_map(|(index, pm)| {
-        if profile_mod_matches_stable_target(pm, current_name, current_folder_name, current_mod_id)
+        if profile_mod_matches_target_source(pm, current_target)
+            && profile_mod_matches_stable_target(
+                pm,
+                current_target.name,
+                current_target.folder_name,
+                current_target.mod_id,
+            )
         {
             Some(index)
         } else {
@@ -538,35 +559,25 @@ fn find_profile_mod_for_version_switch(
     .or_else(|| {
         let current_installed = installed_mods
             .iter()
-            .find(|m| {
-                installed_mod_matches_target(
-                    m,
-                    current_name,
-                    current_mod_version_id,
-                    current_folder_name,
-                    current_mod_id,
-                )
-            })
+            .find(|m| installed_mod_matches_version_target(m, current_target))
             .or_else(|| {
                 installed_mods.iter().find(|m| {
-                    installed_mod_matches_target_with_version_db(
+                    installed_mod_matches_version_target_with_version_db(
                         m,
-                        current_name,
-                        current_mod_version_id,
-                        current_folder_name,
-                        current_mod_id,
+                        current_target,
                         version_db,
                     )
                 })
             })
             .or_else(|| {
                 installed_mods.iter().find(|m| {
-                    installed_mod_matches_stable_target(
-                        m,
-                        current_name,
-                        current_folder_name,
-                        current_mod_id,
-                    )
+                    mod_info_matches_target_source(m, current_target)
+                        && installed_mod_matches_stable_target(
+                            m,
+                            current_target.name,
+                            current_target.folder_name,
+                            current_target.mod_id,
+                        )
                 })
             })?;
 
@@ -653,37 +664,174 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct VersionSelectionTarget<'a> {
+    pub name: &'a str,
+    pub mod_version_id: Option<&'a str>,
+    pub folder_name: Option<&'a str>,
+    pub mod_id: Option<&'a str>,
+    pub install_source: Option<ModInstallSource>,
+    pub workshop_item_id: Option<&'a str>,
+    pub workshop_url: Option<&'a str>,
+}
+
+impl<'a> VersionSelectionTarget<'a> {
+    fn workshop_item_id(self) -> Option<String> {
+        self.workshop_item_id
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                crate::mods::workshop_item_id_from_reference(self.workshop_url, self.folder_name)
+            })
+    }
+
+    fn wants_local(self) -> bool {
+        matches!(self.install_source, Some(ModInstallSource::Local))
+    }
+
+    fn wants_workshop(self) -> bool {
+        matches!(self.install_source, Some(ModInstallSource::SteamWorkshop))
+            || self.workshop_item_id().is_some()
+    }
+}
+
+fn mod_info_workshop_item_id(info: &ModInfo) -> Option<String> {
+    info.workshop_item_id
+        .clone()
+        .or_else(|| {
+            crate::mods::workshop_item_id_from_reference(
+                info.workshop_url.as_deref().or(info.source.as_deref()),
+                None,
+            )
+        })
+        .or_else(|| {
+            if info.install_source.is_workshop() {
+                crate::mods::workshop_item_id_from_reference(None, info.folder_name.as_deref())
+            } else {
+                None
+            }
+        })
+}
+
+fn profile_mod_workshop_item_id(pm: &ProfileMod) -> Option<String> {
+    crate::mods::workshop_item_id_from_reference(pm.source.as_deref(), pm.folder_name.as_deref())
+}
+
+fn mod_info_matches_target_source(info: &ModInfo, target: VersionSelectionTarget<'_>) -> bool {
+    if let Some(target_item_id) = target.workshop_item_id() {
+        return info.install_source.is_workshop()
+            && mod_info_workshop_item_id(info).as_deref() == Some(target_item_id.as_str());
+    }
+    if target.wants_workshop() {
+        return info.install_source.is_workshop();
+    }
+    if target.wants_local() {
+        return info.install_source.is_local();
+    }
+    true
+}
+
+fn profile_mod_matches_target_source(pm: &ProfileMod, target: VersionSelectionTarget<'_>) -> bool {
+    if let Some(target_item_id) = target.workshop_item_id() {
+        return profile_mod_workshop_item_id(pm).as_deref() == Some(target_item_id.as_str());
+    }
+    if target.wants_workshop() {
+        return profile_mod_workshop_item_id(pm).is_some();
+    }
+    if target.wants_local() {
+        return profile_mod_workshop_item_id(pm).is_none();
+    }
+    true
+}
+
+fn installed_mod_matches_version_target(
+    installed: &ModInfo,
+    target: VersionSelectionTarget<'_>,
+) -> bool {
+    mod_info_matches_target_source(installed, target)
+        && installed_mod_matches_target(
+            installed,
+            target.name,
+            target.mod_version_id,
+            target.folder_name,
+            target.mod_id,
+        )
+}
+
+fn installed_mod_matches_version_target_with_version_db(
+    installed: &ModInfo,
+    target: VersionSelectionTarget<'_>,
+    version_db: &crate::mod_versions::ModVersionsDb,
+) -> bool {
+    mod_info_matches_target_source(installed, target)
+        && installed_mod_matches_target_with_version_db(
+            installed,
+            target.name,
+            target.mod_version_id,
+            target.folder_name,
+            target.mod_id,
+            version_db,
+        )
+}
+
+fn profile_mod_matches_version_target(pm: &ProfileMod, target: VersionSelectionTarget<'_>) -> bool {
+    profile_mod_matches_target_source(pm, target)
+        && profile_mod_matches_target(
+            pm,
+            target.name,
+            target.mod_version_id,
+            target.folder_name,
+            target.mod_id,
+        )
+}
+
 pub(crate) fn select_library_mod_version_from_paths(
     current_name: &str,
     current_mod_version_id: Option<&str>,
     current_folder_name: Option<&str>,
     current_mod_id: Option<&str>,
+    current_install_source: Option<ModInstallSource>,
+    current_workshop_item_id: Option<&str>,
+    current_workshop_url: Option<&str>,
     selected_name: &str,
     selected_mod_version_id: Option<&str>,
     selected_folder_name: Option<&str>,
     selected_mod_id: Option<&str>,
+    selected_install_source: Option<ModInstallSource>,
+    selected_workshop_item_id: Option<&str>,
+    selected_workshop_url: Option<&str>,
     mods_path: &Path,
     disabled_path: &Path,
     profiles_path: &Path,
     config_path: &Path,
     cache_path: &Path,
 ) -> Result<ModInfo> {
-    let mut installed_mods =
-        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    let mut installed_mods = scan_installed_mods_with_workshop(mods_path, disabled_path);
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, config_path);
     crate::mod_versions::enrich_mods_with_versions(&mut installed_mods, config_path);
+    let current_target = VersionSelectionTarget {
+        name: current_name,
+        mod_version_id: current_mod_version_id,
+        folder_name: current_folder_name,
+        mod_id: current_mod_id,
+        install_source: current_install_source,
+        workshop_item_id: current_workshop_item_id,
+        workshop_url: current_workshop_url,
+    };
+    let selected_target = VersionSelectionTarget {
+        name: selected_name,
+        mod_version_id: selected_mod_version_id,
+        folder_name: selected_folder_name,
+        mod_id: selected_mod_id,
+        install_source: selected_install_source,
+        workshop_item_id: selected_workshop_item_id,
+        workshop_url: selected_workshop_url,
+    };
 
     let current = installed_mods
         .iter()
-        .find(|m| {
-            installed_mod_matches_target(
-                m,
-                current_name,
-                current_mod_version_id,
-                current_folder_name,
-                current_mod_id,
-            )
-        })
+        .find(|m| installed_mod_matches_version_target(m, current_target))
         .ok_or_else(|| {
             AppError::ModNotFound(format!(
                 "Installed mod '{}' was not found; refresh the mod list and try again.",
@@ -691,15 +839,9 @@ pub(crate) fn select_library_mod_version_from_paths(
             ))
         })?;
     let target_enabled = current.enabled;
-    let selected_installed = installed_mods.iter().find(|m| {
-        installed_mod_matches_target(
-            m,
-            selected_name,
-            selected_mod_version_id,
-            selected_folder_name,
-            selected_mod_id,
-        )
-    });
+    let selected_installed = installed_mods
+        .iter()
+        .find(|m| installed_mod_matches_version_target(m, selected_target));
 
     let selected = select_local_mod_version_on_disk(
         &installed_mods,
@@ -707,6 +849,7 @@ pub(crate) fn select_library_mod_version_from_paths(
         current_mod_id.or(selected_mod_id),
         selected_installed,
         selected_mod_version_id,
+        selected_install_source,
         target_enabled,
         mods_path,
         disabled_path,
@@ -745,8 +888,7 @@ fn prune_after_version_selection(
     if anchor_ids.is_empty() {
         return;
     }
-    let mut installed =
-        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    let mut installed = scan_installed_mods_with_workshop(mods_path, disabled_path);
     crate::mod_sources::enrich_mods_with_sources(&mut installed, config_path);
     crate::mod_versions::enrich_mods_with_versions(&mut installed, config_path);
     let profiles = if profiles_path.as_os_str().is_empty() {
@@ -770,6 +912,7 @@ fn select_local_mod_version_on_disk(
     family_mod_id: Option<&str>,
     selected_installed: Option<&ModInfo>,
     selected_mod_version_id: Option<&str>,
+    selected_install_source: Option<ModInstallSource>,
     target_enabled: bool,
     mods_path: &Path,
     disabled_path: &Path,
@@ -780,6 +923,18 @@ fn select_local_mod_version_on_disk(
         .and_then(|m| m.mod_version_id.as_deref())
         .or(selected_mod_version_id)
         .map(str::to_string);
+    let selected_is_workshop = selected_installed.is_some_and(|m| m.install_source.is_workshop())
+        || matches!(
+            selected_install_source,
+            Some(ModInstallSource::SteamWorkshop)
+        )
+        || selected_id
+            .as_deref()
+            .and_then(|id| crate::mod_versions::record_by_id(config_path, id))
+            .is_some_and(|record| {
+                record.install_source == ModInstallSource::SteamWorkshop
+                    || record.workshop_item_id.is_some()
+            });
     let same_family = |m: &ModInfo| {
         if let Some(id) = family_mod_id.map(str::trim).filter(|id| !id.is_empty()) {
             return m
@@ -802,6 +957,15 @@ fn select_local_mod_version_on_disk(
         } else {
             disabled_path
         };
+        if installed.install_source.is_workshop() {
+            continue;
+        }
+        if selected_is_workshop {
+            if installed.enabled {
+                move_mod_by_info(installed, mods_path, disabled_path)?;
+            }
+            continue;
+        }
         let mut cache_candidate = installed.clone();
         crate::mod_versions::cache_mod_version_by_id(
             &mut cache_candidate,
@@ -816,6 +980,9 @@ fn select_local_mod_version_on_disk(
 
     if let Some(selected) = selected_installed {
         let mut selected = selected.clone();
+        if selected.install_source.is_workshop() {
+            return Ok(selected);
+        }
         if selected.enabled != target_enabled {
             let (src, dest) = if selected.enabled {
                 (mods_path, disabled_path)
@@ -884,6 +1051,10 @@ fn apply_record_source_version(info: &ModInfo, record_id: Option<&str>, config_p
     let Some(record) = crate::mod_versions::record_by_id(config_path, record_id) else {
         return;
     };
+    if info.install_source.is_workshop() || record.install_source == ModInstallSource::SteamWorkshop
+    {
+        return;
+    }
     let Some(version) = record
         .source_version
         .as_deref()
@@ -911,6 +1082,14 @@ fn apply_record_source_version(info: &ModInfo, record_id: Option<&str>, config_p
         source_type,
         config_path,
     );
+    if source_type == "nexus" {
+        let identity = crate::nexus::NexusFileIdentity {
+            file_id: record.nexus_file_id,
+            file_name: record.nexus_file_name.clone(),
+            lane_key: record.nexus_file_lane_key.clone(),
+        };
+        crate::mod_sources::set_nexus_file_identity_for_key(key, &identity, config_path);
+    }
 }
 
 /// Result of bulk enable/disable of a profile's mods.
@@ -1036,6 +1215,40 @@ fn disk_mod_settings_id(m: &ModInfo) -> String {
         .to_string()
 }
 
+fn normalize_settings_source(source: Option<&str>) -> String {
+    match source.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(SETTINGS_SOURCE_STEAM_WORKSHOP) => SETTINGS_SOURCE_STEAM_WORKSHOP.to_string(),
+        Some(SETTINGS_SOURCE_MODS_DIRECTORY) | None => SETTINGS_SOURCE_MODS_DIRECTORY.to_string(),
+        Some(other) => other.to_string(),
+    }
+}
+
+fn settings_entry_key(id: &str, source: &str) -> String {
+    format!(
+        "{}|{}",
+        id.trim().to_lowercase(),
+        source.trim().to_lowercase()
+    )
+}
+
+fn profile_mod_settings_source(pm: &ProfileMod) -> String {
+    if crate::mods::workshop_item_id_from_reference(pm.source.as_deref(), pm.folder_name.as_deref())
+        .is_some()
+    {
+        SETTINGS_SOURCE_STEAM_WORKSHOP.to_string()
+    } else {
+        SETTINGS_SOURCE_MODS_DIRECTORY.to_string()
+    }
+}
+
+fn disk_mod_settings_source(m: &ModInfo) -> String {
+    if m.install_source == ModInstallSource::SteamWorkshop || m.workshop_item_id.is_some() {
+        SETTINGS_SOURCE_STEAM_WORKSHOP.to_string()
+    } else {
+        m.install_source.settings_source().to_string()
+    }
+}
+
 pub(crate) fn set_profile_load_order_from_paths(
     profile_name: &str,
     ordered_mods: Vec<ProfileModOrderKey>,
@@ -1100,19 +1313,20 @@ pub(crate) fn set_profile_load_order_from_paths(
 
 fn settings_entry_with_state(
     id: &str,
+    source: &str,
     enabled: bool,
     existing: Option<&serde_json::Value>,
 ) -> serde_json::Value {
+    let source = normalize_settings_source(Some(source));
     let mut entry = existing
         .filter(|value| value.is_object())
         .cloned()
-        .unwrap_or_else(|| json!({ "id": id, "source": "mods_directory" }));
+        .unwrap_or_else(|| json!({ "id": id, "source": source }));
 
     if let Some(obj) = entry.as_object_mut() {
         obj.insert("id".into(), serde_json::Value::String(id.to_string()));
         obj.insert("is_enabled".into(), serde_json::Value::Bool(enabled));
-        obj.entry("source")
-            .or_insert_with(|| serde_json::Value::String("mods_directory".into()));
+        obj.insert("source".into(), serde_json::Value::String(source));
     }
     entry
 }
@@ -1210,7 +1424,7 @@ pub(crate) fn write_profile_load_order_to_settings_file(
         ));
     }
 
-    let mut existing_by_id: std::collections::HashMap<String, serde_json::Value> =
+    let mut existing_by_id_and_source: std::collections::HashMap<String, serde_json::Value> =
         std::collections::HashMap::new();
     if let Some(existing) = settings
         .get("mod_settings")
@@ -1219,7 +1433,9 @@ pub(crate) fn write_profile_load_order_to_settings_file(
     {
         for entry in existing {
             if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
-                existing_by_id.insert(id.to_string(), entry.clone());
+                let source =
+                    normalize_settings_source(entry.get("source").and_then(|v| v.as_str()));
+                existing_by_id_and_source.insert(settings_entry_key(id, &source), entry.clone());
             }
         }
     }
@@ -1228,28 +1444,39 @@ pub(crate) fn write_profile_load_order_to_settings_file(
     let mut mod_list = Vec::new();
     for pm in &profile.mods {
         let id = profile_mod_settings_id(pm);
-        if id.is_empty() || !seen.insert(id.to_lowercase()) {
+        let source = profile_mod_settings_source(pm);
+        let key = settings_entry_key(&id, &source);
+        if id.is_empty() || !seen.insert(key.clone()) {
             continue;
         }
         mod_list.push(settings_entry_with_state(
             &id,
-            true,
-            existing_by_id.get(&id),
+            &source,
+            if source == SETTINGS_SOURCE_STEAM_WORKSHOP {
+                pm.enabled
+            } else {
+                true
+            },
+            existing_by_id_and_source.get(&key),
         ));
     }
     for m in extra_mods {
         let id = disk_mod_settings_id(m);
-        if id.is_empty() || !seen.insert(id.to_lowercase()) {
+        let source = disk_mod_settings_source(m);
+        let key = settings_entry_key(&id, &source);
+        if id.is_empty() || !seen.insert(key.clone()) {
             continue;
         }
         mod_list.push(settings_entry_with_state(
             &id,
+            &source,
             m.enabled,
-            existing_by_id.get(&id),
+            existing_by_id_and_source.get(&key),
         ));
     }
 
-    let mods_enabled = !profile.mods.is_empty() || extra_mods.iter().any(|m| m.enabled);
+    let mods_enabled =
+        profile.mods.iter().any(|pm| pm.enabled) || extra_mods.iter().any(|m| m.enabled);
 
     let root = settings.as_object_mut().ok_or_else(|| {
         AppError::InvalidProfile("settings.save must contain a JSON object".into())
@@ -1377,8 +1604,7 @@ pub(super) fn sync_profile_load_order_to_settings(
     };
 
     let pinned_set = crate::mod_sources::load_pinned_set(config_path);
-    let mut all_mods =
-        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    let mut all_mods = scan_installed_mods_with_workshop(mods_path, disabled_path);
     crate::mod_versions::enrich_mods_with_versions(&mut all_mods, config_path);
     let pinned_mods = all_mods
         .into_iter()
@@ -1411,6 +1637,31 @@ pub(super) fn sync_profile_load_order_to_settings(
 mod profile_membership_tests {
     use super::*;
 
+    static STEAM_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvOverride {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvOverride {
+        fn set(key: &'static str, value: &Path) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvOverride {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.as_ref() {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
     fn write_mod(root: &Path, folder: &str, display: &str, version: &str) {
         write_mod_with_id(root, folder, folder, display, version);
     }
@@ -1424,6 +1675,42 @@ mod profile_membership_tests {
         )
         .unwrap();
         fs::write(dir.join(format!("{folder}.dll")), b"dll").unwrap();
+    }
+
+    fn write_workshop_mod(
+        steam_root: &Path,
+        item_id: &str,
+        mod_id: &str,
+        display: &str,
+        version: &str,
+    ) {
+        let dir = steam_root
+            .join("steamapps")
+            .join("workshop")
+            .join("content")
+            .join(crate::game::STS2_STEAM_APPID)
+            .join(item_id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("mod_manifest.json"),
+            format!(
+                r#"{{"id":"{mod_id}","name":"{display}","version":"{version}","min_game_version":"0.107.1"}}"#
+            ),
+        )
+        .unwrap();
+        fs::write(dir.join(format!("{mod_id}.dll")), b"dll").unwrap();
+    }
+
+    fn steam_game_mod_paths(steam_root: &Path) -> (PathBuf, PathBuf) {
+        let game_path = steam_root
+            .join("steamapps")
+            .join("common")
+            .join("Slay the Spire 2");
+        let mods_path = game_path.join("mods");
+        let disabled_path = game_path.join("mods_disabled");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        (mods_path, disabled_path)
     }
 
     fn write_bundle(
@@ -1596,6 +1883,7 @@ mod profile_membership_tests {
             "Pretty Pack",
             None,
             Some(&selected),
+            None,
             None,
             true,
             &mods_path,
@@ -1871,6 +2159,311 @@ mod profile_membership_tests {
     }
 
     #[test]
+    fn set_profile_mod_membership_adds_workshop_mod_by_source_hint() {
+        let _steam_guard = STEAM_ENV_LOCK.lock().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let steam_tmp = tempfile::tempdir().unwrap();
+        let _env = EnvOverride::set("STS2_FIXTURE_STEAM_PATH", steam_tmp.path());
+        let (mods_path, disabled_path) = steam_game_mod_paths(steam_tmp.path());
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        let workshop_item_id = "3747602295";
+        let workshop_url = crate::mods::workshop_url(workshop_item_id);
+        write_workshop_mod(
+            steam_tmp.path(),
+            workshop_item_id,
+            "STS2-RitsuLib",
+            "RitsuLib",
+            "0.4.41",
+        );
+        save_profile(&empty_profile("TesterW"), &profiles_path).unwrap();
+
+        let updated = set_profile_mod_membership_from_paths(
+            "TesterW",
+            "RitsuLib",
+            None,
+            Some(workshop_item_id),
+            Some("STS2-RitsuLib"),
+            true,
+            Some(&workshop_url),
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+        )
+        .unwrap();
+
+        assert_eq!(updated.mods.len(), 1);
+        let entry = &updated.mods[0];
+        assert_eq!(entry.name, "RitsuLib");
+        assert_eq!(entry.version, "0.4.41");
+        assert_eq!(entry.folder_name.as_deref(), Some(workshop_item_id));
+        assert_eq!(entry.mod_id.as_deref(), Some("STS2-RitsuLib"));
+        assert_eq!(entry.source.as_deref(), Some(workshop_url.as_str()));
+        assert!(
+            !mods_path.join(workshop_item_id).exists(),
+            "adding a Workshop mod to a pack must not copy it into mods/"
+        );
+        assert!(
+            !disabled_path.join(workshop_item_id).exists(),
+            "adding a Workshop mod to a pack must not move it into mods_disabled/"
+        );
+    }
+
+    #[test]
+    fn membership_matrix_deduplicates_stale_workshop_artifact_rows_by_item_id() {
+        let _steam_guard = STEAM_ENV_LOCK.lock().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let steam_tmp = tempfile::tempdir().unwrap();
+        let _env = EnvOverride::set("STS2_FIXTURE_STEAM_PATH", steam_tmp.path());
+        let (mods_path, disabled_path) = steam_game_mod_paths(steam_tmp.path());
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        let workshop_item_id = "3747602295";
+        let workshop_url = crate::mods::workshop_url(workshop_item_id);
+        write_workshop_mod(
+            steam_tmp.path(),
+            workshop_item_id,
+            "STS2-RitsuLib",
+            "RitsuLib",
+            "0.4.41",
+        );
+
+        let stale_id = "stale-workshop-artifact";
+        let mut db = crate::mod_versions::ModVersionsDb::default();
+        db.records.insert(
+            stale_id.into(),
+            crate::mod_versions::ModVersionRecord {
+                id: stale_id.into(),
+                identity_key: "legacy-stale-workshop-identity".into(),
+                aliases: Vec::new(),
+                name: "RitsuLib".into(),
+                version: "0.4.41".into(),
+                source_version: None,
+                folder_name: Some(workshop_item_id.into()),
+                mod_id: Some("STS2-RitsuLib".into()),
+                bundle_member_ids: Vec::new(),
+                source: Some(workshop_url.clone()),
+                install_source: ModInstallSource::SteamWorkshop,
+                workshop_item_id: Some(workshop_item_id.into()),
+                workshop_url: Some(workshop_url.clone()),
+                workshop_manifest: None,
+                workshop_time_updated: None,
+                content_hash: Some("old-workshop-hash".into()),
+                archive_sha256: None,
+                cache_relpath: Some(crate::mod_versions::cache_relpath_for_id(stale_id)),
+                ..crate::mod_versions::ModVersionRecord::default()
+            },
+        );
+        crate::mod_versions::save(&db, config_tmp.path()).unwrap();
+        let stale_cache = crate::mod_versions::cache_path_for_id(cache_tmp.path(), stale_id);
+        fs::create_dir_all(stale_cache.parent().unwrap()).unwrap();
+        fs::write(stale_cache, b"stale workshop cache").unwrap();
+
+        let mut profile = empty_profile("TesterW");
+        profile.mods.push(ProfileMod {
+            mod_version_id: Some(stale_id.into()),
+            name: "RitsuLib".into(),
+            version: "0.4.41".into(),
+            source: Some(workshop_url.clone()),
+            hash: None,
+            files: vec!["mod_manifest.json".into()],
+            folder_name: Some(workshop_item_id.into()),
+            mod_id: Some("STS2-RitsuLib".into()),
+            enabled: true,
+            bundle_url: None,
+            bundle_sha256: None,
+            bundle_members: vec![],
+            bundle_member_ids: vec![],
+        });
+        save_profile(&profile, &profiles_path).unwrap();
+
+        let grid = profile_membership_matrix(
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .unwrap();
+        let ritsu_rows = grid
+            .mods
+            .iter()
+            .filter(|m| m.mod_id.as_deref() == Some("STS2-RitsuLib"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ritsu_rows.len(),
+            1,
+            "same Workshop item must not appear as both installed and stale cached rows"
+        );
+        assert!(ritsu_rows[0].install_source.is_workshop());
+        let tester_state = ritsu_rows[0]
+            .profiles
+            .iter()
+            .find(|state| state.profile_name == "TesterW")
+            .unwrap();
+        assert!(tester_state.included);
+    }
+
+    #[test]
+    fn select_library_version_from_workshop_to_local_preserves_workshop_files() {
+        let _steam_guard = STEAM_ENV_LOCK.lock().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let steam_tmp = tempfile::tempdir().unwrap();
+        let _env = EnvOverride::set("STS2_FIXTURE_STEAM_PATH", steam_tmp.path());
+        let (mods_path, disabled_path) = steam_game_mod_paths(steam_tmp.path());
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        let workshop_item_id = "3747602295";
+        let workshop_url = crate::mods::workshop_url(workshop_item_id);
+        write_workshop_mod(
+            steam_tmp.path(),
+            workshop_item_id,
+            "STS2-RitsuLib",
+            "RitsuLib",
+            "0.4.41",
+        );
+        write_mod_with_id(
+            &disabled_path,
+            "STS2-RitsuLib-v0.2.26",
+            "STS2-RitsuLib",
+            "RitsuLib",
+            "0.2.26",
+        );
+
+        let mut installed = scan_installed_mods_with_workshop(&mods_path, &disabled_path);
+        crate::mod_sources::enrich_mods_with_sources(&mut installed, config_tmp.path());
+        crate::mod_versions::enrich_mods_with_versions(&mut installed, config_tmp.path());
+        let current = installed
+            .iter()
+            .find(|m| m.install_source.is_workshop())
+            .expect("Workshop RitsuLib should scan")
+            .clone();
+        let selected = installed
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("STS2-RitsuLib-v0.2.26"))
+            .expect("stored local RitsuLib should scan")
+            .clone();
+
+        let result = select_library_mod_version_from_paths(
+            &current.name,
+            current.mod_version_id.as_deref(),
+            current.folder_name.as_deref(),
+            current.mod_id.as_deref(),
+            Some(current.install_source),
+            current.workshop_item_id.as_deref(),
+            current.workshop_url.as_deref(),
+            &selected.name,
+            selected.mod_version_id.as_deref(),
+            selected.folder_name.as_deref(),
+            selected.mod_id.as_deref(),
+            Some(selected.install_source),
+            selected.workshop_item_id.as_deref(),
+            selected.workshop_url.as_deref(),
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .unwrap();
+
+        assert_eq!(result.folder_name.as_deref(), Some("STS2-RitsuLib-v0.2.26"));
+        assert!(mods_path.join("STS2-RitsuLib-v0.2.26").is_dir());
+        assert!(!disabled_path.join("STS2-RitsuLib-v0.2.26").exists());
+        assert!(
+            steam_tmp
+                .path()
+                .join("steamapps/workshop/content")
+                .join(crate::game::STS2_STEAM_APPID)
+                .join(workshop_item_id)
+                .join("mod_manifest.json")
+                .is_file(),
+            "switching away from Workshop must not mutate Steam-owned files"
+        );
+        assert_eq!(current.workshop_url.as_deref(), Some(workshop_url.as_str()));
+    }
+
+    #[test]
+    fn select_library_version_from_local_to_workshop_stores_local_shadow_copy() {
+        let _steam_guard = STEAM_ENV_LOCK.lock().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let steam_tmp = tempfile::tempdir().unwrap();
+        let _env = EnvOverride::set("STS2_FIXTURE_STEAM_PATH", steam_tmp.path());
+        let (mods_path, disabled_path) = steam_game_mod_paths(steam_tmp.path());
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        let workshop_item_id = "3747602295";
+        write_mod_with_id(
+            &mods_path,
+            "STS2-RitsuLib-v0.2.26",
+            "STS2-RitsuLib",
+            "RitsuLib",
+            "0.2.26",
+        );
+        write_workshop_mod(
+            steam_tmp.path(),
+            workshop_item_id,
+            "STS2-RitsuLib",
+            "RitsuLib",
+            "0.4.41",
+        );
+
+        let mut installed = scan_installed_mods_with_workshop(&mods_path, &disabled_path);
+        crate::mod_sources::enrich_mods_with_sources(&mut installed, config_tmp.path());
+        crate::mod_versions::enrich_mods_with_versions(&mut installed, config_tmp.path());
+        let current = installed
+            .iter()
+            .find(|m| m.folder_name.as_deref() == Some("STS2-RitsuLib-v0.2.26"))
+            .expect("active local RitsuLib should scan")
+            .clone();
+        let selected = installed
+            .iter()
+            .find(|m| m.install_source.is_workshop())
+            .expect("Workshop RitsuLib should scan")
+            .clone();
+
+        let result = select_library_mod_version_from_paths(
+            &current.name,
+            current.mod_version_id.as_deref(),
+            current.folder_name.as_deref(),
+            current.mod_id.as_deref(),
+            Some(current.install_source),
+            current.workshop_item_id.as_deref(),
+            current.workshop_url.as_deref(),
+            &selected.name,
+            selected.mod_version_id.as_deref(),
+            selected.folder_name.as_deref(),
+            selected.mod_id.as_deref(),
+            Some(selected.install_source),
+            selected.workshop_item_id.as_deref(),
+            selected.workshop_url.as_deref(),
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .unwrap();
+
+        assert!(result.install_source.is_workshop());
+        assert_eq!(result.workshop_item_id.as_deref(), Some(workshop_item_id));
+        assert!(
+            disabled_path.join("STS2-RitsuLib-v0.2.26").is_dir(),
+            "selecting Workshop should store the local mods/ copy that would shadow it"
+        );
+        assert!(!mods_path.join("STS2-RitsuLib-v0.2.26").exists());
+    }
+
+    #[test]
     fn set_profile_mod_membership_does_not_duplicate_same_folder_when_readded() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
@@ -2035,10 +2628,16 @@ mod profile_membership_tests {
             current.mod_version_id.as_deref(),
             current.folder_name.as_deref(),
             current.mod_id.as_deref(),
+            None,
+            None,
+            None,
             &selected.name,
             selected.mod_version_id.as_deref(),
             selected.folder_name.as_deref(),
             selected.mod_id.as_deref(),
+            None,
+            None,
+            None,
             &mods_path,
             &disabled_path,
             &profiles_path,
@@ -2168,6 +2767,7 @@ mod profile_membership_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         };
         let old_id = crate::mod_versions::ensure_mod_info_id(&mut old_info, config_tmp.path())
             .expect("old version should get an artifact id");
@@ -2710,6 +3310,7 @@ mod profile_membership_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         }];
 
         write_profile_load_order_to_settings_file(&profile, &settings_path, &pinned).unwrap();
@@ -2739,6 +3340,53 @@ mod profile_membership_tests {
                     .starts_with("settings.save.sts2mm-bak")),
             "a successful settings.save rewrite must remove its temporary backup"
         );
+    }
+
+    #[test]
+    fn write_profile_load_order_to_settings_save_preserves_workshop_source_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("settings.save");
+        fs::write(
+            &settings_path,
+            r#"{
+  "mod_settings": {
+    "mod_list": [
+      { "id": "STS2-RitsuLib", "is_enabled": true, "source": "mods_directory", "note": "local copy" },
+      { "id": "STS2-RitsuLib", "is_enabled": true, "source": "steam_workshop", "note": "steam copy" }
+    ],
+    "mods_enabled": true
+  }
+}"#,
+        )
+        .unwrap();
+
+        let mut profile = empty_profile("Mixed");
+        let mut local = profile_mod_entry("RitsuLib", "RitsuLib", "0.4.26", true);
+        local.mod_id = Some("STS2-RitsuLib".into());
+        local.source = Some("github:example/RitsuLib".into());
+        let mut workshop = profile_mod_entry("RitsuLib", "3747602295", "0.4.41", false);
+        workshop.mod_id = Some("STS2-RitsuLib".into());
+        workshop.source = Some(crate::mods::workshop_url("3747602295"));
+        workshop.hash = None;
+        workshop.bundle_url = None;
+        workshop.bundle_sha256 = None;
+        profile.mods.push(local);
+        profile.mods.push(workshop);
+
+        write_profile_load_order_to_settings_file(&profile, &settings_path, &[]).unwrap();
+
+        let saved: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
+        let mod_list = saved["mod_settings"]["mod_list"].as_array().unwrap();
+        assert_eq!(mod_list.len(), 2);
+        assert_eq!(mod_list[0]["id"].as_str(), Some("STS2-RitsuLib"));
+        assert_eq!(mod_list[0]["source"].as_str(), Some("mods_directory"));
+        assert_eq!(mod_list[0]["is_enabled"].as_bool(), Some(true));
+        assert_eq!(mod_list[0]["note"].as_str(), Some("local copy"));
+        assert_eq!(mod_list[1]["id"].as_str(), Some("STS2-RitsuLib"));
+        assert_eq!(mod_list[1]["source"].as_str(), Some("steam_workshop"));
+        assert_eq!(mod_list[1]["is_enabled"].as_bool(), Some(false));
+        assert_eq!(mod_list[1]["note"].as_str(), Some("steam copy"));
     }
 
     #[test]

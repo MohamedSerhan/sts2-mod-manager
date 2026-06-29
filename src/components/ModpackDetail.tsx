@@ -134,6 +134,10 @@ function modKey(mod: {
   return mod.mod_version_id ?? mod.folder_name ?? mod.mod_id ?? mod.name;
 }
 
+function isWorkshopMod(mod: ModInfo): boolean {
+  return mod.install_source === 'steam_workshop';
+}
+
 function missingNameKey(name: string): string {
   return name.trim().toLocaleLowerCase();
 }
@@ -304,6 +308,7 @@ export function ModpackDetail({
           mod_version_id: pm.mod_version_id ?? null,
           name: pm.name,
           version: pm.version,
+          source: pm.source ?? null,
           folder_name: pm.folder_name ?? null,
           mod_id: pm.mod_id ?? null,
           installed: false,
@@ -499,7 +504,7 @@ export function ModpackDetail({
       // while the membership write doesn't. Doing the guarded step first keeps
       // disk and manifest in sync instead of recording a membership the live
       // mods/ folder never received.
-      if (isActive) {
+      if (isActive && !isWorkshopMod(mod)) {
         await toggleMod(mod.name, mod.folder_name ?? null, true);
       }
       await setProfileModMembership(
@@ -509,7 +514,7 @@ export function ModpackDetail({
         mod.folder_name ?? null,
         mod.mod_id ?? null,
         true,
-        mod.source ?? mod.github_url ?? mod.nexus_url ?? null,
+        mod.workshop_url ?? mod.source ?? mod.github_url ?? mod.nexus_url ?? null,
       );
       markSharedLocalEdit();
       await refreshAfterMutation();
@@ -556,9 +561,16 @@ export function ModpackDetail({
         name: m.name,
         mod_version_id: m.mod_version_id ?? null,
         folder_name: m.folder_name ?? null,
+        source: m.source ?? null,
       }));
       for (const m of targets) {
-        await deleteMod(m.name, m.folder_name);
+        const steamOwned =
+          !!m.source &&
+          (m.source.includes('steamcommunity.com/sharedfiles') ||
+            m.source.startsWith('steam://'));
+        if (!steamOwned) {
+          await deleteMod(m.name, m.folder_name);
+        }
         await setProfileModMembership(
           profileKey,
           m.name,
@@ -597,12 +609,18 @@ export function ModpackDetail({
         mod_version_id: current.mod_version_id ?? null,
         folder_name: current.folder_name ?? null,
         mod_id: current.mod_id ?? null,
+        install_source: current.install_source,
+        workshop_item_id: current.workshop_item_id ?? null,
+        workshop_url: current.workshop_url ?? null,
         name: current.name,
       },
       {
         mod_version_id: selected.mod_version_id,
         folder_name: selected.folder_name ?? null,
         mod_id: selected.mod_id ?? null,
+        install_source: selected.install_source,
+        workshop_item_id: selected.workshop_item_id ?? null,
+        workshop_url: selected.workshop_url ?? null,
         name: selected.name,
       },
       applyToDisk,

@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
-import { check } from '@tauri-apps/plugin-updater';
-import { relaunch } from '@tauri-apps/plugin-process';
 import { Button } from './Button';
-import { useToast } from '../contexts/ToastContext';
 import { DiagnosticBundle } from './DiagnosticBundle';
-import { useOpenFeedback } from '../hooks/useOpenFeedback';
-import { installAppUpdate } from '../hooks/useTauri';
+
+interface AboutCardProps {
+  onCheckForAppUpdate?: () => void | Promise<void>;
+  checkingAppUpdate?: boolean;
+}
 
 /**
  * "About" footer for the Home screen. Lives below all primary content as a
@@ -15,35 +15,18 @@ import { installAppUpdate } from '../hooks/useTauri';
  * card. The user explicitly asked for footer treatment so the visual
  * weight stops fighting the actual home content above it.
  */
-export function AboutCard() {
+export function AboutCard({ onCheckForAppUpdate, checkingAppUpdate = false }: AboutCardProps) {
   const { t } = useTranslation();
-  const toast = useToast();
   const [appVersion, setAppVersion] = useState('');
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [showDiag, setShowDiag] = useState(false);
-  const openFeedback = useOpenFeedback();
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
 
-  async function handleCheckUpdateNow() {
-    if (checkingUpdate) return;
-    setCheckingUpdate(true);
-    try {
-      const update = await check();
-      if (!update) {
-        toast.success(t('about.latestVersion'));
-        return;
-      }
-      toast.success(t('about.updateAvailable', { version: update.version }));
-      await installAppUpdate();
-      await relaunch();
-    } catch (e) {
-      toast.error(t('about.updateCheckFailed', { error: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setCheckingUpdate(false);
-    }
+  function handleCheckUpdateNow() {
+    if (checkingAppUpdate) return;
+    void onCheckForAppUpdate?.();
   }
 
   return (
@@ -69,14 +52,11 @@ export function AboutCard() {
             {t('about.license')}
           </span>
           <span className="gf-about-footer-actions">
-            <Button variant="ghost" size="sm" onClick={handleCheckUpdateNow} disabled={checkingUpdate}>
-              {checkingUpdate ? t('about.checking') : t('about.checkForUpdates')}
+            <Button variant="ghost" size="sm" onClick={handleCheckUpdateNow} disabled={checkingAppUpdate}>
+              {checkingAppUpdate ? t('about.checking') : t('about.checkForUpdates')}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowDiag(true)}>
               {t('about.generateSupportBundle')}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={openFeedback}>
-              {t('feedback.sendFeedback')}
             </Button>
           </span>
         </div>

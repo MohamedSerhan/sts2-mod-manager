@@ -52,6 +52,7 @@ import {
   openLogFile,
   openModsFolder,
   pinMod,
+  previewLibraryModVersionRemoval,
   quickAddMod,
   quarantineLaunchFailures,
   readLogTail,
@@ -291,10 +292,16 @@ describe('useTauri wrappers — command names + arg shapes', () => {
         currentModVersionId: 'old-version',
         currentFolderName: 'BaseLib-old',
         currentModId: 'baselib',
+        currentInstallSource: null,
+        currentWorkshopItemId: null,
+        currentWorkshopUrl: null,
         selectedName: 'BaseLib',
         selectedModVersionId: 'new-version',
         selectedFolderName: 'BaseLib-new',
         selectedModId: 'baselib',
+        selectedInstallSource: null,
+        selectedWorkshopItemId: null,
+        selectedWorkshopUrl: null,
         applyToDisk: false,
       },
     });
@@ -312,10 +319,16 @@ describe('useTauri wrappers — command names + arg shapes', () => {
         currentModVersionId: 'old-version',
         currentFolderName: 'BaseLib-old',
         currentModId: 'baselib',
+        currentInstallSource: null,
+        currentWorkshopItemId: null,
+        currentWorkshopUrl: null,
         selectedName: 'BaseLib',
         selectedModVersionId: 'new-version',
         selectedFolderName: 'BaseLib-new',
         selectedModId: 'baselib',
+        selectedInstallSource: null,
+        selectedWorkshopItemId: null,
+        selectedWorkshopUrl: null,
         applyToDisk: true,
       },
     });
@@ -330,10 +343,16 @@ describe('useTauri wrappers — command names + arg shapes', () => {
         currentModVersionId: 'old-version',
         currentFolderName: 'BaseLib-old',
         currentModId: 'baselib',
+        currentInstallSource: null,
+        currentWorkshopItemId: null,
+        currentWorkshopUrl: null,
         selectedName: 'BaseLib',
         selectedModVersionId: 'new-version',
         selectedFolderName: 'BaseLib-new',
         selectedModId: 'baselib',
+        selectedInstallSource: null,
+        selectedWorkshopItemId: null,
+        selectedWorkshopUrl: null,
       },
     });
     await selectLibraryModVersion(
@@ -347,10 +366,16 @@ describe('useTauri wrappers — command names + arg shapes', () => {
         currentModVersionId: null,
         currentFolderName: null,
         currentModId: null,
+        currentInstallSource: null,
+        currentWorkshopItemId: null,
+        currentWorkshopUrl: null,
         selectedName: 'LegacyLib',
         selectedModVersionId: null,
         selectedFolderName: null,
         selectedModId: null,
+        selectedInstallSource: null,
+        selectedWorkshopItemId: null,
+        selectedWorkshopUrl: null,
       },
     });
     await selectProfileModVersion(
@@ -366,10 +391,16 @@ describe('useTauri wrappers — command names + arg shapes', () => {
         currentModVersionId: null,
         currentFolderName: null,
         currentModId: null,
+        currentInstallSource: null,
+        currentWorkshopItemId: null,
+        currentWorkshopUrl: null,
         selectedName: 'LegacyLib',
         selectedModVersionId: null,
         selectedFolderName: null,
         selectedModId: null,
+        selectedInstallSource: null,
+        selectedWorkshopItemId: null,
+        selectedWorkshopUrl: null,
         applyToDisk: false,
       },
     });
@@ -410,6 +441,80 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     });
   });
 
+  it('normalizes library version removal previews from backend wire fields', async () => {
+    registerInvokeHandler('preview_library_mod_version_removal', () => ({
+      target: {
+        modVersionId: 'mv-1',
+        name: 'Watcher',
+        version: '2.0.0',
+        folderName: 'Watcher-v2',
+        modId: 'watcher',
+        displayName: 'Watcher Display',
+        githubUrl: 'https://github.com/example/watcher',
+        nexusUrl: 'https://www.nexusmods.com/slaythespire2/mods/46',
+        installSource: 'workshop',
+        workshopItemId: '123',
+        workshopUrl: 'steam://url/123',
+        bundleMemberIds: ['BaseLib'],
+        installed: true,
+        installedEnabled: true,
+        cached: false,
+        pinned: false,
+        usedByProfiles: ['main'],
+      },
+      affectedProfiles: [{ profileName: 'Main Profile' }],
+      replacementCandidates: [{
+        modVersionId: 'mv-2',
+        name: 'Watcher',
+        version: '2.1.0',
+        folderName: 'Watcher-v21',
+      }],
+      active: false,
+      installed: true,
+      cached: false,
+      pinned: false,
+    }));
+
+    const preview = await previewLibraryModVersionRemoval('mv-1');
+
+    expect(lastCall()).toEqual({
+      cmd: 'preview_library_mod_version_removal',
+      args: { modVersionId: 'mv-1' },
+    });
+    expect(preview.target).toMatchObject({
+      mod_version_id: 'mv-1',
+      folder_name: 'Watcher-v2',
+      mod_id: 'watcher',
+      display_name: 'Watcher Display',
+      github_url: 'https://github.com/example/watcher',
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/46',
+      install_source: 'workshop',
+      workshop_item_id: '123',
+      workshop_url: 'steam://url/123',
+      bundle_member_ids: ['BaseLib'],
+      installed_enabled: true,
+      used_by_profiles: ['main'],
+    });
+    expect(preview.affected_profiles[0]).toMatchObject({
+      profile_id: 'Main Profile',
+      profile_name: 'Main Profile',
+    });
+    expect(preview.replacement_candidates[0]).toMatchObject({
+      mod_version_id: 'mv-2',
+      folder_name: 'Watcher-v21',
+    });
+    expect(preview.can_delete_directly).toBe(false);
+  });
+
+  it('rejects incomplete library version removal previews', async () => {
+    registerInvokeHandler('preview_library_mod_version_removal', () => ({
+      affectedProfiles: [],
+    }));
+
+    await expect(previewLibraryModVersionRemoval('missing-target'))
+      .rejects.toThrow('Version removal preview was incomplete.');
+  });
+
   it('mod-source linking carries folderName', async () => {
     registerInvokeFallback(() => null);
     await getModSources();
@@ -423,7 +528,7 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     await setModSource('BaseLib', 'github:foo/bar', 'BaseLib-folder');
     expect(lastCall().args!.folderName).toBe('BaseLib-folder');
 
-    await setModSourcesFull('BaseLib', 'foo/bar', null, 'BaseLib-folder');
+    await setModSourcesFull('BaseLib', 'foo/bar', null, null, 'BaseLib-folder');
     expect(lastCall()).toEqual({
       cmd: 'set_mod_sources_full',
       args: {
@@ -431,6 +536,7 @@ describe('useTauri wrappers — command names + arg shapes', () => {
         folderName: 'BaseLib-folder',
         githubRepo: 'foo/bar',
         nexusUrl: null,
+        workshopUrl: null,
       },
     });
 

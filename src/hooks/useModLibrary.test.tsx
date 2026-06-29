@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -8,7 +8,7 @@ import { useModLibrary } from './useModLibrary';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from '../lib/installPolicy';
-import type { ModInfo } from '../types';
+import type { ModAuditEntry, ModInfo } from '../types';
 
 /**
  * Direct unit tests for the useModLibrary hook (otherwise only covered
@@ -20,6 +20,7 @@ const importCalls = () => getInvokeCalls().filter((c) => c.cmd === 'install_mod_
 const quickAddCalls = () => getInvokeCalls().filter((c) => c.cmd === 'quick_add_mod');
 const membershipCalls = () => getInvokeCalls().filter((c) => c.cmd === 'set_profile_mod_membership');
 const updateModCalls = () => getInvokeCalls().filter((c) => c.cmd === 'update_mod');
+const snoozeCalls = () => getInvokeCalls().filter((c) => c.cmd === 'set_mod_snooze');
 
 /** Minimal ModInfo shape used by update tests. */
 function makeMod(overrides: Partial<ModInfo> = {}): ModInfo {
@@ -38,6 +39,31 @@ function makeMod(overrides: Partial<ModInfo> = {}): ModInfo {
     pinned: false,
     github_url: null,
     nexus_url: null,
+    ...overrides,
+  };
+}
+
+function auditEntry(overrides: Partial<ModAuditEntry> = {}): ModAuditEntry {
+  return {
+    mod_name: 'Route Planner',
+    folder_name: 'route_planner',
+    github_repo: 'llzcx/STS2-RoutePlanner',
+    manifest_version: '1.0.0',
+    installed_source_version: '1.0.0',
+    installed_version: '1.0.0',
+    latest_release_tag: 'v1.0.2',
+    latest_release_with_assets_tag: 'v1.0.2',
+    latest_has_assets: true,
+    needs_update: true,
+    asset_names: ['RoutePlanner.zip'],
+    releases_scanned: 1,
+    error: null,
+    nexus_url: null,
+    nexus_version: null,
+    nexus_update_available: false,
+    update_source: 'github',
+    github_auto_detected: false,
+    pinned: false,
     ...overrides,
   };
 }
@@ -350,6 +376,7 @@ describe('useModLibrary', () => {
           folderName: 'route_planner',
           githubRepo: 'auto/guess',
           nexusUrl: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+          workshopUrl: null,
         },
       });
     });
@@ -415,6 +442,89 @@ describe('useModLibrary', () => {
     await waitFor(() => {
       expect(openUrl).toHaveBeenCalledWith('https://www.nexusmods.com/slaythespire2/mods/1260?tab=files');
     });
+  });
+
+  it('handleInlineUpdate failure can skip the current advertised update', async () => {
+    const githubMod = makeMod({
+      name: 'Route Planner',
+      folder_name: 'route_planner',
+      github_url: 'https://github.com/llzcx/STS2-RoutePlanner',
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/1260',
+    });
+    registerInvokeHandler('audit_mod_versions', () => [auditEntry()]);
+    registerInvokeHandler('update_mod', () => {
+      throw new Error('Installed archive did not produce a parseable manifest version.');
+    });
+    registerInvokeHandler('set_mod_snooze', () => ({
+      snoozed_until_tag: 'v1.0.2',
+    }));
+    const user = userEvent.setup();
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.handleCheckUpdates();
+    });
+    await waitFor(() => expect(result.current.auditResults).toHaveLength(1));
+
+    let updatePromise!: Promise<void>;
+    act(() => {
+      updatePromise = result.current.tableActionProps.onUpdate(githubMod);
+    });
+
+    const dialog = await screen.findByRole('dialog', {
+      name: /Could not install update for Route Planner/i,
+    });
+    expect(within(dialog).getByText(/Reason: Installed archive did not produce a parseable manifest version\./i))
+      .toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /Skip this update/i }));
+    await act(async () => {
+      await updatePromise;
+    });
+
+    expect(snoozeCalls()).toHaveLength(1);
+    expect(snoozeCalls()[0].args).toMatchObject({
+      modName: 'Route Planner',
+      folderName: 'route_planner',
+      latestTag: 'v1.0.2',
+    });
+    expect(openUrl).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Skipped this failed update for 'Route Planner'/i)).toBeInTheDocument();
+  });
+
+  it('handleInlineUpdate keep showing leaves the update unskipped', async () => {
+    const githubMod = makeMod({
+      name: 'Route Planner',
+      folder_name: 'route_planner',
+      github_url: 'https://github.com/llzcx/STS2-RoutePlanner',
+      nexus_url: null,
+    });
+    registerInvokeHandler('audit_mod_versions', () => [auditEntry()]);
+    registerInvokeHandler('update_mod', () => {
+      throw new Error('network dropped');
+    });
+    const user = userEvent.setup();
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.handleCheckUpdates();
+    });
+    await waitFor(() => expect(result.current.auditResults).toHaveLength(1));
+
+    let updatePromise!: Promise<void>;
+    act(() => {
+      updatePromise = result.current.tableActionProps.onUpdate(githubMod);
+    });
+
+    const dialog = await screen.findByRole('dialog', {
+      name: /Could not install update for Route Planner/i,
+    });
+    await user.click(within(dialog).getByRole('button', { name: /Keep showing/i }));
+    await act(async () => {
+      await updatePromise;
+    });
+
+    expect(snoozeCalls()).toHaveLength(0);
+    expect(await screen.findByText(/Update failed for 'Route Planner'.*network dropped/i)).toBeInTheDocument();
   });
 
   it('handleInlineUpdate reports when the Nexus fallback cannot open after a GitHub update failure', async () => {

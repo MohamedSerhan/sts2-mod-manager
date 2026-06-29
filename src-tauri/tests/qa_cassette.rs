@@ -63,6 +63,7 @@ fn make_mod(name: &str, version: &str, folder: &str) -> ModInfo {
         tags: Vec::new(),
         bundle_members: vec![],
         bundle_member_ids: vec![],
+        ..Default::default()
     }
 }
 

@@ -103,13 +103,17 @@ const CASSETTE_DIR = resolve(REPO_ROOT, 'qa', 'fixtures');
  */
 let FIXTURE_DIRS = null; // { root, game, config, cache } — populated at startup
 
+const WORKSHOP_ITEM_ID = '3747602295';
+const WORKSHOP_MOD_NAME = 'RitsuLib';
+
 function makeFixtureGameTree() {
   const root = mkdtempSync(join(tmpdir(), 'sts2mm-fixture-'));
-  const game = join(root, 'game');
   const config = join(root, 'config');
   const cache = join(root, 'cache');
-  seedFixtureGameTree({ game, config, cache });
-  return { root, game, config, cache };
+  const steam = join(root, 'steam');
+  const game = join(steam, 'steamapps', 'common', 'Slay the Spire 2');
+  seedFixtureGameTree({ game, config, cache, steam });
+  return { root, game, config, cache, steam };
 }
 
 /**
@@ -119,7 +123,7 @@ function makeFixtureGameTree() {
  * without churning the tempdir paths the running app has captured via
  * env vars (STS2_FIXTURE_GAME_PATH / STS2_CONFIG_DIR / STS2_CACHE_DIR).
  */
-function seedFixtureGameTree({ game, config, cache }) {
+function seedFixtureGameTree({ game, config, cache, steam }) {
   for (const d of [game, config, cache, join(game, 'mods'), join(game, 'mods_disabled')]) {
     mkdirSync(d, { recursive: true });
   }
@@ -138,11 +142,15 @@ function seedFixtureGameTree({ game, config, cache }) {
   // audit unless CASSETTE_MODE is set.)
   seedQaTestMod(join(game, 'mods', 'QaTestMod'));
   seedUpToDateMod(join(game, 'mods', 'UpToDateMod'));
+  seedStoredRitsuLib(join(game, 'mods_disabled', 'STS2-RitsuLib-v0.2.26'));
   // WalkbackMod is deliberately NOT seeded here — it would be flagged
   // "needs update" by the audit and break specAuditAgainstCassettesShows
   // OnePending's "1 update" count. The repair walk-back spec seeds it
   // on demand via seedWalkbackMod() and triggers a re-scan by nav'ing
   // to Mods after writing.
+  if (steam) {
+    seedWorkshopFixtureTree(steam);
+  }
 }
 
 /**
@@ -170,6 +178,7 @@ function rebuildFixtureTree() {
     game: FIXTURE_DIRS.game,
     config: FIXTURE_DIRS.config,
     cache: FIXTURE_DIRS.cache,
+    steam: FIXTURE_DIRS.steam,
   });
 }
 
@@ -224,6 +233,61 @@ function seedUpToDateMod(dir) {
     ),
   );
   writeFileSync(join(dir, 'UpToDateMod.dll'), Buffer.from([0]));
+}
+
+function seedWorkshopFixtureTree(steam) {
+  const steamapps = join(steam, 'steamapps');
+  const workshopMeta = join(steamapps, 'workshop');
+  const workshopRoot = join(workshopMeta, 'content', '2868840');
+  const itemDir = join(workshopRoot, WORKSHOP_ITEM_ID);
+  mkdirSync(itemDir, { recursive: true });
+  mkdirSync(workshopMeta, { recursive: true });
+  writeFileSync(
+    join(steamapps, 'libraryfolders.vdf'),
+    `"libraryfolders"\n{\n  "0"\n  {\n    "path" "${steam.replace(/\\/g, '\\\\')}"\n  }\n}\n`,
+  );
+  writeFileSync(
+    join(workshopMeta, 'appworkshop_2868840.acf'),
+    `"AppWorkshop"\n{\n  "appid" "2868840"\n  "NeedsUpdate" "0"\n  "NeedsDownload" "0"\n  "WorkshopItemsInstalled"\n  {\n    "${WORKSHOP_ITEM_ID}"\n    {\n      "size" "2048"\n      "timeupdated" "1782640939"\n      "manifest" "7697508620998582885"\n    }\n  }\n}\n`,
+  );
+  writeFileSync(
+    join(itemDir, 'mod_manifest.json'),
+    JSON.stringify(
+      {
+        id: 'STS2-RitsuLib',
+        name: WORKSHOP_MOD_NAME,
+        version: '0.4.41',
+        min_game_version: '0.105.0',
+        author: 'QA Workshop',
+        description: 'Smoke fixture: Steam Workshop-owned mod.',
+        dependencies: [],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(itemDir, 'RitsuLib.dll'), Buffer.from([0]));
+}
+
+function seedStoredRitsuLib(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'mod_manifest.json'),
+    JSON.stringify(
+      {
+        id: 'STS2-RitsuLib',
+        name: WORKSHOP_MOD_NAME,
+        version: '0.2.26',
+        min_game_version: '0.105.0',
+        author: 'QA Local',
+        description: 'Smoke fixture: stored local sibling for source-aware Workshop version selection.',
+        dependencies: [],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(dir, 'RitsuLib.dll'), Buffer.from([0]));
 }
 
 function seedAutoDetectedSourceMod(dir) {
@@ -417,7 +481,9 @@ function startTauriDriver() {
     env.STS2_FIXTURE_GAME_PATH = FIXTURE_DIRS.game;
     env.STS2_CONFIG_DIR = FIXTURE_DIRS.config;
     env.STS2_CACHE_DIR = FIXTURE_DIRS.cache;
+    env.STS2_FIXTURE_STEAM_PATH = FIXTURE_DIRS.steam;
     console.error(`[smoke] fixture game tree: ${FIXTURE_DIRS.game}`);
+    console.error(`[smoke] fixture Steam tree: ${FIXTURE_DIRS.steam}`);
   }
   if (CASSETTE_MODE) {
     env.STS2_CASSETTE_DIR = CASSETTE_DIR;
@@ -568,19 +634,28 @@ async function specDisplayNameOverrideUpdatesRow(driver) {
   );
   const displayName = `QA Friendly ${Date.now().toString(36)}`;
   await input.sendKeys(displayName);
+  await driver.wait(
+    async () => (await input.getAttribute('value')) === displayName,
+    5_000,
+    'Source editor display-name input did not receive the smoke value',
+  );
 
-  const save = await waitForElement(
+  await clickLocatedByScript(
     driver,
     By.xpath("//*[contains(@class,'gf-src-edit')]//button[contains(., 'Save sources')]"),
     'Source editor Save sources button',
   );
-  await save.click();
+  await driver.wait(
+    async () => (await driver.findElements(By.css('.gf-src-edit'))).length === 0,
+    20_000,
+    'Source editor did not close after saving display-name override',
+  );
 
   await waitForElement(
     driver,
     By.xpath(`//h3[contains(@class,'gf-profile-library-title') and normalize-space(.)='${displayName}']`),
     'row title after display-name edit',
-    15_000,
+    20_000,
   );
 }
 
@@ -642,12 +717,11 @@ async function specAutoDetectedGitHubSavePromotesSource(driver) {
   const githubValue = await githubInput.getAttribute('value');
   assertEqual(githubValue, 'qa-fixture/test-mod', 'auto-detected GitHub value shown in Source Editor');
 
-  const save = await waitForElement(
+  await clickLocated(
     driver,
     By.xpath("//*[contains(@class,'gf-src-edit')]//button[contains(., 'Save sources')]"),
     'Source editor Save sources button',
   );
-  await save.click();
 
   await driver.wait(
     () => {
@@ -771,13 +845,10 @@ async function specToggleMovesQaTestModToDisabled(driver) {
   // is applied conditionally, parent class is hover:bg-surface-hover
   // which doesn't help). The toggle is a `[role=switch]` from the
   // Toggle component. We scope by climbing from the QaTestMod label.
-  const toggle = await waitForElement(
-    driver,
-    By.xpath(
-      "//*[normalize-space(text())='QaTestMod']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']",
-    ),
-    'QaTestMod toggle switch',
+  const toggleLocator = By.xpath(
+    "//*[normalize-space(text())='QaTestMod']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']",
   );
+  const toggle = await waitForElement(driver, toggleLocator, 'QaTestMod toggle switch');
   // It should be checked at start (the fixture seeded an enabled mod).
   const before = await toggle.getAttribute('aria-checked');
   if (before !== 'true') {
@@ -802,11 +873,17 @@ async function specToggleMovesQaTestModToDisabled(driver) {
     throw new Error(`mods/QaTestMod still exists after toggle-off — move was a copy?`);
   }
 
-  // And the UI matches the disk state.
-  const after = await toggle.getAttribute('aria-checked');
-  if (after !== 'false') {
-    throw new Error(`expected QaTestMod toggle aria-checked=false after click, got ${after}`);
-  }
+  // And the UI matches the disk state. Re-query because React may replace the
+  // switch while the async backend move is settling.
+  await driver.wait(async () => {
+    try {
+      const current = await driver.findElement(toggleLocator);
+      return (await current.getAttribute('aria-checked')) === 'false';
+    } catch (error) {
+      if (error?.name === 'StaleElementReferenceError') return false;
+      throw error;
+    }
+  }, 10_000, 'QaTestMod toggle did not settle to aria-checked=false after disk move');
 }
 
 /**
@@ -912,12 +989,11 @@ async function specDeleteUpToDateMod(driver) {
 
   // 1.7.0: delete is a dedicated trash button on each Mod Library row (the
   // kebab holds Freeze/Edit/etc.). Its aria-label is "Remove <mod>".
-  const trash = await waitForElement(
+  await clickLocated(
     driver,
     By.xpath("//button[@aria-label='Remove UpToDateMod']"),
     'UpToDateMod delete (trash) button',
   );
-  await trash.click();
 
   // Confirm modal: title contains "Delete", primary action button
   // text is "Delete". Click it.
@@ -1202,10 +1278,16 @@ async function specDisabledLibraryExtrasArePreserved(driver) {
     'QaTestMod row after fixture refresh',
     10_000,
   );
+  await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='UpToDateMod']"),
+    'UpToDateMod row after fixture refresh',
+    10_000,
+  );
 
   // Step 2: create + activate a fresh modpack.
   await navToModpacks(driver);
-  await createModpackNamed(driver, modpackName);
+  await createModpackNamed(driver, modpackName, { minSelected: 2 });
   await waitForToastsToClear(driver);
   await activateModpack(driver, modpackName);
   await waitForToastsToClear(driver);
@@ -1240,22 +1322,22 @@ async function specDisabledLibraryExtrasArePreserved(driver) {
     throw new Error(`orphan seed failed: ${orphanDir} does not exist after mkdir/writeFile`);
   }
 
-  // Step 5: nav back to Modpacks. Disabled library extras should not
-  // render a drift banner with a Repair action.
+  // Step 5: nav back to Modpacks and ask the live backend for drift.
+  // Disabled library extras may coexist with unrelated stateful smoke drift,
+  // but OrphanMod itself must not appear in any drift bucket.
   await navToModpacks(driver);
-  const repairButtonLocator = By.xpath(
-    "//*[contains(@class,'gf-banner') and contains(@class,'gf-banner-warn')]" +
-      "//button[normalize-space(.)='Repair']",
-  );
-
-  // Give the drift effect a moment to run, then assert there is no
-  // disabled-library drift and the folder is still preserved on disk.
-  await delay(2_000);
-  const repairButtons = await driver.findElements(repairButtonLocator);
-  if (repairButtons.length > 0) {
+  await delay(500);
+  const drift = await invokeTauri(driver, 'get_profile_drift', { name: modpackName });
+  const driftNames = [
+    ...(drift?.added ?? []),
+    ...(drift?.removed ?? []),
+    ...(drift?.toggled ?? []),
+    ...((drift?.version_changed ?? []).map((entry) => entry.name)),
+  ];
+  if (driftNames.includes('OrphanMod')) {
     throw new Error(
       `disabled library regression: ${orphanDir} surfaced as profile drift; ` +
-        'disabled mods outside the selected profile should be preserved and ignored',
+        `disabled mods outside the selected profile should be preserved and ignored. Drift: ${JSON.stringify(drift)}`,
     );
   }
 
@@ -1313,12 +1395,41 @@ async function waitForToastsToClear(driver) {
   );
 }
 
+function loadProfileByName(profileName) {
+  const profilesDir = join(FIXTURE_DIRS.config, 'profiles');
+  const profilePath = readdirSync(profilesDir)
+    .filter((name) => name.endsWith('.json'))
+    .map((name) => join(profilesDir, name))
+    .find((candidatePath) => {
+      try {
+        const raw = readFileSync(candidatePath, 'utf8');
+        const candidateProfile = JSON.parse(raw.replace(/^\uFEFF/, ''));
+        return candidateProfile.name === profileName;
+      } catch {
+        return false;
+      }
+    });
+  if (!profilePath) {
+    throw new Error(`Failed to find created modpack named "${profileName}" under ${profilesDir}`);
+  }
+  try {
+    return {
+      path: profilePath,
+      profile: JSON.parse(readFileSync(profilePath, 'utf8').replace(/^\uFEFF/, '')),
+    };
+  } catch (e) {
+    throw new Error(
+      `Failed to read/parse created modpack at ${profilePath}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+}
+
 /**
  * Create a modpack through the 1.7.0 guided wizard: Modpacks tab ->
  * "Create modpack" -> "Start from my active mods" (auto-advances) -> Next ->
  * Continue anyway -> name -> Create modpack. Waits for the new modpack to appear.
  */
-async function createModpackNamed(driver, modpackName) {
+async function createModpackNamed(driver, modpackName, { minSelected = 1 } = {}) {
   await navToModpacks(driver);
   const entry = await waitForElement(
     driver,
@@ -1335,6 +1446,12 @@ async function createModpackNamed(driver, modpackName) {
     'wizard "Start from my active mods" strategy tile',
   );
   await strategy.click();
+  await driver.wait(async () => {
+    const selected = await driver.findElements(
+      By.css(".gf-create-wizard-list input[type='checkbox']:checked"),
+    );
+    return selected.length >= minSelected;
+  }, 10_000, `wizard did not select ${minSelected} active fixture mod(s) before Next`);
   // Step 2 (choose mods) → Next.
   const next = await waitForElement(
     driver,
@@ -1432,8 +1549,63 @@ function assertEqual(actual, expected, label) {
 }
 
 async function waitForElement(driver, locator, label, timeoutMs = 10_000) {
-  await driver.wait(until.elementLocated(locator), timeoutMs, `Timed out waiting for ${label}`);
-  return driver.findElement(locator);
+  return driver.wait(async () => {
+    const candidates = await driver.findElements(locator);
+    for (const candidate of candidates) {
+      try {
+        if (await candidate.isDisplayed()) return candidate;
+      } catch (error) {
+        if (error?.name === 'StaleElementReferenceError') return false;
+        throw error;
+      }
+    }
+    return false;
+  }, timeoutMs, `Timed out waiting for ${label}`);
+}
+
+async function clickLocated(driver, locator, label, timeoutMs = 10_000) {
+  await driver.wait(async () => {
+    const candidates = await driver.findElements(locator);
+    for (const candidate of candidates) {
+      try {
+        if (!(await candidate.isDisplayed()) || !(await candidate.isEnabled())) continue;
+        await driver.executeScript(
+          'arguments[0].scrollIntoView({ block: "center", inline: "center" });',
+          candidate,
+        );
+        await candidate.click();
+        return true;
+      } catch (error) {
+        if (error?.name === 'StaleElementReferenceError') return false;
+        if (error?.name === 'ElementClickInterceptedError') {
+          await driver.executeScript('arguments[0].click();', candidate);
+          return true;
+        }
+        throw error;
+      }
+    }
+    return false;
+  }, timeoutMs, `Timed out clicking ${label}`);
+}
+
+async function clickLocatedByScript(driver, locator, label, timeoutMs = 10_000) {
+  await driver.wait(async () => {
+    const candidates = await driver.findElements(locator);
+    for (const candidate of candidates) {
+      try {
+        if (!(await candidate.isDisplayed()) || !(await candidate.isEnabled())) continue;
+        await driver.executeScript(
+          'arguments[0].scrollIntoView({ block: "center", inline: "center" }); arguments[0].click();',
+          candidate,
+        );
+        return true;
+      } catch (error) {
+        if (error?.name === 'StaleElementReferenceError') return false;
+        throw error;
+      }
+    }
+    return false;
+  }, timeoutMs, `Timed out clicking ${label}`);
 }
 
 async function invokeTauri(driver, cmd, args = {}) {
@@ -1724,6 +1896,92 @@ async function specRepairWalkback(driver) {
 }
 
 /**
+ * Workshop v1 contract: Workshop-owned mods show in the regular Library and
+ * saved modpacks keep a Steam reference instead of copying or moving files
+ * into STS2's manager-owned mods folders.
+ */
+async function specWorkshopModpackReferenceStaysSteamOwned(driver) {
+  const modpackName = `QA Workshop ${Date.now().toString(36)}`;
+  await waitForToastsToClear(driver);
+  await navToMods(driver);
+
+  const refreshBtn = await waitForElement(
+    driver,
+    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+    'Mods toolbar Refresh button',
+  );
+  await refreshBtn.click();
+
+  await waitForElement(
+    driver,
+    By.xpath(`//*[normalize-space(text())='${WORKSHOP_MOD_NAME}']`),
+    'Workshop RitsuLib row',
+    30_000,
+  );
+  await waitForElement(
+    driver,
+    By.xpath(
+      `//*[normalize-space(text())='${WORKSHOP_MOD_NAME}']/ancestor::*[contains(@class,'gf-profile-library-row') or contains(@class,'gf-card')][1]//*[contains(., 'Steam Workshop')]`,
+    ),
+    'Steam Workshop badge on RitsuLib row',
+  );
+
+  await invokeTauri(driver, 'create_profile', { name: modpackName });
+  const { path: profilePath, profile } = loadProfileByName(modpackName);
+  if (!Array.isArray(profile.mods)) {
+    throw new Error(
+      `Profile ${profilePath} has no mods array. Keys: ${Object.keys(profile).join(', ')}`,
+    );
+  }
+
+  const localEntry = profile.mods.find((m) => m.name === 'QaTestMod' || m.folder_name === 'QaTestMod');
+  if (!localEntry) {
+    throw new Error(`Workshop mixed-profile smoke lost the local QaTestMod entry in ${profilePath}`);
+  }
+
+  const expectedUrl = `https://steamcommunity.com/sharedfiles/filedetails/?id=${WORKSHOP_ITEM_ID}`;
+  const workshopEntry = profile.mods.find(
+    (m) =>
+      m.source === expectedUrl ||
+      m.folder_name === WORKSHOP_ITEM_ID ||
+      m.workshop_item_id === WORKSHOP_ITEM_ID,
+  );
+  if (!workshopEntry) {
+    throw new Error(
+      `Workshop mixed-profile smoke did not save the Steam-owned RitsuLib entry in ${profilePath}. ` +
+        `Profile mods: ${JSON.stringify(profile.mods)}`,
+    );
+  }
+  if (workshopEntry.source !== expectedUrl) {
+    throw new Error(
+      `Workshop profile entry should reference ${expectedUrl}, got ${JSON.stringify(workshopEntry)}`,
+    );
+  }
+
+  const workshopDir = join(
+    FIXTURE_DIRS.steam,
+    'steamapps',
+    'workshop',
+    'content',
+    '2868840',
+    WORKSHOP_ITEM_ID,
+  );
+  if (!existsSync(join(workshopDir, 'mod_manifest.json'))) {
+    throw new Error(`Workshop-owned fixture was removed or moved from ${workshopDir}`);
+  }
+  for (const candidate of [
+    join(FIXTURE_DIRS.game, 'mods', WORKSHOP_ITEM_ID),
+    join(FIXTURE_DIRS.game, 'mods', WORKSHOP_MOD_NAME),
+    join(FIXTURE_DIRS.game, 'mods_disabled', WORKSHOP_ITEM_ID),
+    join(FIXTURE_DIRS.game, 'mods_disabled', WORKSHOP_MOD_NAME),
+  ]) {
+    if (existsSync(candidate)) {
+      throw new Error(`Workshop-owned files were copied or moved into manager storage: ${candidate}`);
+    }
+  }
+}
+
+/**
  * Regression spec for issue #21: when a mod's `min_game_version` is above the
  * current game version, a modpack created from the active install must NOT
  * include it in the saved profile JSON. The bug: automatic snapshot-style
@@ -1915,6 +2173,7 @@ const STATE_SPECS = [
   ['modpack switch preserves freeze state (v1.3.1 contract)', specModpackSwitchPreservesFreeze],
   ['#22: toggle state sticky across modpack switch', specToggleStickyAcrossModpackSwitch],
   ['#20: disabled library extras are preserved', specDisabledLibraryExtrasArePreserved],
+  ['Steam Workshop references stay Steam-owned in mixed modpacks', specWorkshopModpackReferenceStaysSteamOwned],
   ['#21: incompatible mods stay out of created modpack', specIncompatibleModAbsentFromCreatedModpack],
 ];
 

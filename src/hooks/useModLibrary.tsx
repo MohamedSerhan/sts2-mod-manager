@@ -25,6 +25,7 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useClipboard } from './useClipboard';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useFailedUpdateRecovery } from './useFailedUpdateRecovery';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { SourceEditor } from '../components/SourceEditor';
@@ -65,6 +66,10 @@ function displayNameFor(mod: ModInfo): string {
 
 function modInfoRowKey(mod: ModInfo): string {
   return mod.mod_version_id ?? mod.folder_name ?? mod.mod_id ?? mod.name;
+}
+
+function isWorkshopMod(mod: ModInfo): boolean {
+  return mod.install_source === 'steam_workshop';
 }
 
 function ghRepoFromUrl(url: string | null): string {
@@ -134,6 +139,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   } = useApp();
   const toast = useToast();
   const { copy: copyToClipboard } = useClipboard();
+  const promptFailedUpdateSkip = useFailedUpdateRecovery();
 
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showAutoDetect, setShowAutoDetect] = useState(false);
@@ -196,7 +202,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     // pack: toggle_mod guards on the game running (and can fail the move) while
     // the membership write doesn't — toggling first keeps disk + manifest in
     // sync instead of recording a membership the live folder never received.
-    if ((activeProfileId === targetPack || (!activeProfileId && activeProfile === targetPack)) && !mod.enabled) {
+    if ((activeProfileId === targetPack || (!activeProfileId && activeProfile === targetPack)) && !mod.enabled && !isWorkshopMod(mod)) {
       await toggleMod(mod.name, mod.folder_name ?? null, true);
     }
     await setProfileModMembership(
@@ -206,13 +212,13 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       mod.folder_name ?? null,
       mod.mod_id ?? null,
       true,
-      mod.source ?? mod.github_url ?? mod.nexus_url ?? null,
+      mod.workshop_url ?? mod.source ?? mod.github_url ?? mod.nexus_url ?? null,
     );
     await onTargetPackChanged?.();
   }
 
   function sourceHintForMod(mod: ModInfo): string | null {
-    return mod.source ?? mod.github_url ?? mod.nexus_url ?? null;
+    return mod.workshop_url ?? mod.source ?? mod.github_url ?? mod.nexus_url ?? null;
   }
 
   async function syncTargetPackUpdatedMods(updated: ModInfo[]) {
@@ -289,6 +295,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function handleInlineUpdate(mod: ModInfo) {
+    if (isWorkshopMod(mod)) {
+      toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
+      return;
+    }
     const key = modInfoRowKey(mod);
     if (updatingKeyRef.current) return;
     updatingKeyRef.current = key;
@@ -319,6 +329,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
           mod.name,
           cleanOptional(ghRepoFromUrl(mod.github_url)),
           mod.nexus_url ?? null,
+          mod.workshop_url ?? null,
           mod.folder_name,
         );
       }
@@ -333,6 +344,19 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
       );
     } catch (e) {
       const updateErrMsg = e instanceof Error ? e.message : String(e);
+      const audit = auditByKey.get(key)
+        ?? (mod.folder_name ? auditByKey.get(mod.folder_name) : undefined)
+        ?? (mod.mod_id ? auditByKey.get(mod.mod_id) : undefined)
+        ?? auditByKey.get(mod.name);
+      const skipped = await promptFailedUpdateSkip({
+        modName: mod.name,
+        displayName: displayNameFor(mod),
+        folderName: mod.folder_name,
+        skipVersion: audit?.latest_release_with_assets_tag ?? audit?.nexus_version ?? null,
+        error: updateErrMsg,
+        onSkipped: () => refreshAuditEntries([auditTargetForMod(mod)]),
+      });
+      if (skipped) return;
       toast.error(t('mods.toast.updateFailed', { name: mod.name, error: updateErrMsg }));
       if (mod.nexus_url) {
         try {
@@ -375,6 +399,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleRepair(mod: ModInfo) {
     /* v8 ignore start */
+    if (isWorkshopMod(mod)) {
+      toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
+      return;
+    }
     if (!mod.github_url || mod.github_auto_detected) {
       toast.error(t('mods.toast.repairNoGithub', { name: mod.name }));
       return;
@@ -403,6 +431,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleRollback(mod: ModInfo) {
     /* v8 ignore start */
+    if (isWorkshopMod(mod)) {
+      toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
+      return;
+    }
     if (!mod.github_url || mod.github_auto_detected) {
       toast.error(t('mods.rollbackNoSource', { name: mod.name }));
       return;
@@ -435,6 +467,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function handleDelete(mod: ModInfo) {
+    if (isWorkshopMod(mod)) {
+      toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
+      return;
+    }
     const ok = await confirm({
       title: t('mods.deleteConfirmTitle', { name: mod.name }),
       body: t('mods.deleteConfirmBody'),
@@ -595,6 +631,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   function handleAutoDetectSource(mod: ModInfo) {
+    if (isWorkshopMod(mod)) {
+      toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
+      return;
+    }
     if (mod.bundle_members && mod.bundle_members.length > 0) {
       toast.info(t('mods.toast.autoDetectBundleUnsupported', { name: mod.display_name?.trim() || mod.name }));
       return;
@@ -693,18 +733,20 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
         onClose={() => setSourceEditorRowKey(null)}
         onClear={() => handleClearSource(mod.name, mod.folder_name)}
         onFindGithub={() => handleFindGithubFromNexus(mod)}
-        onSave={async (gh, nx, note, customUrl, displayName, displayDescription, tagsInput) => {
+        onSave={async (gh, nx, workshopUrl, note, customUrl, displayName, displayDescription, tagsInput) => {
           try {
             setSavingSource(true);
             let manifestChanged = false;
             const nextGithub = cleanOptional(gh);
             const nextNexus = cleanOptional(nx);
+            const nextWorkshop = cleanOptional(workshopUrl);
             if (
               nextGithub !== (cleanOptional(ghRepoFromUrl(mod.github_url)))
               || nextNexus !== (mod.nexus_url ?? null)
+              || nextWorkshop !== (mod.workshop_url ?? null)
               || (!!nextGithub && !!mod.github_auto_detected)
             ) {
-              await setModSourcesFull(mod.name, nextGithub, nextNexus, mod.folder_name);
+              await setModSourcesFull(mod.name, nextGithub, nextNexus, nextWorkshop, mod.folder_name);
               manifestChanged = true;
             }
 

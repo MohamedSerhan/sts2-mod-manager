@@ -623,6 +623,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
             display_description: None,
             bundle_members,
             bundle_member_ids,
+            ..Default::default()
         });
     }
 
@@ -680,6 +681,7 @@ pub fn install_mod_from_zip(zip_path: &Path, mods_path: &Path) -> Result<ModInfo
                 display_description: None,
                 bundle_members: vec![],
                 bundle_member_ids: vec![],
+                ..Default::default()
             })
         }
     }
@@ -1748,6 +1750,7 @@ mod config_snapshot_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         };
         let new_folder = mods_path.join("MyMod");
         fs::create_dir_all(&new_folder).unwrap();

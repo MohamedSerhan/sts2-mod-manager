@@ -44,6 +44,7 @@ import { LocalizedAppErrorBoundary, RendererErrorReporter } from './components/A
 import { recordModpackLaunch } from './lib/modpackUsage';
 import { profileDisplayName, safeProfileDisplayName } from './lib/profileDisplay';
 import { useResizableSidebar } from './hooks/useResizableSidebar';
+import { useFailedUpdateRecovery } from './hooks/useFailedUpdateRecovery';
 import {
   loadNavigationLayout,
   NAVIGATION_LAYOUT_CHANGE_EVENT,
@@ -54,7 +55,7 @@ import { ModsView } from './views/Mods';
 import { ProfilesView } from './views/Profiles';
 import { SettingsView } from './views/Settings';
 import { launchGame, launchVanilla, getLaunchHealth, installAppUpdate, installModFromFile, listProfiles, openExternalUrl, resolveLaunchHealthBlockers, setProfileModMembership, toggleMod } from './hooks/useTauri';
-import type { LaunchHealthReport, Profile } from './types';
+import type { LaunchHealthReport, ModAuditTarget, Profile } from './types';
 
 // View IDs include legacy ones ('browse-mods', 'browse-modpacks')
 // so internal handlers + deep-links that pre-date the 1.7.0 IA
@@ -118,13 +119,15 @@ function AppInner() {
   const { t } = useTranslation();
   const [activeView, setActiveView] = useState<View>('home');
   const [navigationLayout, setNavigationLayout] = useState<NavigationLayout>(() => loadNavigationLayout());
-  const { gameInfo, mods, refreshAll, activeProfile, activeProfileId, gameRunning, subUpdates, refreshSubUpdates } = useApp();
+  const { gameInfo, mods, refreshAll, refreshAuditEntries, activeProfile, activeProfileId, gameRunning, subUpdates, refreshSubUpdates } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
+  const promptFailedUpdateSkip = useFailedUpdateRecovery();
   const sidebar = useResizableSidebar();
   const [dragOver, setDragOver] = useState(false);
   const [appUpdate, setAppUpdate] = useState<Update | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [checkingAppUpdate, setCheckingAppUpdate] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
@@ -268,8 +271,41 @@ function AppInner() {
       }
       refreshAll();
     });
-    const unlisten2 = listen<{ file_name: string; error: string }>('mod-auto-install-failed', (event) => {
-      toast.error(t('app.toast.installFailed', { file: event.payload.file_name, error: event.payload.error }));
+    const unlisten2 = listen<{
+      file_name: string;
+      error: string;
+      mod_name?: string | null;
+      folder_name?: string | null;
+      mod_id?: string | null;
+      mod_version_id?: string | null;
+      skip_version?: string | null;
+    }>('mod-auto-install-failed', async (event) => {
+      const {
+        file_name,
+        error,
+        mod_name,
+        folder_name,
+        mod_id,
+        mod_version_id,
+        skip_version,
+      } = event.payload;
+      if (mod_name && skip_version) {
+        const target: ModAuditTarget = {
+          mod_version_id: mod_version_id ?? null,
+          folder_name: folder_name ?? null,
+          mod_id: mod_id ?? null,
+          name: mod_name,
+        };
+        const skipped = await promptFailedUpdateSkip({
+          modName: mod_name,
+          folderName: folder_name ?? null,
+          skipVersion: skip_version,
+          error,
+          onSkipped: () => refreshAuditEntries([target]),
+        });
+        if (skipped) return;
+      }
+      toast.error(t('app.toast.installFailed', { file: file_name, error }));
     });
     // Emitted by update_mod / repair_mod / update_all_mods whenever an
     // update carried forward user-edited config files. The downloads
@@ -489,6 +525,25 @@ function AppInner() {
   }, []);
 
   const RELEASES_URL = 'https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest';
+
+  async function handleCheckAppUpdateNow() {
+    if (checkingAppUpdate) return;
+    setCheckingAppUpdate(true);
+    try {
+      const update = await check();
+      if (!update) {
+        setAppUpdate(null);
+        toast.success(t('about.latestVersion'));
+        return;
+      }
+      setAppUpdate(update);
+      setUpdateDismissed(false);
+    } catch (e) {
+      toast.error(t('about.updateCheckFailed', { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setCheckingAppUpdate(false);
+    }
+  }
 
   async function handleInstallUpdate() {
     if (!appUpdate || updateInstalling) return;
@@ -1147,6 +1202,8 @@ function AppInner() {
                 }}
                 onLaunch={handleLaunchGame}
                 onBlockingOperationChange={setBlockingModpackOperation}
+                onCheckForAppUpdate={handleCheckAppUpdateNow}
+                checkingAppUpdate={checkingAppUpdate}
               />
             )}
             {/* Modpacks view. The legacy 'browse-modpacks' view-id
@@ -1185,6 +1242,8 @@ function AppInner() {
               <SettingsView
                 goToGeneralSignal={settingsGeneralSignal}
                 openRowMenuSettingsSignal={openRowMenuSettingsSignal}
+                onCheckForAppUpdate={handleCheckAppUpdateNow}
+                checkingAppUpdate={checkingAppUpdate}
               />
             )}
 

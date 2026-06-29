@@ -27,11 +27,6 @@ releases them at once.
    - Publishes a GitHub Release with all bundles attached (NSIS, MSI, DMG, deb, rpm, AppImage, portable zip).
    - `publish-updater` assembles `latest.json` for the in-app Tauri updater (NSIS / MSI based).
    - `format-release` rewrites the release notes with download links.
-   - `publish-nexus` uploads the Windows portable zip, the macOS `.dmg`, and the Linux `.AppImage` to Nexus Mods (mod 856) — one matrix leg per file, each into its own Nexus file group. A leg whose group-id secret is unset is skipped, so mac/Linux stay inert until the one-time setup below is done.
-
-A failed `publish-nexus` does not block the GitHub Release or the in-app updater (the jobs run in parallel). Re-run just that job from the Actions UI if Nexus is flaky.
-
-The portable zip ships to Nexus specifically because the NSIS self-extracting installer triggers AV/SmartScreen heuristics that a bare `.exe` does not. NSIS / MSI continue to ship on the GitHub Release because the in-app updater depends on them.
 
 ## Hard gates
 
@@ -56,42 +51,11 @@ Set these once at <https://github.com/MohamedSerhan/sts2-mod-manager/settings/se
 |---|---|---|
 | `TAURI_SIGNING_PRIVATE_KEY` | `build` | Tauri minisign key (already configured). |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | `build` | Password for the above (already configured). |
-| `NEXUS_API_KEY` | `publish-nexus` | Generate or copy the **Personal API Key** at <https://www.nexusmods.com/users/myaccount?tab=api>. Treat like a password. |
-| `NEXUS_FILE_GROUP_ID` | `publish-nexus` (Windows) | On the mod page, Files tab → "API Info" → copy the integer. Tied to mod 856's Windows portable zip. |
-| `NEXUS_FILE_GROUP_ID_MACOS` | `publish-nexus` (macOS) | The macOS `.dmg` file's group id — see "One-time setup: macOS + Linux Nexus files" below. Leave unset to skip macOS uploads. |
-| `NEXUS_FILE_GROUP_ID_LINUX` | `publish-nexus` (Linux) | The Linux `.AppImage` file's group id — see "One-time setup: macOS + Linux Nexus files" below. Leave unset to skip Linux uploads. |
-
-If `NEXUS_API_KEY` or `NEXUS_FILE_GROUP_ID` is missing, the Windows leg of `publish-nexus` fails loudly. That's intentional — a silent skip would let Nexus drift out of sync without anyone noticing. The macOS/Linux group secrets behave differently: if `NEXUS_FILE_GROUP_ID_MACOS` / `NEXUS_FILE_GROUP_ID_LINUX` are unset, those legs **skip** (with a workflow notice) instead of failing — they are opt-in until you create the files (next section).
-
-### One-time setup: macOS + Linux Nexus files
-
-`publish-nexus` rolls a new version into one Nexus *file group* per platform. A
-file group is a single file's version chain — the upload action can only
-**update** an existing group, not create one. So the macOS `.dmg` and Linux
-`.AppImage` must exist on the mod page once before CI can keep them current:
-
-1. From any release, download the `…_universal.dmg` and `…_amd64.AppImage` off the GitHub Release.
-2. On the Nexus mod page (856) → **Files** → **Manage files**, upload each as a **Main file** with a clear name (e.g. "STS2 Mod Manager (macOS Universal)" and "(Linux AppImage)").
-3. For each new file, open **Files tab → "API Info"** and copy its integer group id.
-4. Store them as repo secrets:
-
-       gh secret set NEXUS_FILE_GROUP_ID_MACOS --repo MohamedSerhan/sts2-mod-manager
-       gh secret set NEXUS_FILE_GROUP_ID_LINUX --repo MohamedSerhan/sts2-mod-manager
-
-From the next tagged release on, each leg uploads a new version into its own
-group and archives the prior one (`archive_existing_file: true`). Until the
-secrets are set, the mac/Linux legs skip with a notice and only Windows uploads —
-no red CI.
-
-## What is not automated
-
-- The **mod page description / "About this mod"** on Nexus — the public API doesn't expose it. Update manually if the copy needs to change.
-- The **Posts tab** announcements on Nexus — also not API-accessible.
 
 ## Re-running a release
 
 - A failed individual job: Actions UI → workflow run → "Re-run failed jobs".
-- A full re-build for an existing tag: Actions UI → workflow_dispatch (Run workflow). Note this re-triggers every job including `publish-nexus`, which would roll a fresh version into each configured Nexus file group (the upload API has no "if not exists" guard; the prior version is archived via `archive_existing_file`). If you only need to re-run Nexus, use "Re-run failed jobs" instead.
+- A full re-build for an existing tag: Actions UI -> workflow_dispatch (Run workflow).
 
 ## Smoke-testing the portable build
 
@@ -126,78 +90,6 @@ date current when the harness boundary changes.
    a fast `rename`, or copy-then-delete as the cross-volume fallback).
 7. **Report a bug** — trigger Report a bug from the UI and confirm it produces a
    report (clipboard text or an issue link).
-
----
-
-## Operator runbook - Nexus triage
-
-This section covers the Nexus -> GitHub triage automation introduced in `2026-05-26`. The automation now files normal maintainer/Codex-ready issues; it does **not** depend on a reactive Claude agent.
-
-### Day 0 setup
-
-1. **Confirm GitHub CLI auth** so the local runner can create issues and push the updated state file:
-
-       gh auth status
-
-2. **Create the dedicated Python venv** used by the Nexus fetch shim:
-
-       python -m venv .nexus-triage-venv
-       .nexus-triage-venv\Scripts\python -m pip install curl_cffi
-
-   The runner prepends `.nexus-triage-venv\Scripts` to `PATH`; `.nexus-triage-venv/` is gitignored.
-
-3. **Bootstrap the state file** locally so the first triage run does not refile old Nexus comments:
-
-       node scripts/nexus-triage.mjs --bootstrap
-       git add scripts/nexus-triage-state.json
-       git commit -m "chore(triage): bootstrap Nexus triage state"
-       git push
-
-4. **Run a dry-run** and inspect what would be filed:
-
-       node scripts/nexus-triage.mjs --dry-run
-
-5. **Enable the local scheduled runner** if you want unattended triage:
-
-   - Task Scheduler -> Create Task
-   - Name: `Nexus Triage`
-   - Trigger: daily, or whatever cadence you want
-   - Action: `C:\Users\xxsku\repos\sts2-mod-manager\scripts\run-nexus-triage-local.bat`
-   - Start in: `C:\Users\xxsku\repos\sts2-mod-manager`
-
-### Local runtime via Task Scheduler
-
-`scripts/run-nexus-triage-local.bat` is the Windows runner:
-
-1. Prepends the `.nexus-triage-venv\Scripts` venv to `PATH`
-2. Sets the `NEXUSMODS_*` env vars for mod 856
-3. Pulls `gh auth token` for `GITHUB_TOKEN`
-4. Honors the `scripts/nexus-triage.disabled` killswitch
-5. Updates the repo to `main` and pulls latest
-6. Preflights `python -c "import curl_cffi"`
-7. Runs `node scripts/nexus-triage.mjs`
-8. Commits and pushes the updated state file
-9. Logs each run to `.nexus-triage-runs/YYYY-MM-DD.log` (gitignored)
-
-The per-run cap is 5 issues. With a daily trigger, a backlog drains at 5/day; steady-state mod traffic is well under that. Bump `PER_RUN_CAP` in `scripts/nexus-triage.mjs` if you want faster catch-up.
-
-### What still runs in CI
-
-- `nexus-triage.yml` is kept for `workflow_dispatch` diagnostics only.
-- Its `schedule:` block stays commented out because GitHub-hosted runners are Cloudflare-blocked by Nexus.
-- The Claude watchdog and reactive Claude workflows were removed.
-
-### Killswitches
-
-- Create `scripts/nexus-triage.disabled` with any content; the next run exits 0 with no work.
-- Disable the Task Scheduler entry from the Task Scheduler UI.
-- Both leave the state file frozen at the last successful run.
-
-### Retired Claude automation
-
-The previous reactive `@claude`, auto-fix, QA-Claude, watchdog, and conflict-watcher workflows were removed. Nexus triage issues are now ordinary GitHub issues with a checklist that a maintainer or Codex session can pick up manually.
-
-The old labels (`auto-fix`, `qa`, `qa-passed`, `qa-needs-human`, `watchdog-ping`, `ops:token-renewal`) can remain for historical issues, but they no longer trigger automation in this repository.
 
 ---
 

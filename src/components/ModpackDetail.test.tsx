@@ -167,7 +167,7 @@ function setupMissingRitsuPack(): Profile {
 
 /** Open the "+ Add mods" dropdown (install actions live inside it now). */
 async function openAddMods(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: /Add mods/i }));
+  await user.click(await screen.findByRole('button', { name: /Add mods/i }));
 }
 
 /** The "Add from your Library" section is collapsed by default; expand it
@@ -1405,6 +1405,48 @@ describe('<ModpackDetail>', () => {
     });
   });
 
+  it('Add on an active Steam Workshop row saves the Workshop source and does not toggle local files', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('get_active_profile', () => 'Sample');
+    const profile = setupPack({
+      available: [
+        modInfo({
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: '3747602295',
+          mod_id: 'STS2-RitsuLib',
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+          source: workshopUrl,
+        }),
+      ],
+    });
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    const available = await expandLibrary(user);
+    await user.click(within(available).getByRole('button', { name: /^Add$/i }));
+
+    await waitFor(() => {
+      expect(
+        getInvokeCalls().some((c) => c.cmd === 'set_profile_mod_membership'),
+      ).toBe(true);
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(false);
+    const call = getInvokeCalls().find(
+      (c) => c.cmd === 'set_profile_mod_membership',
+    );
+    expect(call?.args).toMatchObject({
+      profileId: 'Sample',
+      modName: 'RitsuLib',
+      folderName: '3747602295',
+      modId: 'STS2-RitsuLib',
+      included: true,
+      sourceHint: workshopUrl,
+    });
+  });
+
   it('Add does NOT call toggle_mod when the pack is not active', async () => {
     const profile = setupPack({
       available: [modInfo({ name: 'LibMod', folder_name: 'LibMod' })],
@@ -1579,7 +1621,7 @@ describe('<ModpackDetail>', () => {
     const user = userEvent.setup();
     render(<Wrap profile={profile} onBack={vi.fn()} />);
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
-    await user.click(within(inPack).getByRole('button', { name: /^Edit$/i }));
+    await user.click(await within(inPack).findByRole('button', { name: /^Edit$/i }));
 
     // The picker modal mounts with the pack member checked.
     await waitFor(() => {
@@ -1671,7 +1713,7 @@ describe('<ModpackDetail>', () => {
     );
     const inPack = await screen.findByTestId('modpack-detail-in-pack');
     await user.click(
-      within(inPack).getByRole('button', { name: /Load order/i }),
+      await within(inPack).findByRole('button', { name: /Load order/i }),
     );
     expect(onOpenLoadOrder).toHaveBeenCalledWith(profile);
   });

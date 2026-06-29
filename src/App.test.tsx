@@ -66,6 +66,8 @@ describe('<App>', () => {
   // wedge state in the next test.
   beforeEach(async () => {
     const { listen } = await import('@tauri-apps/api/event');
+    const updater = await import('@tauri-apps/plugin-updater');
+    const proc = await import('@tauri-apps/plugin-process');
     (listen as unknown as { mockClear: () => void; mockReset?: () => void }).mockClear();
     // Reset the mock implementation back to the default no-op unlisten
     // (some tests `mockImplementation()` it to capture handlers; without
@@ -74,6 +76,9 @@ describe('<App>', () => {
     (listen as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(
       async () => () => {},
     );
+    (updater.check as ReturnType<typeof vi.fn>).mockReset();
+    (updater.check as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (proc.relaunch as ReturnType<typeof vi.fn>).mockClear();
     // Default: pretend the user has already dismissed onboarding. The
     // few tests that exercise the wizard explicitly `removeItem` this
     // key before rendering. With this default, the onboarding overlay
@@ -1254,6 +1259,43 @@ describe('<App>', () => {
     });
   });
 
+  it('mod-auto-install-failed matched update can skip the advertised version', async () => {
+    registerInvokeHandler('set_mod_snooze', () => ({
+      snoozed_until_tag: 'V2',
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+
+    const eventPromise = fireTauriEvent('mod-auto-install-failed', {
+      file_name: 'RoutePlanner-1260-2-1780.zip',
+      error: 'Installed archive did not produce a parseable manifest version.',
+      mod_name: 'Route Planner',
+      folder_name: 'route_planner',
+      mod_id: 'route_planner',
+      mod_version_id: 'route-planner-v1',
+      skip_version: 'V2',
+    });
+
+    const dialog = await screen.findByRole('dialog', {
+      name: /Could not install update for Route Planner/i,
+    });
+    expect(within(dialog).getByText(/Reason: Installed archive did not produce a parseable manifest version\./i))
+      .toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /Skip this update/i }));
+    await eventPromise;
+
+    expect(getInvokeCalls()).toContainEqual({
+      cmd: 'set_mod_snooze',
+      args: {
+        modName: 'Route Planner',
+        folderName: 'route_planner',
+        latestTag: 'V2',
+      },
+    });
+    expect(screen.queryByText(/Failed to install RoutePlanner-1260-2-1780\.zip/)).not.toBeInTheDocument();
+  });
+
   it('modpack-mods-skipped event fires info toast with skipped count', async () => {
     render(<App />);
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
@@ -1667,6 +1709,101 @@ describe('<App>', () => {
     await waitFor(() => {
       expect(screen.queryByText(/Mod Manager v9\.9\.9 is available/)).toBeNull();
     });
+  });
+
+  it('manual app-update check toasts when already on the latest version', async () => {
+    const updater = await import('@tauri-apps/plugin-updater');
+    const checkMock = updater.check as ReturnType<typeof vi.fn>;
+    checkMock.mockReset();
+    checkMock.mockResolvedValue(null);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await waitFor(() => { expect(checkMock).toHaveBeenCalledTimes(1); });
+
+    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/latest version/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Mod Manager v.*is available/)).not.toBeInTheDocument();
+  });
+
+  it('manual app-update check surfaces update-check failures', async () => {
+    const updater = await import('@tauri-apps/plugin-updater');
+    const checkMock = updater.check as ReturnType<typeof vi.fn>;
+    checkMock.mockReset();
+    checkMock
+      .mockResolvedValueOnce(null)
+      .mockRejectedValueOnce('rough-check');
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await waitFor(() => { expect(checkMock).toHaveBeenCalledTimes(1); });
+
+    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Update check failed: rough-check/)).toBeInTheDocument();
+    });
+  });
+
+  it('manual app-update check shows the banner without installing or relaunching', async () => {
+    const updater = await import('@tauri-apps/plugin-updater');
+    const proc = await import('@tauri-apps/plugin-process');
+    const checkMock = updater.check as ReturnType<typeof vi.fn>;
+    const relaunchMock = proc.relaunch as ReturnType<typeof vi.fn>;
+    const downloadAndInstall = vi.fn(async () => {});
+    checkMock.mockReset();
+    relaunchMock.mockClear();
+    checkMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        version: '9.9.9',
+        currentVersion: '1.3.4',
+        downloadAndInstall,
+      } as never);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
+    await waitFor(() => { expect(checkMock).toHaveBeenCalledTimes(1); });
+
+    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Mod Manager v9\.9\.9 is available/)).toBeInTheDocument();
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_app_update')).toBe(false);
+    expect(downloadAndInstall).not.toHaveBeenCalled();
+    expect(relaunchMock).not.toHaveBeenCalled();
+  });
+
+  it('manual app-update check reopens a dismissed update banner', async () => {
+    const updater = await import('@tauri-apps/plugin-updater');
+    const update = {
+      version: '9.9.9',
+      currentVersion: '1.3.4',
+      downloadAndInstall: vi.fn(async () => {}),
+    } as never;
+    const checkMock = updater.check as ReturnType<typeof vi.fn>;
+    checkMock.mockReset();
+    checkMock.mockResolvedValue(update);
+    const user = userEvent.setup();
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText(/Mod Manager v9\.9\.9 is available/)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /^Dismiss$/i }));
+    await waitFor(() => {
+      expect(screen.queryByText(/Mod Manager v9\.9\.9 is available/)).toBeNull();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Mod Manager v9\.9\.9 is available/)).toBeInTheDocument();
+    });
+    expect(getInvokeCalls().some((c) => c.cmd === 'install_app_update')).toBe(false);
   });
 
   it('app-update banner Install & Restart invokes backend install + relaunch', async () => {

@@ -159,8 +159,10 @@ interface HomeProps {
   onCreateModpack?: () => void;
   onLaunch?: () => void;
   onBlockingOperationChange?: (busy: boolean) => void;
+  onCheckForAppUpdate?: () => void | Promise<void>;
+  checkingAppUpdate?: boolean;
 }
-export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks, onCreateModpack, onLaunch, onBlockingOperationChange }: HomeProps) {
+export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfiles, onGoToBrowseModpacks, onCreateModpack, onLaunch, onBlockingOperationChange, onCheckForAppUpdate, checkingAppUpdate = false }: HomeProps) {
   const { t } = useTranslation();
   const { gameInfo, mods, refreshAll, activeProfile, activeProfileId, setActiveProfile, refreshSubUpdates } = useApp();
   const toast = useToast();
@@ -685,7 +687,10 @@ export function HomeView({ onGoToSettings, onGoToMods: _onGoToMods, onGoToProfil
           Sits below the hero so the launcher feels finished, not blank,
           and still keeps the play loop above-the-fold. */}
       <div className="gf-home-footer">
-        <AboutCard />
+        <AboutCard
+          onCheckForAppUpdate={onCheckForAppUpdate}
+          checkingAppUpdate={checkingAppUpdate}
+        />
       </div>
 
       <SubUpdateDetail

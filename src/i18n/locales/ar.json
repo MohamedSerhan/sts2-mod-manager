@@ -121,7 +121,6 @@
       "outOfSyncTitle": "غير متزامنة",
       "outOfSyncBody": "تحتوي هذه الحزمة على تغييرات محلية لم تُدفَع بعد إلى رمز المشاركة.",
       "outOfSyncAction": "إعادة المشاركة للدفع",
-
       "inactiveToggleHint": "هذه الحزمة غير نشطة — لا يمكن تفعيل/تعطيل المودات داخل اللعبة إلا للحزمة النشطة. بدّل إليها للتحكم بما يُحمَّل."
     },
     "edit": {
@@ -256,15 +255,7 @@
     "checkForUpdates": "التحقّق من التحديثات",
     "generateSupportBundle": "الإبلاغ عن خطأ",
     "latestVersion": "أنت على أحدث نسخة.",
-    "updateAvailable": "تتوفّر v{{version}} — جارٍ التثبيت…",
     "updateCheckFailed": "فشل التحقّق من التحديثات: {{error}}"
-  },
-  "feedback": {
-    "sendFeedback": "إرسال ملاحظات",
-    "noGitHubPrompt": "ليس لديك حساب GitHub؟",
-    "nexusCta": "انشر ملاحظاتك على صفحة Nexus",
-    "translatedNote": "اكتب بلغتك — نقرأ كل تعليق (يُترجَم تلقائيًا إلى الإنجليزية).",
-    "couldntOpen": "تعذّر فتح صفحة Nexus: {{error}}"
   },
   "profileSwitcher": {
     "title": "الحزم",
@@ -950,6 +941,7 @@
     "closeEditor": "إغلاق المحرّر",
     "githubRepo": "مستودع GitHub",
     "nexusUrl": "رابط مود Nexus",
+    "workshopUrl": "رابط Steam Workshop",
     "displayName": "الاسم المعروض",
     "displayDescription": "الوصف المعروض",
     "note": "ملاحظة",
@@ -963,6 +955,7 @@
     "empty": "فارغ",
     "githubPlaceholder": "owner/repo",
     "nexusPlaceholder": "https://www.nexusmods.com/sts2/mods/123",
+    "workshopPlaceholder": "https://steamcommunity.com/sharedfiles/filedetails/?id=123",
     "displayDescriptionPlaceholder": "يظهر في قائمة المودات",
     "displayNameHint": "تسمية اختيارية تظهر في المدير فقط. يبقى اسم البيان دون تغيير.",
     "displayDescriptionHint": "وصف اختياري للمدير فقط للمودات المربكة أو غير المترجمة.",
@@ -971,6 +964,7 @@
     "tagsPlaceholder": "أداة، بيتا",
     "noteHint": "حرّة الصياغة. تظهر في صف المود لتتذكّر من أين أتى.",
     "otherLinkHint": "للمودات التي ليست على GitHub أو Nexus.",
+    "workshopHint": "مصدر Steam Workshop الرسمي لهذا المود.",
     "tagsHint": "فئات اختيارية للمدير فقط. افصل الوسوم بفواصل.",
     "nexusOnlyMessage": "مود على Nexus فقط — حاول جلب مستودع GitHub من وصف Nexus حتى تُفحص التحديثات من كلا المصدرين.",
     "searching": "جارٍ البحث…",
@@ -1419,7 +1413,6 @@
       "checking": "جارٍ التحقّق…",
       "inAppLogs": "سجلات التطبيق",
       "latestVersion": "أنت على أحدث نسخة.",
-      "versionAvailable": "تتوفّر v{{version}} — جارٍ التثبيت…",
       "updateCheckFailed": "فشل التحقّق من التحديثات: {{error}}"
     },
     "defaultPathMac": "~/Library/Application Support/Steam/steamapps/common/SlayTheSpire2",
@@ -1494,6 +1487,14 @@
     "latestTitle": "على أحدث إصدار قابل للتثبيت من المصدر.",
     "updateAvailable": "تنزيل التحديث → v{{version}}",
     "updateClickTitle": "نزّل v{{target}} إلى قائمة الإصدارات. سيبقى التثبيت الحالي وحِزم المودات على v{{current}} إلى أن تختار إصدارًا.",
+    "updateFailureRecovery": {
+      "title": "تعذّر تثبيت تحديث {{name}}",
+      "body": "فشل حفظ التحديث. يمكنك تخطي هذا الإصدار المعلن والمحاولة مرة أخرى عندما ينشر المصدر إصدارًا أحدث.",
+      "reason": "السبب: {{reason}}",
+      "unknownReason": "خطأ تثبيت غير معروف.",
+      "skip": "تخطّي هذا التحديث",
+      "keepShowing": "متابعة العرض"
+    },
     "closeSts2FirstDot": "أغلق STS2 أولاً.",
     "updating": "جارٍ التحديث…",
     "updateBlockedByGameVersion": "التحديث محظور بسبب نسخة اللعبة",
@@ -1528,10 +1529,15 @@
     "gitHub": "GitHub",
     "viewOnNexus": "العرض على Nexus: {{url}}",
     "nexus": "Nexus",
+    "viewOnSteamWorkshop": "العرض في ورشة Steam: {{url}}",
+    "steamWorkshop": "ورشة Steam",
     "openLink": "فتح الرابط: {{url}}",
     "link": "رابط",
     "local": "محلي",
     "unlinked": "غير مرتبط",
+    "workshopManagedTitle": "تديره ورشة Steam. استخدم إعدادات/ترتيب تحميل STS2 أو افتح صفحة الورشة؛ لن ينقل المدير أو يحذف ملفات تملكها Steam.",
+    "workshopManagedDesc": "هذه الملفات يديرها Steam؛ استخدم ورشة Steam لتحديثها أو إلغاء الاشتراك أو إصلاحها.",
+    "duplicateSourceWarning": "قد يفضل STS2 نسخة مجلد mods المحلي عندما يكون هذا المود ونسخة Steam Workshop مفعّلين معًا.",
     "modActions": "إجراءات المود",
     "copyVersion": "نسخ النسخة (v{{version}})",
     "customizeMenu": "تخصيص القائمة…",
@@ -1553,6 +1559,8 @@
     "toast": {
       "updated": "تم تنزيل «{{name}}» v{{version}} إلى قائمة الإصدارات",
       "updateFailed": "فشل تحديث «{{name}}»: {{error}}",
+      "updateSkippedAfterFailure": "تم تخطي هذا التحديث الفاشل لـ «{{name}}» حتى يظهر إصدار أحدث",
+      "updateSkipFailed": "تعذّر تخطي هذا التحديث: {{error}}",
       "unpinned": "تم إلغاء تجميد {{name}}",
       "pinned": "تم تجميد {{name}} — ستتخطّاه التحديثات وتغييرات الحزم",
       "pinAction": "تجميد",
@@ -1563,6 +1571,7 @@
       "repairNoGithub": "لا يحتوي «{{name}}» على مصدر GitHub مرتبط — يجلب الإصلاح من GitHub. أضِف مصدرًا عبر «تعديل المصادر…» أولاً.",
       "deleted": "تم الحذف: {{name}}",
       "deleteFailed": "فشل حذف {{name}}: {{error}}",
+      "workshopManaged": "تدير ورشة Steam {{name}}. افتحه في Steam للتحديث أو الإصلاح أو إلغاء الاشتراك.",
       "versionRemoved": "تمت إزالة {{name}} v{{version}} من الإصدارات",
       "versionManualRemoved": "تمت إزالة {{name}} v{{version}} وتحديث {{profiles}} حزمة",
       "versionRemoveFailed": "تعذرت إزالة v{{version}}: {{error}}",
@@ -1625,6 +1634,14 @@
     "manifestVersion": "البيان v{{version}}",
     "versionOption": "{{version}} {{state}}",
     "versionOptionVersion": "v{{version}}",
+    "versionSource": {
+      "steamWorkshop": "Steam Workshop",
+      "gitHub": "GitHub",
+      "nexus": "Nexus",
+      "link": "رابط",
+      "manual": "يدوي",
+      "joiner": " + "
+    },
     "versionManageTitle": "إدارة الإصدارات المخزنة",
     "versionManageHeading": "إدارة إصدارات {{mod}}",
     "versionManageSub": "أزِل الإصدارات المخزنة القديمة التي لم تعد تحتاجها. الإصدارات النشطة أو المستخدمة في الحزم تفتح معالج إزالة.",
@@ -1638,6 +1655,9 @@
     "versionRemoveActiveReason": "بدّل عن هذا الإصدار النشط أولا.",
     "versionRemovePinnedReason": "ألغِ تجميد هذا المود أولا.",
     "versionRemoveProfileReason": "مستخدم في: {{profiles}}",
+    "versionRemoveWorkshopReason": "يديره Steam Workshop.",
+    "versionSteamManaged": "يديره Steam",
+    "versionOpenWorkshop": "فتح Workshop",
     "versionRemoveConfirmTitle": "إزالة {{mod}} v{{version}}؟",
     "versionRemoveConfirmDiskBody": "سيحذف هذا النسخة المخزنة على القرص ويزيلها من قائمة الإصدارات.",
     "versionRemoveConfirmCacheBody": "سيحذف هذا الأرشيف المحفوظ ويزيله من قائمة الإصدارات.",

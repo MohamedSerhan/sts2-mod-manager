@@ -27,6 +27,7 @@ interface Props {
   onSave: (
     githubRepo: string,
     nexusUrl: string,
+    workshopUrl: string,
     note: string,
     customUrl: string,
     displayName: string,
@@ -43,6 +44,15 @@ function ghRepoFromUrl(url: string | null): string {
   return url;
 }
 
+function workshopUrlFromMod(mod: ModInfo): string {
+  if (mod.workshop_url) return mod.workshop_url;
+  const source = mod.source ?? '';
+  if (source.includes('steamcommunity.com/sharedfiles') || source.startsWith('steam://')) {
+    return source;
+  }
+  return '';
+}
+
 export function SourceEditor({
   mod,
   saving,
@@ -55,6 +65,7 @@ export function SourceEditor({
   const { t } = useTranslation();
   const [github, setGithub] = useState<string>(ghRepoFromUrl(mod.github_url));
   const [nexus, setNexus] = useState<string>(mod.nexus_url ?? '');
+  const [workshop, setWorkshop] = useState<string>(workshopUrlFromMod(mod));
   const [note, setNote] = useState<string>(mod.note ?? '');
   const [customUrl, setCustomUrl] = useState<string>(mod.custom_url ?? '');
   const [displayName, setDisplayName] = useState<string>(mod.display_name ?? '');
@@ -63,6 +74,7 @@ export function SourceEditor({
 
   const ghOk = github.trim().length > 0;
   const nxOk = nexus.trim().length > 0;
+  const workshopOk = workshop.trim().length > 0;
   const onlyNexus = nxOk && !ghOk;
   const titleName = mod.display_name?.trim() || mod.name;
 
@@ -151,6 +163,34 @@ export function SourceEditor({
           </div>
           <div className="gf-src-edit-hint">
             <span>{t('sourceEditor.displayDescriptionHint')}</span>
+          </div>
+        </div>
+
+        {/* Steam Workshop */}
+        <div className="gf-src-edit-field">
+          <label className="gf-src-edit-label">
+            <ExternalLink size={11} style={{ marginInlineEnd: 4 }} />
+            {t('sourceEditor.workshopUrl')}
+            {workshop && (
+              <button
+                type="button"
+                className="gf-src-edit-clear"
+                onClick={() => setWorkshop('')}
+              >
+                {t('sourceEditor.clear')}
+              </button>
+            )}
+          </label>
+          <div className="gf-src-edit-input">
+            <input
+              value={workshop}
+              onChange={(e) => setWorkshop(e.target.value)}
+              placeholder={t('sourceEditor.workshopPlaceholder')}
+            />
+            {statusBadge(workshopOk)}
+          </div>
+          <div className="gf-src-edit-hint">
+            <span>{t('sourceEditor.workshopHint')}</span>
           </div>
         </div>
       </div>
@@ -326,7 +366,7 @@ export function SourceEditor({
       )}
 
       <div className="gf-src-edit-foot">
-        {(mod.github_url || mod.nexus_url) && (
+        {(mod.github_url || mod.nexus_url || mod.workshop_url) && (
           <button className="gf-btn-3 gf-btn-2-sm gf-btn-danger" onClick={onClear}>
             {t('sourceEditor.clearAllLinks')}
           </button>
@@ -335,7 +375,7 @@ export function SourceEditor({
         <button className="gf-btn-3" onClick={onClose}>{t('common.cancel')}</button>
         <button
           className="gf-btn gf-btn-sm"
-          onClick={() => onSave(github, nexus, note, customUrl, displayName, displayDescription, tags)}
+          onClick={() => onSave(github, nexus, workshop, note, customUrl, displayName, displayDescription, tags)}
           disabled={saving}
         >
           <Save size={11} /> {saving ? t('sourceEditor.saving') : t('sourceEditor.saveSources')}

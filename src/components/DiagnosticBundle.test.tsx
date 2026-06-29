@@ -5,8 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { DiagnosticBundle } from './DiagnosticBundle';
 import { AllProviders } from '../__test__/providers';
-import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
-import { FEEDBACK_NEXUS_POSTS_URL } from '../lib/nexusUrl';
+import { registerInvokeHandler } from '../__test__/setup';
 
 /**
  * "Report a bug" modal (reworked from the old support bundle). Builds a
@@ -713,14 +712,4 @@ describe('<DiagnosticBundle> (Report a bug)', () => {
     expect(ta.value).toContain('C:\\Users\\alice');
   });
 
-  it('offers a no-GitHub Nexus feedback link that opens the Posts page', async () => {
-    const user = userEvent.setup();
-    render(<Wrap />);
-    await user.click(
-      screen.getByRole('button', { name: 'Post feedback on the Nexus page' }),
-    );
-    const opened = getInvokeCalls().filter((c) => c.cmd === 'open_external_url');
-    expect(opened).toHaveLength(1);
-    expect(opened[0].args).toEqual({ url: FEEDBACK_NEXUS_POSTS_URL });
-  });
 });

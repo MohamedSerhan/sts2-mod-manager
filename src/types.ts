@@ -1,3 +1,5 @@
+export type ModInstallSource = 'local' | 'steam_workshop';
+
 export interface ModInfo {
   mod_version_id?: string | null;
   name: string;
@@ -6,6 +8,12 @@ export interface ModInfo {
   enabled: boolean;
   files: string[];
   source: string | null;
+  install_source?: ModInstallSource;
+  workshop_item_id?: string | null;
+  workshop_url?: string | null;
+  workshop_manifest?: string | null;
+  workshop_time_updated?: number | null;
+  workshop_update_pending?: boolean;
   hash: string | null;
   dependencies: string[];
   size_bytes: number;
@@ -132,6 +140,14 @@ export interface ProfileMembershipMod {
   folder_name: string | null;
   mod_id: string | null;
   display_name?: string | null;
+  source?: string | null;
+  github_url?: string | null;
+  nexus_url?: string | null;
+  install_source?: ModInstallSource;
+  workshop_item_id?: string | null;
+  workshop_url?: string | null;
+  workshop_time_updated?: number | null;
+  workshop_update_pending?: boolean;
   bundle_members?: string[];
   bundle_member_ids?: string[];
   installed?: boolean;
@@ -149,6 +165,12 @@ export interface LocalModVersionOption {
   folder_name?: string | null;
   mod_id?: string | null;
   display_name?: string | null;
+  source?: string | null;
+  github_url?: string | null;
+  nexus_url?: string | null;
+  install_source?: ModInstallSource;
+  workshop_item_id?: string | null;
+  workshop_url?: string | null;
   bundle_member_ids?: string[];
   installed: boolean;
   installed_enabled: boolean;
@@ -398,6 +420,8 @@ export interface ModSourceEntry {
   nexus_url: string | null;
   nexus_game_domain: string | null;
   nexus_mod_id: number | null;
+  workshop_url?: string | null;
+  workshop_item_id?: string | null;
   note?: string | null;
   custom_url?: string | null;
   tags?: string[];
@@ -539,6 +563,9 @@ export interface ModAuditTarget {
   mod_version_id?: string | null;
   folder_name?: string | null;
   mod_id?: string | null;
+  install_source?: ModInstallSource;
+  workshop_item_id?: string | null;
+  workshop_url?: string | null;
   name: string;
 }
 

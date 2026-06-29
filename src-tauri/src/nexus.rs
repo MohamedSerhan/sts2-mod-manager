@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -133,6 +134,13 @@ pub struct NexusFile {
     pub uploaded_timestamp: Option<i64>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NexusFileIdentity {
+    pub file_id: Option<u64>,
+    pub file_name: Option<String>,
+    pub lane_key: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct NexusFilesResponse {
     files: Vec<NexusFile>,
@@ -265,6 +273,7 @@ impl NexusClient {
 /// — we just pick the highest-scoring one.
 ///
 /// Tier-1 boosts: matching variant tag, MAIN category, recent upload.
+#[cfg(test)]
 fn nexus_file_relevance(file: &NexusFile, want_lite: bool) -> i64 {
     let mut score: i64 = 0;
     let blob = format!(
@@ -301,11 +310,80 @@ fn nexus_file_relevance(file: &NexusFile, want_lite: bool) -> i64 {
     score
 }
 
+fn strip_archive_extension(raw: &str) -> &str {
+    raw.strip_suffix(".zip")
+        .or_else(|| raw.strip_suffix(".7z"))
+        .or_else(|| raw.strip_suffix(".rar"))
+        .unwrap_or(raw)
+}
+
+fn version_variants(version: &str) -> Vec<String> {
+    let version = version
+        .trim()
+        .trim_start_matches(|c| c == 'v' || c == 'V')
+        .trim();
+    if version.is_empty() {
+        return Vec::new();
+    }
+    let dashed = version.replace('.', "-");
+    let mut variants: Vec<String> = [
+        version.to_string(),
+        format!("v{version}"),
+        dashed.clone(),
+        format!("v{dashed}"),
+    ]
+    .into_iter()
+    .collect();
+    variants.sort_by_key(|variant| std::cmp::Reverse(variant.len()));
+    variants
+}
+
+pub fn nexus_file_lane_key_from_label(raw: &str, version: Option<&str>) -> Option<String> {
+    let mut text = strip_archive_extension(raw.trim()).to_ascii_lowercase();
+    if let Some(version) = version {
+        for variant in version_variants(version) {
+            text = text.replace(&variant.to_ascii_lowercase(), " ");
+        }
+    }
+    let tokens: Vec<&str> = text
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty() && *token != "zip")
+        .collect();
+    (!tokens.is_empty()).then(|| tokens.join(" "))
+}
+
+pub fn nexus_file_lane_key(file: &NexusFile) -> Option<String> {
+    file.name
+        .as_deref()
+        .or(file.file_name.as_deref())
+        .and_then(|label| nexus_file_lane_key_from_label(label, file.version.as_deref()))
+}
+
+pub fn nexus_file_identity_from_download(
+    archive_path: &Path,
+    source_version: Option<&str>,
+) -> NexusFileIdentity {
+    let file_name = archive_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string);
+    let file_id = crate::mods::bundle::nexus_download_ids(archive_path).map(|(_, file_id)| file_id);
+    let lane_key = file_name
+        .as_deref()
+        .and_then(|name| nexus_file_lane_key_from_label(name, source_version));
+    NexusFileIdentity {
+        file_id,
+        file_name,
+        lane_key,
+    }
+}
+
 /// Pick the version string Nexus should report for a mod, given the local
 /// mod's display name (used as a flavor hint).
 ///
 /// Returns None if no file looks like a sensible match — caller then falls
 /// back to the page-level `version` field.
+#[cfg(test)]
 pub fn pick_version_for_local_mod(files: &[NexusFile], local_mod_name: &str) -> Option<String> {
     if files.is_empty() {
         return None;
@@ -514,6 +592,50 @@ mod nexus_helper_tests {
     #[test]
     fn pick_version_for_local_mod_returns_none_on_empty() {
         assert!(pick_version_for_local_mod(&[], "AnyMod").is_none());
+    }
+
+    #[test]
+    fn nexus_file_lane_key_removes_file_version_but_keeps_game_branch_version() {
+        let beta = NexusFile {
+            file_id: 1,
+            name: Some("The Watcher - 1.4.22 - StS2 - v0.107.1".into()),
+            file_name: None,
+            version: Some("1.4.22".into()),
+            category_id: Some(1),
+            uploaded_timestamp: Some(1),
+        };
+        let release = NexusFile {
+            file_id: 2,
+            name: Some("The Watcher - 1.4.3 - StS2 - v0.103.2".into()),
+            file_name: None,
+            version: Some("1.4.3".into()),
+            category_id: Some(1),
+            uploaded_timestamp: Some(1),
+        };
+
+        assert_eq!(
+            nexus_file_lane_key(&beta).as_deref(),
+            Some("the watcher sts2 v0 107 1")
+        );
+        assert_eq!(
+            nexus_file_lane_key(&release).as_deref(),
+            Some("the watcher sts2 v0 103 2")
+        );
+        assert_ne!(nexus_file_lane_key(&beta), nexus_file_lane_key(&release));
+    }
+
+    #[test]
+    fn nexus_file_identity_from_download_keeps_file_id_and_lane_label() {
+        let identity = nexus_file_identity_from_download(
+            std::path::Path::new("SlayTheStats v1.1.0-349-v1-1-0-1780935880.zip"),
+            Some("1.1.0"),
+        );
+
+        assert_eq!(identity.file_id, Some(1780935880));
+        assert_eq!(
+            identity.lane_key.as_deref(),
+            Some("slaythestats 349 1780935880")
+        );
     }
 
     #[test]

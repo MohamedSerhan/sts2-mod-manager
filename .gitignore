@@ -26,6 +26,7 @@ dist-ssr
 # Rust / Tauri
 target/
 src-tauri/target/
+target-codex-*/
 src-tauri/gen/
 # Cargo.lock IS committed (for reproducible release builds — pins every
 # transitive dep so CI's three platforms build against the exact same
@@ -61,14 +62,6 @@ coverage/
 # command segfaults). Not shipped, not useful in history.
 *.stackdump
 
-# Local Nexus triage runner logs (written by scripts/run-nexus-triage-local.bat).
-# Per-day rolling logs; not meaningful in history.
-.nexus-triage-runs/
-
-# Local Nexus triage venv (created per the One-time setup in that .bat). Holds
-# curl_cffi for the Python shim; large and machine-specific, never committed.
-.nexus-triage-venv/
-
-# Python bytecode cache (from the curl_cffi shim scripts/_nexus_fetch.py).
+# Python bytecode cache.
 __pycache__/
 *.pyc

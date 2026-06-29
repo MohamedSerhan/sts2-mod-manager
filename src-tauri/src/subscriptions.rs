@@ -139,6 +139,34 @@ pub fn sync_own_subscription_after_publish(config_path: &Path, profile: &Profile
     changed
 }
 
+/// Keep a followed pack's local snapshot aligned after a targeted recovery edit.
+///
+/// This does not update sync timestamps because no remote subscription update
+/// occurred; it only prevents local Repair/Reapply paths from restoring stale
+/// broken artifact references from `last_synced_profile`.
+pub fn sync_local_subscription_snapshot_after_profile_cleanup(
+    config_path: &Path,
+    profile: &Profile,
+) -> Result<bool> {
+    let mut db = load_subscriptions(config_path);
+    let mut changed = false;
+    for sub in db.subscriptions.values_mut() {
+        let matches_id =
+            !sub.profile_id.trim().is_empty() && sub.profile_id.eq_ignore_ascii_case(&profile.id);
+        let matches_legacy_name = sub.profile_name.eq_ignore_ascii_case(&profile.name);
+        if matches_id || matches_legacy_name {
+            sub.profile_id = profile.id.clone();
+            sub.profile_name = profile.name.clone();
+            sub.last_synced_profile = profile.clone();
+            changed = true;
+        }
+    }
+    if changed {
+        save_subscriptions(&db, config_path)?;
+    }
+    Ok(changed)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModVersionChange {
     pub name: String,

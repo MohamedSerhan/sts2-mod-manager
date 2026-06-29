@@ -348,7 +348,7 @@ jobs:
           # heredoc / file-construction block below.
           WIN_LINKS=$(
             link "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "STS2.Mod.Manager_${VERSION}_x64-setup.exe" "Recommended. Double-click to install." true
-            link "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "Portable build (no installer, no auto-update). Used by the Nexus Mods page. Requires WebView2 Runtime."
+            link "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "STS2.Mod.Manager_${VERSION}_x64_portable.zip" "Portable build (no installer, no auto-update). Requires WebView2 Runtime."
           )
           MAC_LINKS=$(
             link "STS2.Mod.Manager_${VERSION}_universal.dmg" "STS2.Mod.Manager_${VERSION}_universal.dmg" "Works on both Intel and Apple Silicon Macs. Open the DMG and drag to Applications." true
@@ -406,51 +406,6 @@ jobs:
 
           # Update the release body
           gh release edit "$TAG" --notes-file "$BODY_FILE"
-
-  # Upload the release assets to Nexus Mods (mod 856): macOS, Linux, then
-  # Windows. Windows is uploaded last and marked as the primary mod-manager
-  # download so it stays the newest/top/default file on Nexus while macOS/Linux
-  # are still available alongside it.
-  #
-  # IMPORTANT: a Nexus "file_group_id" identifies ONE file's version chain, not
-  # a category. The three platforms therefore need three separate groups, and
-  # every release must update those configured groups directly so Nexus archives
-  # the previous platform versions instead of creating duplicate main files.
-  # Re-run via "Re-run failed jobs" if Nexus is flaky.
-  publish-nexus:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Install Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-
-      - name: Download Nexus release assets
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p nexus-assets
-          gh release download "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" -D nexus-assets \
-            -p "STS2.Mod.Manager_${VERSION}_universal.dmg" \
-            -p "STS2.Mod.Manager_${VERSION}_amd64.AppImage" \
-            -p "STS2.Mod.Manager_${VERSION}_x64_portable.zip"
-
-      - name: Publish Nexus files
-        env:
-          NEXUS_API_KEY:                ${{ secrets.NEXUS_API_KEY }}
-          NEXUS_FILE_GROUP_ID:          ${{ secrets.NEXUS_FILE_GROUP_ID }}
-          NEXUS_FILE_GROUP_ID_MACOS:    ${{ secrets.NEXUS_FILE_GROUP_ID_MACOS }}
-          NEXUS_FILE_GROUP_ID_LINUX:    ${{ secrets.NEXUS_FILE_GROUP_ID_LINUX }}
-          NEXUS_ALLOW_BOOTSTRAP:        "false"
-          NEXUSMODS_MOD_ID:             ${{ vars.NEXUSMODS_MOD_ID || '856' }}
-          NEXUSMODS_GAME_DOMAIN:        slaythespire2
-        run: node scripts/nexus-publish-release.mjs --version "${GITHUB_REF_NAME#v}" --asset-dir nexus-assets
 
   # Per-PR dev builds: gather the platform artifacts into a rolling dev-pr<N>
   # prerelease and upsert a sticky PR comment with download links. Runs whenever

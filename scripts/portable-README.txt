@@ -16,8 +16,8 @@ Evergreen Bootstrapper (small, ~2 MB):
 
 Updates
 -------
-The portable build does not auto-update. Re-download from Nexus or
-GitHub when a new version is released.
+The portable build does not auto-update. Re-download it from GitHub
+when a new version is released.
 
 For auto-updates, use the NSIS installer from the GitHub Releases page:
 https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest

@@ -52,9 +52,14 @@ test('Windows setup EXE corrects stale install metadata only when no install dir
 });
 
 test('user-facing update install buttons do not bypass the pinned backend installer', () => {
-  for (const file of ['src/App.tsx', 'src/components/AboutCard.tsx', 'src/views/Settings.tsx']) {
+  const app = read('src/App.tsx');
+  assert.match(app, /installAppUpdate\(\)/, 'App banner install button must use installAppUpdate()');
+  assert.doesNotMatch(app, /\.downloadAndInstall\(/, 'App must not install via JS updater resource');
+
+  for (const file of ['src/components/AboutCard.tsx', 'src/views/Settings.tsx']) {
     const source = read(file);
-    assert.match(source, /installAppUpdate\(\)/, `${file} must use installAppUpdate()`);
+    assert.match(source, /onCheckForAppUpdate/, `${file} must delegate manual checks to the app shell`);
+    assert.doesNotMatch(source, /installAppUpdate\(\)/, `${file} manual checks must not install`);
     assert.doesNotMatch(source, /\.downloadAndInstall\(/, `${file} must not install via JS updater resource`);
   }
 });

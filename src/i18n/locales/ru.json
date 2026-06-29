@@ -121,7 +121,6 @@
       "outOfSyncTitle": "Не синхронизировано",
       "outOfSyncBody": "В этой сборке есть локальные изменения, ещё не отправленные в её код доступа.",
       "outOfSyncAction": "Перезалить сборку",
-
       "inactiveToggleHint": "Эта сборка не активна — включать и отключать моды в игре можно только для активной сборки. Переключитесь на неё, чтобы управлять загрузкой."
     },
     "edit": {
@@ -256,15 +255,7 @@
     "checkForUpdates": "Проверить обновления",
     "generateSupportBundle": "Сообщить об ошибке",
     "latestVersion": "У вас последняя версия.",
-    "updateAvailable": "Доступна v{{version}} — установка…",
     "updateCheckFailed": "Не удалось проверить обновления: {{error}}"
-  },
-  "feedback": {
-    "sendFeedback": "Отправить отзыв",
-    "noGitHubPrompt": "Нет аккаунта GitHub?",
-    "nexusCta": "Оставьте отзыв на странице Nexus",
-    "translatedNote": "Пишите на своём языке — мы читаем каждый комментарий (он автоматически переводится на английский).",
-    "couldntOpen": "Не удалось открыть страницу Nexus: {{error}}"
   },
   "profileSwitcher": {
     "title": "Сборки",
@@ -950,6 +941,7 @@
     "closeEditor": "Закрыть редактор",
     "githubRepo": "Репозиторий GitHub",
     "nexusUrl": "Ссылка на мод Nexus",
+    "workshopUrl": "URL Мастерской Steam",
     "displayName": "Отображаемое имя",
     "displayDescription": "Отображаемое описание",
     "note": "Заметка",
@@ -963,6 +955,7 @@
     "empty": "пусто",
     "githubPlaceholder": "owner/repo",
     "nexusPlaceholder": "https://www.nexusmods.com/sts2/mods/123",
+    "workshopPlaceholder": "https://steamcommunity.com/sharedfiles/filedetails/?id=123",
     "displayDescriptionPlaceholder": "Показывается в списке модов",
     "displayNameHint": "Необязательная подпись, видимая только в менеджере. Имя в манифесте не меняется.",
     "displayDescriptionHint": "Необязательное описание только для менеджера — для непонятных или непереведённых модов.",
@@ -971,6 +964,7 @@
     "tagsPlaceholder": "утилита, бета",
     "noteHint": "Свободная форма. Показывается в строке мода, чтобы вы помнили, откуда он.",
     "otherLinkHint": "Для модов, которых нет на GitHub или Nexus.",
+    "workshopHint": "Официальный источник этого мода в Мастерской Steam.",
     "tagsHint": "Необязательные категории только для менеджера. Разделяйте теги запятыми.",
     "nexusOnlyMessage": "Мод только с Nexus — попробуйте получить репозиторий GitHub из описания на Nexus, чтобы обновления проверялись из обоих источников.",
     "searching": "Поиск…",
@@ -1419,7 +1413,6 @@
       "checking": "Проверка…",
       "inAppLogs": "Логи приложения",
       "latestVersion": "У вас последняя версия.",
-      "versionAvailable": "Доступна v{{version}} — установка…",
       "updateCheckFailed": "Не удалось проверить обновления: {{error}}"
     },
     "defaultPathMac": "~/Library/Application Support/Steam/steamapps/common/SlayTheSpire2",
@@ -1494,6 +1487,14 @@
     "latestTitle": "На последнем устанавливаемом релизе источника.",
     "updateAvailable": "Скачать обновление → v{{version}}",
     "updateClickTitle": "Скачать v{{target}} в список версий. Текущая установка и модпаки останутся на v{{current}}, пока вы не выберете версию.",
+    "updateFailureRecovery": {
+      "title": "Не удалось установить обновление для {{name}}",
+      "body": "Обновление не удалось сохранить. Можно пропустить эту опубликованную версию и попробовать снова, когда источник выпустит новую.",
+      "reason": "Причина: {{reason}}",
+      "unknownReason": "Неизвестная ошибка установки.",
+      "skip": "Пропустить это обновление",
+      "keepShowing": "Продолжать показывать"
+    },
     "closeSts2FirstDot": "Сначала закройте STS2.",
     "updating": "Обновление…",
     "updateBlockedByGameVersion": "Обновление заблокировано версией игры",
@@ -1528,10 +1529,15 @@
     "gitHub": "GitHub",
     "viewOnNexus": "Открыть на Nexus: {{url}}",
     "nexus": "Nexus",
+    "viewOnSteamWorkshop": "Открыть в Мастерской Steam: {{url}}",
+    "steamWorkshop": "Мастерская Steam",
     "openLink": "Открыть ссылку: {{url}}",
     "link": "Ссылка",
     "local": "Локальный",
     "unlinked": "Без привязки",
+    "workshopManagedTitle": "Управляется Мастерской Steam. Используйте настройки/порядок загрузки STS2 или откройте страницу Мастерской; менеджер не будет перемещать или удалять файлы Steam.",
+    "workshopManagedDesc": "Этими файлами управляет Steam; обновляйте, отменяйте подписку или восстанавливайте их в Мастерской Steam.",
+    "duplicateSourceWarning": "Если включены и этот мод, и копия из Мастерской Steam, STS2 может предпочесть копию из локальной папки mods.",
     "modActions": "Действия с модом",
     "copyVersion": "Копировать версию (v{{version}})",
     "customizeMenu": "Настроить меню…",
@@ -1553,6 +1559,8 @@
     "toast": {
       "updated": "«{{name}}» v{{version}} скачан в список версий",
       "updateFailed": "Не удалось обновить «{{name}}»: {{error}}",
+      "updateSkippedAfterFailure": "Этот неудачный апдейт для «{{name}}» пропущен до появления новой версии",
+      "updateSkipFailed": "Не удалось пропустить это обновление: {{error}}",
       "unpinned": "{{name}} разморожен",
       "pinned": "{{name}} заморожен — обновления и изменения сборок его не затронут",
       "pinAction": "заморозить",
@@ -1563,6 +1571,7 @@
       "repairNoGithub": "У «{{name}}» не привязан источник GitHub — восстановление загружает с GitHub. Сначала добавьте источник через «Изменить источники…».",
       "deleted": "Удалено: {{name}}",
       "deleteFailed": "Не удалось удалить {{name}}: {{error}}",
+      "workshopManaged": "{{name}} управляется Мастерской Steam. Откройте его в Steam, чтобы обновить, восстановить или отменить подписку.",
       "versionRemoved": "{{name}} v{{version}} удален из списка версий",
       "versionManualRemoved": "{{name}} v{{version}} удален, обновлено сборок: {{profiles}}",
       "versionRemoveFailed": "Не удалось удалить v{{version}}: {{error}}",
@@ -1625,6 +1634,14 @@
     "manifestVersion": "манифест v{{version}}",
     "versionOption": "{{version}} {{state}}",
     "versionOptionVersion": "v{{version}}",
+    "versionSource": {
+      "steamWorkshop": "Steam Workshop",
+      "gitHub": "GitHub",
+      "nexus": "Nexus",
+      "link": "Ссылка",
+      "manual": "Вручную",
+      "joiner": " + "
+    },
     "versionManageTitle": "Управлять сохраненными версиями",
     "versionManageHeading": "Версии {{mod}}",
     "versionManageSub": "Удаляйте старые сохраненные версии, которые больше не нужны. Активные версии и версии из сборок открывают мастер удаления.",
@@ -1638,6 +1655,9 @@
     "versionRemoveActiveReason": "Сначала переключитесь с этой активной версии.",
     "versionRemovePinnedReason": "Сначала разморозьте этот мод.",
     "versionRemoveProfileReason": "Используется в: {{profiles}}",
+    "versionRemoveWorkshopReason": "Управляется Steam Workshop.",
+    "versionSteamManaged": "Управляется Steam",
+    "versionOpenWorkshop": "Открыть Workshop",
     "versionRemoveConfirmTitle": "Удалить {{mod}} v{{version}}?",
     "versionRemoveConfirmDiskBody": "Это удалит сохраненную копию с диска и уберет ее из списка версий.",
     "versionRemoveConfirmCacheBody": "Это удалит сохраненный архив и уберет его из списка версий.",

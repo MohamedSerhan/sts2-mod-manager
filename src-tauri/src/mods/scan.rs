@@ -454,6 +454,7 @@ pub(crate) fn parse_manifest(
         display_description: None,
         bundle_members: vec![],
         bundle_member_ids: vec![],
+        ..ModInfo::default()
     })
 }
 
@@ -609,6 +610,7 @@ pub(super) fn pck_only_mod(pck_path: &Path, base_dir: &Path, enabled: bool) -> M
         display_description: None,
         bundle_members: vec![],
         bundle_member_ids: vec![],
+        ..ModInfo::default()
     }
 }
 
@@ -679,6 +681,7 @@ pub(super) fn dll_only_mod(dll_path: &Path, base_dir: &Path, enabled: bool) -> M
         display_description: None,
         bundle_members: vec![],
         bundle_member_ids: vec![],
+        ..ModInfo::default()
     }
 }
 
@@ -1006,6 +1009,7 @@ pub(super) fn scan_mods_inner(dir: &Path, enabled: bool) -> Vec<ModInfo> {
                         display_description: None,
                         bundle_members,
                         bundle_member_ids,
+                        ..ModInfo::default()
                     };
                     mods.push(info);
                     continue;
@@ -1247,6 +1251,7 @@ mod dedup_identity_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..ModInfo::default()
         }
     }
 

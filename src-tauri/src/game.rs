@@ -7,7 +7,7 @@ use crate::state::{AppState, LaunchMode};
 
 /// STS2's Steam AppID. Used to build the `steam://rungameid/<id>` URL
 /// the Steam launcher consumes.
-const STS2_STEAM_APPID: &str = "2868840";
+pub const STS2_STEAM_APPID: &str = "2868840";
 const STEAM_URL: &str = "steam://rungameid/2868840";
 
 /// Information about the detected game installation.
@@ -43,6 +43,24 @@ pub struct GameInfo {
 /// "scan multiple candidates" shape so adding e.g. an Application Support
 /// alias is a one-line change later.
 pub fn find_steam_path() -> Option<PathBuf> {
+    if let Ok(raw) = std::env::var("STS2_FIXTURE_STEAM_PATH") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            let path = PathBuf::from(trimmed);
+            if path.exists() {
+                log::info!(
+                    "STS2_FIXTURE_STEAM_PATH override - using {}",
+                    path.display()
+                );
+                return Some(path);
+            }
+            log::warn!(
+                "STS2_FIXTURE_STEAM_PATH points at {} but it does not exist",
+                path.display()
+            );
+        }
+    }
+
     #[cfg(target_os = "linux")]
     {
         let home = dirs::home_dir()?;
@@ -589,6 +607,11 @@ pub fn open_mod_folder(
                 return Ok(true);
             }
         }
+    }
+    if let Some(dir) = crate::mods::workshop::workshop_item_dir(trimmed) {
+        crate::external_open::open_external_detached(&dir)
+            .map_err(|e| format!("Failed to open Steam Workshop mod folder: {}", e))?;
+        return Ok(true);
     }
     Err(format!("Mod folder '{}' not found on disk.", trimmed))
 }

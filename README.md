@@ -43,6 +43,10 @@ exist elsewhere:
   up as pending so you know what to grab from Nexus. Re-shares reuse the
   same code so followers see "update available" instead of having to
   follow a new one.
+- **One Library for GitHub, Nexus Mods, and Steam Workshop.** The manager
+  keeps those sources visible side by side, tracks the exact source a pack
+  chose, and avoids silently swapping you to a different copy just because
+  Steam or Nexus has the same version number.
 - **Smart import.** Click a friend's link and the app figures out what to
   do: brand-new pack → confirm + install; you already have it but it's
   not active → "Switch to *X*?"; an update is pending → "Apply update?";
@@ -157,6 +161,17 @@ what is kept anywhere.
   scans filenames against known sources.
 - **Drag and drop** any `.zip` onto the window to install a mod.
 - **Quick Add by URL** for one-off installs from a GitHub or Nexus URL.
+
+### Supported mod sources
+- **GitHub.** Link a repo, install compatible releases, and include GitHub
+  release mods directly in shareable modpacks when redistribution is allowed.
+- **Nexus Mods.** Link Nexus pages, audit for available updates, and use the
+  downloads-folder watcher after you click Nexus's free Slow Download /
+  Manual button in your browser.
+- **Steam Workshop.** Subscribed Workshop mods appear in the normal Library
+  with Steam source labels and can be saved in modpacks by Workshop item ID.
+  The manager treats Workshop files as Steam-owned: it will not copy, move,
+  delete, repair, or auto-update them.
 
 ### Browse Mods
 - **GitHub search.** Full text search of GitHub repos with a Slay the Spire 2

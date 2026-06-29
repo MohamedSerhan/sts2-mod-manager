@@ -50,7 +50,7 @@ tokio-util = { version = "0.7", features = ["io"] }
 # previous defaults: charset/http2/system-proxy) so the shipped app's HTTPS/cert
 # behavior is unchanged from the 0.12 line, and add `query` for the calls in
 # download.rs / sharing/github.rs that use RequestBuilder::query().
-reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "blocking", "query", "charset", "http2", "system-proxy", "native-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "query", "charset", "http2", "system-proxy", "native-tls"] }
 sha2 = "0.11"
 hex = "0.4"
 zip = "8"

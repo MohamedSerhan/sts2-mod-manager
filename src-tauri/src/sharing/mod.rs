@@ -3658,6 +3658,7 @@ mod share_orchestration_tests {
             content_hash: Some(id.into()),
             archive_sha256: None,
             cache_relpath: None,
+            ..crate::mod_versions::ModVersionRecord::default()
         }
     }
 

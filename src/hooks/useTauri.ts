@@ -1,6 +1,111 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption, LocalModVersionRemovalPreview, ManualModVersionRemovalMode, ManualModVersionProfileReplacement, ManualModVersionRemovalResult, LaunchDiagnostics, LaunchHealthReport, LaunchQuarantineResult } from '../types';
 
+type LocalModVersionOptionWire = Partial<LocalModVersionOption> & {
+  modVersionId?: string;
+  folderName?: string | null;
+  modId?: string | null;
+  displayName?: string | null;
+  githubUrl?: string | null;
+  nexusUrl?: string | null;
+  installSource?: LocalModVersionOption['install_source'];
+  workshopItemId?: string | null;
+  workshopUrl?: string | null;
+  bundleMemberIds?: string[];
+  installedEnabled?: boolean;
+  usedByProfiles?: string[];
+};
+
+type LocalModVersionAffectedProfileWire = Partial<
+  LocalModVersionRemovalPreview['affected_profiles'][number]
+> & {
+  profileId?: string;
+  profileName?: string;
+};
+
+type LocalModVersionRemovalPreviewWire =
+  Partial<LocalModVersionRemovalPreview> & {
+    target?: LocalModVersionOptionWire;
+    affectedProfiles?: LocalModVersionAffectedProfileWire[];
+    replacementCandidates?: LocalModVersionOptionWire[];
+    canDeleteDirectly?: boolean;
+  };
+
+function normalizeLocalModVersionOption(
+  option: LocalModVersionOptionWire,
+): LocalModVersionOption {
+  return {
+    ...option,
+    mod_version_id: option.mod_version_id ?? option.modVersionId ?? '',
+    name: option.name ?? '',
+    version: option.version ?? '',
+    folder_name: option.folder_name ?? option.folderName ?? null,
+    mod_id: option.mod_id ?? option.modId ?? null,
+    display_name: option.display_name ?? option.displayName ?? null,
+    source: option.source ?? null,
+    github_url: option.github_url ?? option.githubUrl ?? null,
+    nexus_url: option.nexus_url ?? option.nexusUrl ?? null,
+    install_source: option.install_source ?? option.installSource,
+    workshop_item_id: option.workshop_item_id ?? option.workshopItemId ?? null,
+    workshop_url: option.workshop_url ?? option.workshopUrl ?? null,
+    bundle_member_ids: option.bundle_member_ids ?? option.bundleMemberIds ?? [],
+    installed: Boolean(option.installed),
+    installed_enabled: Boolean(
+      option.installed_enabled ?? option.installedEnabled,
+    ),
+    cached: Boolean(option.cached),
+    pinned: Boolean(option.pinned),
+    used_by_profiles: option.used_by_profiles ?? option.usedByProfiles ?? [],
+  };
+}
+
+function normalizeLocalModVersionAffectedProfile(
+  profile: LocalModVersionAffectedProfileWire,
+): LocalModVersionRemovalPreview['affected_profiles'][number] {
+  const profileId =
+    profile.profile_id ??
+    profile.profileId ??
+    profile.profile_name ??
+    profile.profileName ??
+    '';
+  return {
+    ...profile,
+    profile_id: profileId,
+    profile_name: profile.profile_name ?? profile.profileName ?? profileId,
+  };
+}
+
+function normalizeLocalModVersionRemovalPreview(
+  preview: LocalModVersionRemovalPreviewWire | null | undefined,
+): LocalModVersionRemovalPreview {
+  if (!preview?.target) {
+    throw new Error('Version removal preview was incomplete.');
+  }
+
+  const affectedProfiles = (
+    preview.affected_profiles ?? preview.affectedProfiles ?? []
+  ).map(normalizeLocalModVersionAffectedProfile);
+  const replacementCandidates = (
+    preview.replacement_candidates ?? preview.replacementCandidates ?? []
+  ).map(normalizeLocalModVersionOption);
+  const active = Boolean(preview.active);
+  const pinned = Boolean(preview.pinned);
+  return {
+    ...preview,
+    target: normalizeLocalModVersionOption(preview.target),
+    affected_profiles: affectedProfiles,
+    replacement_candidates: replacementCandidates,
+    active,
+    installed: Boolean(preview.installed),
+    cached: Boolean(preview.cached),
+    pinned,
+    can_delete_directly:
+      preview.can_delete_directly ??
+      preview.canDeleteDirectly ??
+      (!active && !pinned && affectedProfiles.length === 0),
+  };
+}
+
 // ── Game Detection & QOL ───────────────────────────────────────────────────
 
 export async function detectGamePath(): Promise<GameInfo> {
@@ -220,7 +325,11 @@ export async function getLibraryVersionOptions(): Promise<Record<string, LocalMo
 }
 
 export async function previewLibraryModVersionRemoval(modVersionId: string): Promise<LocalModVersionRemovalPreview> {
-  return invoke('preview_library_mod_version_removal', { modVersionId });
+  const preview = await invoke<LocalModVersionRemovalPreviewWire>(
+    'preview_library_mod_version_removal',
+    { modVersionId },
+  );
+  return normalizeLocalModVersionRemovalPreview(preview);
 }
 
 export async function removeLibraryModVersion(modVersionId: string): Promise<boolean> {
@@ -273,10 +382,16 @@ export async function selectProfileModVersion(
     currentModVersionId: current.mod_version_id ?? null,
     currentFolderName: current.folder_name ?? null,
     currentModId: current.mod_id ?? null,
+    currentInstallSource: current.install_source ?? null,
+    currentWorkshopItemId: current.workshop_item_id ?? null,
+    currentWorkshopUrl: current.workshop_url ?? null,
     selectedName: selected.name,
     selectedModVersionId: selected.mod_version_id ?? null,
     selectedFolderName: selected.folder_name ?? null,
     selectedModId: selected.mod_id ?? null,
+    selectedInstallSource: selected.install_source ?? null,
+    selectedWorkshopItemId: selected.workshop_item_id ?? null,
+    selectedWorkshopUrl: selected.workshop_url ?? null,
     applyToDisk,
   });
 }
@@ -290,10 +405,16 @@ export async function selectLibraryModVersion(
     currentModVersionId: current.mod_version_id ?? null,
     currentFolderName: current.folder_name ?? null,
     currentModId: current.mod_id ?? null,
+    currentInstallSource: current.install_source ?? null,
+    currentWorkshopItemId: current.workshop_item_id ?? null,
+    currentWorkshopUrl: current.workshop_url ?? null,
     selectedName: selected.name,
     selectedModVersionId: selected.mod_version_id ?? null,
     selectedFolderName: selected.folder_name ?? null,
     selectedModId: selected.mod_id ?? null,
+    selectedInstallSource: selected.install_source ?? null,
+    selectedWorkshopItemId: selected.workshop_item_id ?? null,
+    selectedWorkshopUrl: selected.workshop_url ?? null,
   });
 }
 
@@ -439,9 +560,10 @@ export async function setModSourcesFull(
   modName: string,
   githubRepo: string | null,
   nexusUrl: string | null,
+  workshopUrl: string | null,
   folderName: string | null = null,
 ): Promise<ModSourceEntry> {
-  return invoke('set_mod_sources_full', { modName, folderName, githubRepo, nexusUrl });
+  return invoke('set_mod_sources_full', { modName, folderName, githubRepo, nexusUrl, workshopUrl });
 }
 
 export async function removeModSource(

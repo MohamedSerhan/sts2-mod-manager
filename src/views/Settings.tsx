@@ -19,8 +19,6 @@ import {
 import { GITHUB_TOKEN_TEMPLATE_URL } from '../lib/githubLinks';
 import { open } from '@tauri-apps/plugin-dialog';
 import { downloadDir } from '@tauri-apps/api/path';
-import { check } from '@tauri-apps/plugin-updater';
-import { relaunch } from '@tauri-apps/plugin-process';
 import { Card } from '../components/Card';
 import { Select } from '../components/Select';
 import { Button } from '../components/Button';
@@ -60,7 +58,6 @@ import {
   restoreBackup,
   deleteBackup,
   getLaunchMode,
-  installAppUpdate,
   setLaunchMode,
   getNexusDownloadDir,
   setNexusDownloadDir,
@@ -77,9 +74,13 @@ type Tab = 'general' | 'customize' | 'accounts' | 'backups' | 'advanced';
 export function SettingsView({
   goToGeneralSignal,
   openRowMenuSettingsSignal = 0,
+  onCheckForAppUpdate,
+  checkingAppUpdate = false,
 }: {
   goToGeneralSignal?: number;
   openRowMenuSettingsSignal?: number;
+  onCheckForAppUpdate?: () => void | Promise<void>;
+  checkingAppUpdate?: boolean;
 }) {
   const { gameInfo, refreshAll } = useApp();
   const toast = useToast();
@@ -124,8 +125,6 @@ export function SettingsView({
   const [savingRetention, setSavingRetention] = useState(false);
 
   // ── Updates (Advanced) ──────────────────────────────
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
-
   // ── Dev-builds gate ─────────────────────────────────
   const [showDevBuilds, setShowDevBuilds] = useState(false);
   useEffect(() => {
@@ -424,23 +423,9 @@ export function SettingsView({
     }
   }
 
-  async function handleCheckUpdateNow() {
-    if (checkingUpdate) return;
-    setCheckingUpdate(true);
-    try {
-      const update = await check();
-      if (!update) {
-        toast.success(t('settings.advanced.latestVersion'));
-        return;
-      }
-      toast.success(t('settings.advanced.versionAvailable', { version: update.version }));
-      await installAppUpdate();
-      await relaunch();
-    } catch (e) {
-      toast.error(t('settings.advanced.updateCheckFailed', { error: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setCheckingUpdate(false);
-    }
+  function handleCheckUpdateNow() {
+    if (checkingAppUpdate) return;
+    void onCheckForAppUpdate?.();
   }
 
   const TABS: { id: Tab; label: string; count?: number }[] = [
@@ -691,7 +676,10 @@ export function SettingsView({
                 Home is now the single-block launcher; reference info +
                 support links live in Settings → General where they're
                 discoverable but out of the way. */}
-            <AboutCard />
+            <AboutCard
+              onCheckForAppUpdate={onCheckForAppUpdate}
+              checkingAppUpdate={checkingAppUpdate}
+            />
           </>
         )}
 
@@ -973,10 +961,10 @@ export function SettingsView({
                   variant="secondary"
                   size="sm"
                   onClick={handleCheckUpdateNow}
-                  disabled={checkingUpdate}
+                  disabled={checkingAppUpdate}
                 >
-                  <RefreshCw size={14} className={checkingUpdate ? 'animate-spin' : ''} />
-                  {checkingUpdate ? t('settings.advanced.checking') : t('settings.advanced.checkForUpdates')}
+                  <RefreshCw size={14} className={checkingAppUpdate ? 'animate-spin' : ''} />
+                  {checkingAppUpdate ? t('settings.advanced.checking') : t('settings.advanced.checkForUpdates')}
                 </Button>
               </div>
             </Card>

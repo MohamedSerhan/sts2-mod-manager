@@ -24,7 +24,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::mods::{merge_active_disabled_mods, scan_disabled_mods, scan_mods};
+use crate::mods::{scan_disabled_mods, scan_installed_mods_with_workshop, scan_mods};
 
 use super::crud::{
     load_profile, mod_identity_keys, profile_mod_artifact_id_matches,
@@ -183,8 +183,7 @@ fn snapshot_current_inner(
     config_path: Option<&Path>,
     game_version_for_filter: Option<&str>,
 ) -> Result<Profile> {
-    let mut all_mods =
-        merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
+    let mut all_mods = scan_installed_mods_with_workshop(mods_path, disabled_path);
     if let Some(config_path) = config_path {
         crate::mod_versions::enrich_mods_with_versions(&mut all_mods, config_path);
     }
@@ -524,6 +523,9 @@ pub fn apply_profile_with_pins(
         }
     }
 
+    let mut current_workshop = crate::mods::scan_workshop_mods_for_mods_path(mods_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut current_workshop, config_path);
+
     // Report enabled profile mods that we never saw on disk (neither enabled
     // nor disabled). Helps diagnose subscription-update issues where a
     // download landed under a different identifier than the profile expected,
@@ -535,6 +537,7 @@ pub fn apply_profile_with_pins(
         let found = current_enabled
             .iter()
             .chain(current_disabled.iter())
+            .chain(current_workshop.iter())
             .any(|disk_mod| profile_mod_matches_installed_with_registry(pm, disk_mod, config_path));
         if !found {
             let identity_key = format!(
@@ -1682,6 +1685,7 @@ mod pinned_download_tests {
             display_description: None,
             bundle_members: vec![],
             bundle_member_ids: vec![],
+            ..Default::default()
         }
     }
 

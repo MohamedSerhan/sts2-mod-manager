@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { check as checkUpdate } from '@tauri-apps/plugin-updater';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { downloadDir as pathDownloadDir } from '@tauri-apps/api/path';
 
@@ -16,10 +15,19 @@ import {
   NAVIGATION_LAYOUT_STORAGE_KEY,
 } from '../display/navigationLayout';
 
-function Wrap() {
+function Wrap({
+  onCheckForAppUpdate,
+  checkingAppUpdate,
+}: {
+  onCheckForAppUpdate?: () => void | Promise<void>;
+  checkingAppUpdate?: boolean;
+} = {}) {
   return (
     <AllProviders>
-      <SettingsView />
+      <SettingsView
+        onCheckForAppUpdate={onCheckForAppUpdate}
+        checkingAppUpdate={checkingAppUpdate}
+      />
     </AllProviders>
   );
 }
@@ -880,53 +888,34 @@ describe('<SettingsView>', () => {
 
   // ── Advanced tab: updater paths ──────────────────────────────────
 
-  it('Check for updates: "latest version" toast when no update', async () => {
-    const updateMock = vi.mocked(checkUpdate);
-    updateMock.mockResolvedValueOnce(null);
+  it('Check for updates: delegates Advanced button to the shared app-update checker', async () => {
+    const onCheckForAppUpdate = vi.fn();
     const user = userEvent.setup();
-    render(<Wrap />);
+    render(<Wrap onCheckForAppUpdate={onCheckForAppUpdate} />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /Advanced/ }));
     const checkBtn = await screen.findByRole('button', { name: /Check for updates/i });
     await user.click(checkBtn);
-    await waitFor(() => {
-      expect(screen.queryByText(/latest version/i)).toBeInTheDocument();
-    });
+    expect(onCheckForAppUpdate).toHaveBeenCalledTimes(1);
   });
 
-  it('Check for updates: invokes backend install when update is available', async () => {
-    const updateMock = vi.mocked(checkUpdate);
-    const downloadAndInstall = vi.fn(async () => {});
-    registerInvokeHandler('install_app_update', () => null);
-    updateMock.mockResolvedValueOnce({
-      version: '9.9.9',
-      downloadAndInstall,
-    } as never);
+  it('Check for updates: shows shared checking state in Advanced', async () => {
     const user = userEvent.setup();
-    render(<Wrap />);
+    render(<Wrap checkingAppUpdate />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /Advanced/ }));
-    const checkBtn = await screen.findByRole('button', { name: /Check for updates/i });
-    await user.click(checkBtn);
-    await waitFor(() => {
-      expect(getInvokeCalls().some((c) => c.cmd === 'install_app_update')).toBe(true);
-    });
-    expect(downloadAndInstall).not.toHaveBeenCalled();
-    expect(screen.queryByText(/9\.9\.9 available/)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Checking/i })).toBeDisabled();
   });
 
-  it('Check for updates: error path surfaces a toast', async () => {
-    const updateMock = vi.mocked(checkUpdate);
-    updateMock.mockRejectedValueOnce(new Error('updater fail'));
+  it('Check for updates: does not delegate while shared check is running', async () => {
+    const onCheckForAppUpdate = vi.fn();
     const user = userEvent.setup();
-    render(<Wrap />);
+    render(<Wrap onCheckForAppUpdate={onCheckForAppUpdate} checkingAppUpdate />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: /Advanced/ }));
-    const checkBtn = await screen.findByRole('button', { name: /Check for updates/i });
+    const checkBtn = await screen.findByRole('button', { name: /Checking/i });
     await user.click(checkBtn);
-    await waitFor(() => {
-      expect(screen.queryByText(/updater fail/)).toBeInTheDocument();
-    });
+    expect(onCheckForAppUpdate).not.toHaveBeenCalled();
   });
 
   // ── Early-return guards (empty inputs / no-op clicks) ─────────────
@@ -1191,19 +1180,14 @@ describe('<SettingsView>', () => {
     });
   });
 
-  it('Check for updates non-Error throw still toasts', async () => {
-    const updateMock = vi.mocked(checkUpdate);
-    // eslint-disable-next-line @typescript-eslint/no-throw-literal
-    updateMock.mockImplementationOnce(() => { throw 'upd string'; });
+  it('General footer Check for updates delegates to the shared app-update checker', async () => {
+    const onCheckForAppUpdate = vi.fn();
     const user = userEvent.setup();
-    render(<Wrap />);
+    render(<Wrap onCheckForAppUpdate={onCheckForAppUpdate} />);
     await waitFor(() => { expect(screen.getByText('Game Path')).toBeInTheDocument(); });
-    await user.click(screen.getByRole('button', { name: /Advanced/ }));
     const checkBtn = await screen.findByRole('button', { name: /Check for updates/i });
     await user.click(checkBtn);
-    await waitFor(() => {
-      expect(screen.queryByText(/Update check failed/)).toBeInTheDocument();
-    });
+    expect(onCheckForAppUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('Browse... non-Error throw still toasts', async () => {

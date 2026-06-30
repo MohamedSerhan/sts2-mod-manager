@@ -344,13 +344,33 @@ function versionOptionSourceIdentity(option: LocalModVersionOption): string {
     ?? 'local:unknown';
 }
 
+function sourceUrlHostname(source: string | null | undefined): string | null {
+  const value = source?.trim();
+  if (!value) return null;
+
+  try {
+    return new URL(value).hostname.toLocaleLowerCase();
+  } catch {
+    try {
+      return new URL(`https://${value}`).hostname.toLocaleLowerCase();
+    } catch {
+      return null;
+    }
+  }
+}
+
+function hostMatchesDomain(hostname: string | null, domain: string): boolean {
+  return hostname === domain || hostname?.endsWith(`.${domain}`) === true;
+}
+
 function sourceHasGithub(source: string | null | undefined): boolean {
   const value = source?.trim().toLocaleLowerCase() ?? '';
-  return value.startsWith('github:') || value.includes('github.com');
+  return value.startsWith('github:') || hostMatchesDomain(sourceUrlHostname(source), 'github.com');
 }
 
 function sourceHasNexus(source: string | null | undefined): boolean {
-  return (source?.trim().toLocaleLowerCase() ?? '').includes('nexusmods.com');
+  const value = source?.trim().toLocaleLowerCase() ?? '';
+  return value.startsWith('nexus:') || hostMatchesDomain(sourceUrlHostname(source), 'nexusmods.com');
 }
 
 function versionOptionSourceKeys(

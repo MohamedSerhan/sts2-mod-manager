@@ -1,352 +1,725 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>STS2 Mod Manager — Slay the Spire 2 mod manager</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>STS2 Mod Manager | Slay the Spire 2 mod manager</title>
 
-<!-- SEO -->
-<meta name="description" content="A free, open-source mod manager for Slay the Spire 2. Share modpacks with friends by code or one-click sts2mm:// link, or browse public packs from inside the app. Cross-platform for Windows, macOS, and Linux." />
-<meta name="keywords" content="slay the spire 2, slay the spire 2 mod manager, sts2 mod manager, sts2 mods, slay the spire 2 mods, mod loader slay the spire 2, slay the spire ii mods, slay the spire 2 modpack, sts2 mod loader, slay the spire 2 modpack browser, share slay the spire 2 modpacks" />
-<meta name="author" content="Mohamed Serhan" />
-<link rel="canonical" href="https://mohamedserhan.github.io/sts2-mod-manager/" />
+  <meta name="description" content="STS2 Mod Manager is a free, open-source Slay the Spire 2 mod manager for shareable modpacks, GitHub release mods, Nexus download watching, Steam Workshop references, backups, and safe launching." />
+  <meta name="keywords" content="Slay the Spire 2 mod manager, Slay the Spire 2 mod installer, Slay the Spire II mods, STS2 Mod Manager, STS2MM, STS2 mods, Slay the Spire 2 modpacks, STS2 modpacks, share Slay the Spire 2 modpacks, modpack manager, Tauri mod manager" />
+  <meta name="author" content="Mohamed Serhan" />
+  <meta name="robots" content="index,follow" />
+  <link rel="canonical" href="https://mohamedserhan.github.io/sts2-mod-manager/" />
 
-<!-- Google Search Console verification -->
-<meta name="google-site-verification" content="K5wgb5R4vGpNe1PtS_1mNU9QBP1u91XV-4u8-CI04wQ" />
+  <!-- Google Search Console verification -->
+  <meta name="google-site-verification" content="K5wgb5R4vGpNe1PtS_1mNU9QBP1u91XV-4u8-CI04wQ" />
 
-<!-- OpenGraph / Twitter — drives previews when the link is shared on Discord,
-     Reddit, Twitter, etc. -->
-<meta property="og:type" content="website" />
-<meta property="og:title" content="STS2 Mod Manager — Slay the Spire 2 mod manager" />
-<meta property="og:description" content="A free, open-source Slay the Spire 2 mod manager built around playing with friends. Share modpacks by code, one-click link, or browse public packs from inside the app. Cross-platform." />
-<meta property="og:url" content="https://mohamedserhan.github.io/sts2-mod-manager/" />
-<meta property="og:image" content="https://mohamedserhan.github.io/sts2-mod-manager/screenshots/hero-home.png" />
-<meta property="og:image:width" content="1280" />
-<meta property="og:image:height" content="800" />
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="STS2 Mod Manager" />
-<meta name="twitter:description" content="A free, open-source Slay the Spire 2 mod manager. Share modpacks with friends by code, one-click link, or browse public packs in-app." />
-<meta name="twitter:image" content="https://mohamedserhan.github.io/sts2-mod-manager/screenshots/hero-home.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="STS2 Mod Manager | Slay the Spire 2 mod manager" />
+  <meta property="og:description" content="A free, open-source Slay the Spire 2 mod manager for shareable modpacks, source-aware updates, backups, and fast launches." />
+  <meta property="og:url" content="https://mohamedserhan.github.io/sts2-mod-manager/" />
+  <meta property="og:image" content="https://mohamedserhan.github.io/sts2-mod-manager/screenshots/hero-home.png" />
+  <meta property="og:image:width" content="1280" />
+  <meta property="og:image:height" content="720" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="STS2 Mod Manager" />
+  <meta name="twitter:description" content="Shareable modpacks and source-aware Slay the Spire 2 mod management for Windows, macOS, and Linux." />
+  <meta name="twitter:image" content="https://mohamedserhan.github.io/sts2-mod-manager/screenshots/hero-home.png" />
 
-<!-- Schema.org SoftwareApplication — Google reads this for rich results -->
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "STS2 Mod Manager",
-  "alternateName": ["Slay the Spire 2 Mod Manager", "STS2MM"],
-  "description": "A cross-platform mod manager for Slay the Spire 2. Built around sharing modpacks — paste a friend's code, click an sts2mm:// link, or browse public packs from inside the app. The app handles the rest.",
-  "applicationCategory": "GameApplication",
-  "operatingSystem": "Windows, macOS, Linux",
-  "url": "https://github.com/MohamedSerhan/sts2-mod-manager",
-  "downloadUrl": "https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest",
-  "softwareVersion": "1.4.1",
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "screenshot": "https://mohamedserhan.github.io/sts2-mod-manager/screenshots/hero-home.png",
-  "author": {
-    "@type": "Person",
-    "name": "Mohamed Serhan",
-    "url": "https://github.com/MohamedSerhan"
-  },
-  "license": "https://opensource.org/licenses/MIT"
-}
-</script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "STS2 Mod Manager",
+    "alternateName": ["Slay the Spire 2 Mod Manager", "Slay the Spire II Mod Manager", "STS2MM"],
+    "description": "A free, open-source Slay the Spire 2 mod manager for shareable modpacks, source-aware updates, backups, and fast launches.",
+    "applicationCategory": "GameApplication",
+    "operatingSystem": "Windows, macOS, Linux",
+    "url": "https://mohamedserhan.github.io/sts2-mod-manager/",
+    "downloadUrl": "https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest",
+    "softwareVersion": "1.8.3",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "screenshot": [
+      "https://mohamedserhan.github.io/sts2-mod-manager/screenshots/hero-home.png",
+      "https://mohamedserhan.github.io/sts2-mod-manager/screenshots/modpacks-dark.png",
+      "https://mohamedserhan.github.io/sts2-mod-manager/screenshots/library-dark.png"
+    ],
+    "softwareHelp": "https://github.com/MohamedSerhan/sts2-mod-manager/issues",
+    "codeRepository": "https://github.com/MohamedSerhan/sts2-mod-manager",
+    "sameAs": ["https://github.com/MohamedSerhan/sts2-mod-manager"],
+    "inLanguage": "en",
+    "dateModified": "2026-06-30",
+    "license": "https://opensource.org/licenses/MIT",
+    "author": {
+      "@type": "Person",
+      "name": "Mohamed Serhan",
+      "url": "https://github.com/MohamedSerhan"
+    }
+  }
+  </script>
 
-<link rel="icon" type="image/png" href="icon.png" />
+  <link rel="icon" type="image/png" href="icon.png" />
 
-<style>
-  :root {
-    --bg: oklch(0.16 0.04 280);
-    --panel: oklch(0.20 0.04 280);
-    --line: oklch(0.28 0.05 280);
-    --ink: oklch(0.92 0.02 285);
-    --mute: oklch(0.72 0.02 285);
-    --gold: oklch(0.78 0.13 80);
-    --gold-ink: oklch(0.18 0.04 285);
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-  a { color: var(--gold); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  main { max-width: 920px; margin: 0 auto; padding: 56px 24px 80px; }
-  header { display: flex; align-items: center; gap: 18px; margin-bottom: 28px; }
-  header img { width: 64px; height: 64px; border-radius: 14px; }
-  h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
-  .tag { font-size: 14px; color: var(--mute); margin-top: 4px; }
-  .lede { font-size: 17px; line-height: 1.6; color: var(--ink); margin: 0 0 24px; }
-  h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 36px 0 12px; }
-  ul { padding-left: 20px; line-height: 1.65; color: var(--mute); }
-  ul li { margin-bottom: 4px; }
-  ul li b { color: var(--ink); font-weight: 600; }
-  .cta {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: var(--gold); color: var(--gold-ink);
-    border-radius: 8px; padding: 12px 22px;
-    font-weight: 600; font-size: 14.5px;
-    margin: 4px 8px 4px 0;
-    transition: background 0.15s;
-  }
-  .cta:hover { background: oklch(0.83 0.13 80); text-decoration: none; }
-  .cta-secondary {
-    background: var(--panel);
-    color: var(--ink);
-    border: 1px solid var(--line);
-  }
-  .cta-secondary:hover { background: oklch(0.24 0.05 280); }
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080b12;
+      --bg-alt: #0c1220;
+      --panel: #111827;
+      --panel-2: #151d31;
+      --line: #26324d;
+      --text: #f5f7fb;
+      --muted: #aab5c8;
+      --soft: #d8deeb;
+      --gold: #f4bf4f;
+      --gold-ink: #17130a;
+      --teal: #39d6ae;
+      --blue: #8ab3ff;
+      --danger: #f58b8b;
+      --shadow: rgba(0, 0, 0, 0.45);
+    }
 
-  /* Hero screenshot — first thing the eye lands on after the headline */
-  .hero-shot {
-    margin: 24px 0 0;
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid var(--line);
-    box-shadow: 0 12px 40px oklch(0 0 0 / 0.5);
-    background: var(--panel);
-  }
-  .hero-shot img {
-    width: 100%;
-    display: block;
-    height: auto;
-  }
+    * {
+      box-sizing: border-box;
+    }
 
-  /* Differentiator strip — what makes THIS one different */
-  .diff-grid {
-    display: grid;
-    gap: 14px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    margin-top: 14px;
-  }
-  .diff {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--gold);
-    border-radius: 10px;
-    padding: 16px 18px;
-  }
-  .diff h3 {
-    font-size: 14.5px; font-weight: 600;
-    margin: 0 0 6px; color: var(--ink);
-  }
-  .diff p {
-    font-size: 13px; color: var(--mute);
-    margin: 0; line-height: 1.55;
-  }
-  .diff p strong { color: var(--ink); font-weight: 500; }
-  @media (max-width: 720px) { .diff-grid { grid-template-columns: 1fr; } }
+    html {
+      scroll-behavior: smooth;
+    }
 
-  /* Inline screenshot cards under feature sections */
-  .shot-row {
-    display: grid;
-    gap: 18px;
-    grid-template-columns: 1fr 1fr;
-    margin: 16px 0 4px;
-  }
-  .shot {
-    border-radius: 10px;
-    overflow: hidden;
-    border: 1px solid var(--line);
-    background: var(--panel);
-  }
-  .shot img { width: 100%; display: block; height: auto; }
-  .shot-caption {
-    font-size: 12px; color: var(--mute);
-    padding: 8px 12px;
-    border-top: 1px solid var(--line);
-  }
-  @media (max-width: 720px) { .shot-row { grid-template-columns: 1fr; } }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
 
-  .grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; margin-top: 14px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
-  .card h3 { font-size: 14px; font-weight: 600; margin: 0 0 6px; color: var(--ink); }
-  .card p { font-size: 13px; color: var(--mute); margin: 0; line-height: 1.55; }
-  footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 13px; color: var(--mute); }
-  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
-</style>
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    img {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .skip-link {
+      position: absolute;
+      left: 16px;
+      top: -60px;
+      z-index: 20;
+      padding: 10px 14px;
+      background: var(--gold);
+      color: var(--gold-ink);
+      border-radius: 6px;
+      font-weight: 700;
+    }
+
+    .skip-link:focus {
+      top: 16px;
+    }
+
+    .site-header {
+      border-bottom: 1px solid var(--line);
+      background: rgba(8, 11, 18, 0.94);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(12px);
+    }
+
+    .nav {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      min-height: 68px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--text);
+      font-weight: 800;
+      min-width: 0;
+    }
+
+    .brand:hover {
+      text-decoration: none;
+    }
+
+    .brand img {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      flex: 0 0 auto;
+    }
+
+    .brand span {
+      overflow-wrap: anywhere;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .nav-links a {
+      color: var(--soft);
+      font-size: 14px;
+      padding: 8px 10px;
+      border-radius: 6px;
+    }
+
+    .nav-links a:hover {
+      background: var(--panel);
+      text-decoration: none;
+    }
+
+    .section,
+    .hero {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      padding: 40px 0 30px;
+    }
+
+    .version {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 14px;
+      color: var(--gold);
+      font-size: 14px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .version::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--teal);
+      box-shadow: 0 0 18px rgba(57, 214, 174, 0.7);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 14px;
+      font-size: 48px;
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-bottom: 10px;
+      font-size: 30px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin-bottom: 8px;
+      font-size: 18px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .lede {
+      max-width: 780px;
+      color: var(--soft);
+      font-size: 20px;
+      line-height: 1.6;
+      margin-bottom: 22px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 11px 16px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      font-weight: 800;
+      color: var(--gold-ink);
+      background: var(--gold);
+      box-shadow: 0 10px 28px rgba(244, 191, 79, 0.18);
+      max-width: 100%;
+    }
+
+    .button:hover {
+      text-decoration: none;
+      background: #ffd06b;
+    }
+
+    .button.secondary {
+      color: var(--text);
+      background: var(--panel);
+      border-color: var(--line);
+      box-shadow: none;
+    }
+
+    .button.secondary:hover {
+      background: var(--panel-2);
+    }
+
+    .route-note {
+      max-width: 780px;
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 22px;
+    }
+
+    .route-note strong {
+      color: var(--text);
+    }
+
+    .hero-shot {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--panel);
+      box-shadow: 0 22px 58px var(--shadow);
+    }
+
+    .hero-shot img {
+      display: block;
+      width: 100%;
+    }
+
+    .proof-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .proof {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .proof strong {
+      display: block;
+      color: var(--text);
+      font-size: 15px;
+    }
+
+    .band {
+      border-top: 1px solid var(--line);
+      background: var(--bg-alt);
+    }
+
+    .section {
+      padding: 42px 0;
+    }
+
+    .section > p {
+      max-width: 780px;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 18px;
+    }
+
+    .card p {
+      color: var(--muted);
+      margin-bottom: 0;
+      font-size: 15px;
+    }
+
+    .card .tag {
+      display: inline-flex;
+      margin-bottom: 10px;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .screens {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .screen {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    .screen.large {
+      grid-column: 1 / -1;
+    }
+
+    .screen img {
+      display: block;
+      width: 100%;
+    }
+
+    .caption {
+      border-top: 1px solid var(--line);
+      padding: 12px 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .caption strong {
+      color: var(--text);
+    }
+
+    .source-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .source {
+      border-left: 4px solid var(--blue);
+    }
+
+    .source:nth-child(2) {
+      border-left-color: var(--gold);
+    }
+
+    .source:nth-child(3) {
+      border-left-color: var(--teal);
+    }
+
+    .source:nth-child(4) {
+      border-left-color: var(--danger);
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      counter-reset: steps;
+      margin-top: 18px;
+    }
+
+    .step {
+      counter-increment: steps;
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 46px 16px 16px;
+      min-height: 178px;
+    }
+
+    .step::before {
+      content: counter(steps);
+      position: absolute;
+      left: 16px;
+      top: 14px;
+      width: 24px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: var(--gold);
+      color: var(--gold-ink);
+      font-weight: 900;
+      font-size: 14px;
+    }
+
+    .step strong {
+      display: block;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .note {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 18px;
+      color: var(--muted);
+      margin-top: 18px;
+    }
+
+    .note strong {
+      color: var(--text);
+    }
+
+    .footer {
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      padding: 28px 0 42px;
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      font-size: 14px;
+    }
+
+    @media (max-width: 900px) {
+      .proof-row,
+      .grid,
+      .steps {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .source-list {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .nav {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 12px 0;
+      }
+
+      .nav-links {
+        justify-content: flex-start;
+      }
+
+      h1 {
+        font-size: 36px;
+      }
+
+      h2 {
+        font-size: 25px;
+      }
+
+      .lede {
+        font-size: 18px;
+      }
+
+      .proof-row,
+      .grid,
+      .screens,
+      .steps {
+        grid-template-columns: 1fr;
+      }
+
+      .step {
+        min-height: auto;
+      }
+    }
+  </style>
 </head>
 <body>
-<main>
-  <header>
-    <img src="icon.png" alt="STS2 Mod Manager icon" />
-    <div>
-      <h1>STS2 Mod Manager</h1>
-      <div class="tag">A free, open-source <strong>Slay the Spire 2 mod manager</strong></div>
-    </div>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <nav class="nav" aria-label="Primary">
+      <a class="brand" href="https://mohamedserhan.github.io/sts2-mod-manager/" aria-label="STS2 Mod Manager home">
+        <img src="icon.png" alt="" />
+        <span>STS2 Mod Manager</span>
+      </a>
+      <div class="nav-links">
+        <a href="https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest">Download</a>
+        <a href="#screenshots">Screenshots</a>
+        <a href="#sources">Sources</a>
+        <a href="https://github.com/MohamedSerhan/sts2-mod-manager">GitHub</a>
+      </div>
+    </nav>
   </header>
 
-  <p class="lede">
-    Built around playing your friends' modpacks. Share by code
-    (<code>jess/AA5A-315D-61AE</code>) or one-click link
-    (<code>sts2mm://import/...</code>) — or browse <b>public modpacks</b>
-    other players have shared, right from inside the app. Manage profiles,
-    audit versions, auto-backup before launch. Cross-platform for
-    <b>Windows, macOS, and Linux</b>. No account, no tracking, MIT-licensed.
-  </p>
-
-  <p>
-    <a class="cta" href="https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest">Download latest release →</a>
-    <a class="cta cta-secondary" href="https://github.com/MohamedSerhan/sts2-mod-manager">View on GitHub</a>
-  </p>
-
-  <!-- Hero screenshot. Place a 1280×800-ish PNG at docs/screenshots/hero-home.png. -->
-  <div class="hero-shot">
-    <img src="screenshots/hero-home.png" alt="STS2 Mod Manager Home view — active profile hero with Launch and share-code Quick Add" />
-  </div>
-
-  <h2>Why this one</h2>
-  <p style="color: var(--mute); margin-top: 4px; font-size: 14px;">
-    This one has a social focus — built around sharing modpacks and playing
-    the same builds as your friends. A few choices follow from that.
-  </p>
-
-  <div class="diff-grid">
-    <div class="diff">
-      <h3>Code or one-click link</h3>
-      <p>
-        Friend pastes you <strong>jess/AA5A-315D-61AE</strong>, or clicks
-        <strong>sts2mm://import/jess/AA5A-315D-61AE</strong>. Either way the
-        app installs the pack — bundled mods and GitHub releases pull
-        automatically; Nexus-only mods that weren't bundled surface as
-        pending. Re-shares reuse the same code so followers see "update
-        available" instead of having to follow a new code.
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <p class="version">Version 1.8.3 for Windows, macOS, and Linux</p>
+      <h1 id="hero-title">The open-source Slay the Spire 2 mod manager</h1>
+      <p class="lede">
+        STS2 Mod Manager helps you follow friends' modpacks, launch safely,
+        track exact mod sources, and keep backups close when a run setup goes sideways.
       </p>
-    </div>
-    <div class="diff">
-      <h3>Browse public modpacks in-app</h3>
-      <p>
-        A dedicated <strong>Browse Modpacks</strong> tab lists every pack
-        people have opted into sharing publicly. One click installs any
-        pack with the same smart-import flow as paste-a-code, with
-        <strong>live download progress</strong> showing which mod is pulling
-        and how far through the pack you are. Your own packs default to
-        Friends-only — flip Visibility on the Publish dialog when you want
-        to list one.
+      <div class="actions">
+        <a class="button" href="https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest">Download from GitHub Releases</a>
+        <a class="button secondary" href="https://github.com/MohamedSerhan/sts2-mod-manager">View source</a>
+      </div>
+      <p class="route-note">
+        <strong>App downloads are hosted on GitHub Releases.</strong>
+        Nexus Mods and Steam Workshop are supported as mod source integrations,
+        not manager distribution channels.
       </p>
-    </div>
-    <div class="diff">
-      <h3>Smart import routing</h3>
-      <p>
-        Click a share link and the app figures out what to do:
-        <strong>new pack</strong> → confirm + install; pack you already have
-        → "switch to it?"; update pending → "apply update?"; already on the
-        latest → friendly "you're up to date" toast. Same logic whether you
-        paste the code or click the link.
-      </p>
-    </div>
-    <div class="diff">
-      <h3>Game-version aware Repair</h3>
-      <p>
-        If a mod's latest release needs a newer game build than yours, Repair
-        <strong>walks back through the mod's release history</strong> and
-        installs the newest version that's actually compatible with your
-        Slay the Spire 2 — instead of installing something the game's loader
-        will silently skip.
-      </p>
-    </div>
-    <div class="diff">
-      <h3>Drift detection</h3>
-      <p>
-        When your installed mods diverge from the active profile (you toggled
-        something, an update reshaped a mod), the app flags it with a
-        <strong>one-click Repair</strong> that re-applies the manifest. No more
-        wondering why a profile feels different than last session.
-      </p>
-    </div>
-    <div class="diff">
-      <h3>Pin = version <em>and</em> state</h3>
-      <p>
-        Most managers pin only the version. This one pins
-        <strong>both the version and the on/off state</strong>, so a modpack
-        update from a curator can't auto-toggle a mod you specifically wanted
-        on or off.
-      </p>
-    </div>
-    <div class="diff">
-      <h3>Audit you can act on</h3>
-      <p>
-        Settings → Audit shows every mod with a colored LED for its real
-        state: up to date, update available, won't load on your game,
-        release missing assets, no source linked. Update / Pin / Repair
-        actions live <strong>on the row</strong>.
-      </p>
-    </div>
-    <div class="diff">
-      <h3>No account, no telemetry</h3>
-      <p>
-        Open source, MIT-licensed, ships as a standalone Tauri app. Your
-        mod sources are GitHub releases and (optionally, with a free key)
-        Nexus. <strong>Nothing leaves the app</strong> except the network
-        calls you'd make yourself.
-      </p>
-    </div>
-  </div>
+      <div class="hero-shot">
+        <img src="screenshots/hero-home.png" alt="STS2 Mod Manager Home view with the current top bar interface and fake Daily Cheese Build sample pack" />
+      </div>
+      <div class="proof-row" aria-label="Highlights">
+        <div class="proof"><strong>No telemetry</strong> Optional accounts only for flows you choose.</div>
+        <div class="proof"><strong>Share codes</strong> Paste a code or click an `sts2mm://` link.</div>
+        <div class="proof"><strong>Source-aware</strong> GitHub, Nexus, Workshop, and manual archives stay distinct.</div>
+        <div class="proof"><strong>Backups first</strong> Launch and restore flows are built around recovery.</div>
+      </div>
+    </section>
 
-  <h2>Manage mods</h2>
-  <p style="color: var(--mute); margin-top: 4px; font-size: 14px;">
-    Toggle, pin, repair, audit. Advanced toggle on each screen unlocks the
-    deeper controls when you want them.
-  </p>
-  <div class="shot-row">
-    <div class="shot">
-      <img src="screenshots/mods-view.png" alt="Mods view — toggleable mod list with version pills and advanced kebab" />
-      <div class="shot-caption">Mods view: toggle, pin, source-link, repair (advanced).</div>
+    <div class="band">
+      <section class="section" aria-labelledby="features-title">
+        <h2 id="features-title">Built For Real Modded Runs</h2>
+        <p>
+          The manager is designed for the messy middle: friend packs, pinned
+          versions, update drift, downloaded archives, and Steam-owned Workshop
+          items living in the same library without losing their provenance.
+        </p>
+        <div class="grid">
+          <article class="card">
+            <span class="tag">Modpacks</span>
+            <h3>Follow, share, and re-share</h3>
+            <p>Install a pack by code or link, keep the same code when a curator updates it, and browse public packs from inside the app.</p>
+          </article>
+          <article class="card">
+            <span class="tag">Repair</span>
+            <h3>Match the game you have</h3>
+            <p>Repair walks release history and chooses the newest mod build compatible with your current Slay the Spire 2 version.</p>
+          </article>
+          <article class="card">
+            <span class="tag">Library</span>
+            <h3>Disk state stays visible</h3>
+            <p>The Mod Library separates installed files from active modpack membership, with source labels and row actions where you need them.</p>
+          </article>
+          <article class="card">
+            <span class="tag">Safety</span>
+            <h3>Backups before launch</h3>
+            <p>Automatic backups, restore prompts, and recovery-minded confirmations help you get back to a known-good setup.</p>
+          </article>
+          <article class="card">
+            <span class="tag">Pins</span>
+            <h3>Lock version and state</h3>
+            <p>Pinned mods keep both their version and enabled/disabled state, even when a followed modpack changes later.</p>
+          </article>
+          <article class="card">
+            <span class="tag">Open</span>
+            <h3>MIT licensed</h3>
+            <p>The app is open source, built with Tauri 2, React, TypeScript, and Rust, and releases are built in public.</p>
+          </article>
+        </div>
+      </section>
     </div>
-    <div class="shot">
-      <img src="screenshots/audit.png" alt="Audit view — color-coded mod status with update/pin/repair actions per row" />
-      <div class="shot-caption">Audit: every mod's compatibility state at a glance.</div>
+
+    <section id="screenshots" class="section" aria-labelledby="screenshots-title">
+      <h2 id="screenshots-title">Current Screenshots</h2>
+      <p>
+        Fresh screenshots use fake sample data and the current topbar interface.
+        The old sidebar layout and changelog/what's-new banner are not shown.
+      </p>
+      <div class="screens">
+        <figure class="screen large">
+          <img src="screenshots/hero-home.png" alt="Home view with fake Daily Cheese Build modpack, launch controls, share code, and recent packs" />
+          <figcaption class="caption"><strong>Home:</strong> active modpack, launch controls, sync state, and recent packs in the topbar UI.</figcaption>
+        </figure>
+        <figure class="screen">
+          <img src="screenshots/modpacks-dark.png" alt="Modpacks view with fake share code input, update state, and sample modpack cards" />
+          <figcaption class="caption"><strong>Modpacks:</strong> follow packs, apply updates, import `.sts2pack` files, or create your own.</figcaption>
+        </figure>
+        <figure class="screen">
+          <img src="screenshots/library-dark.png" alt="Mod Library view with fake installed mods, source labels, tags, and audit controls" />
+          <figcaption class="caption"><strong>Mod Library:</strong> installed mods, source labels, tags, audit controls, and active-pack membership.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <div class="band">
+      <section id="sources" class="section" aria-labelledby="sources-title">
+        <h2 id="sources-title">Source Compatibility</h2>
+        <p>
+          STS2 Mod Manager can work with several mod source types while keeping
+          ownership clear. This is about managing mods; the manager app itself
+          is still downloaded from GitHub Releases.
+        </p>
+        <div class="source-list">
+          <article class="card source">
+            <h3>GitHub releases</h3>
+            <p>Install compatible release assets, update linked mods, and include redistributable release assets in shared modpacks.</p>
+          </article>
+          <article class="card source">
+            <h3>Nexus Mods</h3>
+            <p>Link mod pages, audit known sources, open the Files page in your browser, and let the downloads watcher install the saved archive.</p>
+          </article>
+          <article class="card source">
+            <h3>Steam Workshop</h3>
+            <p>Subscribed Workshop items appear in the Library and can be referenced by item ID. Steam keeps ownership of the files.</p>
+          </article>
+          <article class="card source">
+            <h3>Manual archives</h3>
+            <p>Drag and drop `.zip`, `.7z`, or `.rar` archives when a mod has no source link the app can automate.</p>
+          </article>
+        </div>
+      </section>
     </div>
-  </div>
 
-  <h2>Share, follow &amp; discover modpacks</h2>
-  <p style="color: var(--mute); margin-top: 4px; font-size: 14px;">
-    Share what you play. Subscribe to friends' packs and get an
-    "update available" card when they re-share. Or browse public packs
-    other players have listed — no friend code needed.
-  </p>
-  <div class="shot-row">
-    <div class="shot">
-      <img src="screenshots/profiles.png" alt="Profiles view — modpack share codes, drift status, and management" />
-      <div class="shot-caption">Profiles: share codes, drift detection, one-click switch.</div>
-    </div>
-    <div class="shot">
-      <img src="screenshots/browse.png" alt="Browse Mods view — search GitHub and Nexus from inside the app" />
-      <div class="shot-caption">Browse Mods: search GitHub topics and Nexus trending / latest. A separate Browse Modpacks tab lists public packs.</div>
-    </div>
-  </div>
+    <section class="section" aria-labelledby="quick-start-title">
+      <h2 id="quick-start-title">Quick Start</h2>
+      <p>From install to launch, the happy path is short.</p>
+      <div class="steps" aria-label="Quick start steps">
+        <div class="step"><strong>Download</strong><span>Get the latest Windows, macOS, or Linux build from GitHub Releases.</span></div>
+        <div class="step"><strong>Find the game</strong><span>Let onboarding detect Slay the Spire 2 or choose the install folder.</span></div>
+        <div class="step"><strong>Add mods</strong><span>Use an archive, URL, downloads watcher, or existing Workshop subscriptions.</span></div>
+        <div class="step"><strong>Join a pack</strong><span>Paste a share code, click an `sts2mm://` link, import a pack file, or browse public packs.</span></div>
+        <div class="step"><strong>Launch</strong><span>The app backs up first, then starts the active modpack.</span></div>
+      </div>
+      <div class="note">
+        <strong>Privacy note:</strong> there is no telemetry. GitHub sign-in, Nexus API keys,
+        publishing, and support bundles are optional flows you choose inside the app.
+      </div>
+    </section>
+  </main>
 
-  <p style="margin-top: 14px; font-size: 12.5px; color: var(--mute); border-left: 2px solid var(--line); padding-left: 12px;">
-    <b style="color: var(--ink);">A note on Nexus.</b> Free-tier only.
-    The app opens the mod's Files page in your browser; you click
-    Nexus's <b>Slow Download</b> / <b>Manual</b> button (the free one),
-    wait the few seconds, and the browser drops a zip into
-    <code>~/Downloads</code>. The app's folder watcher picks it up and
-    installs automatically. Don't click Nexus's <b>Mod Manager
-    Download</b> — its <code>nxm://</code> deep-link isn't wired
-    through to the install pipeline yet, so nothing happens. Premium
-    accounts use the same free-tier flow, so paid subscribers don't get
-    faster downloads here.
-  </p>
-
-  <h2>Quick start</h2>
-  <ul>
-    <li><b>Download</b> the installer for your platform (Windows setup .exe, macOS .dmg, Linux .deb / .rpm / .AppImage).</li>
-    <li><b>Run it.</b> The first-launch wizard auto-detects your Slay the Spire 2 install via Steam — and remembers a manually picked folder across restarts if you launch the game directly.</li>
-    <li><b>Got a code?</b> Paste it on Home and hit Add Pack. Bundled and GitHub-sourced mods install automatically; Nexus-only mods that weren't bundled show as pending so you know what to grab from Nexus.</li>
-    <li><b>Got a link?</b> Click <code>sts2mm://import/...</code> and the app does the rest — install, switch, or apply pending update depending on what you already have.</li>
-    <li><b>No code?</b> Open <b>Browse Modpacks</b> in the sidebar and one-click install any public pack — live progress shows which mod is downloading.</li>
-    <li><b>Hit Launch.</b> Auto-backup runs first.</li>
-  </ul>
-
-  <h2>Source &amp; bug reports</h2>
-  <ul>
-    <li><a href="https://github.com/MohamedSerhan/sts2-mod-manager">Source code on GitHub</a> — MIT licensed.</li>
-    <li><a href="https://github.com/MohamedSerhan/sts2-mod-manager/issues">Report a bug</a> — the in-app <em>Home → Generate support bundle</em> button helps.</li>
-    <li><a href="https://github.com/MohamedSerhan/sts2-mod-manager/releases">All releases</a> — including pre-release builds.</li>
-  </ul>
-
-  <footer>
-    Built by <a href="https://github.com/MohamedSerhan">Mohamed Serhan</a> with Tauri 2 + React + Rust.
+  <footer class="footer">
+    Built by <a href="https://github.com/MohamedSerhan">Mohamed Serhan</a>.
+    Source, issues, and app downloads live on
+    <a href="https://github.com/MohamedSerhan/sts2-mod-manager">GitHub</a>.
     Slay the Spire 2 is a trademark of Mega Crit; this project is unaffiliated.
   </footer>
-</main>
 </body>
 </html>

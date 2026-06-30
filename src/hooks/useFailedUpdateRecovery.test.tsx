@@ -106,6 +106,34 @@ describe('useFailedUpdateRecovery', () => {
     expect(await screen.findByText(/Could not skip this update: permission denied/i)).toBeInTheDocument();
   });
 
+  it('keeps showing the failed update when the user cancels recovery', async () => {
+    const user = userEvent.setup();
+    const { result } = renderHook(() => useFailedUpdateRecovery(), { wrapper: Providers });
+    let recovery!: Promise<boolean>;
+
+    act(() => {
+      recovery = result.current({
+        modName: 'CancelMod',
+        skipVersion: 'v5.0.0',
+        error: null,
+      });
+    });
+
+    const dialog = await screen.findByRole('dialog', {
+      name: /Could not install update for CancelMod/i,
+    });
+    expect(within(dialog).getByText(/Reason: Unknown install error\./i)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /Keep showing/i }));
+
+    let recovered = true;
+    await act(async () => {
+      recovered = await recovery;
+    });
+
+    expect(recovered).toBe(false);
+    expect(snoozeCalls()).toHaveLength(0);
+  });
+
   it('keeps a saved skip even when the refresh callback fails', async () => {
     registerInvokeHandler('set_mod_snooze', () => true);
     const user = userEvent.setup();

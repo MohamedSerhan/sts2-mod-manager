@@ -37,6 +37,27 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.8.3] - 2026-06-29
+
+### Added
+
+- Steam Workshop mods now appear in the Mod Library with Steam badges, editable manager metadata, and modpack inclusion without copying Steam files.
+
+### Changed
+
+- The app now keeps feedback in the Report a bug flow instead of showing separate feedback buttons.
+
+### Fixed
+
+- Mod action menus now stay fully reachable when opened near the bottom of the list.
+- Failed mod updates can now be skipped from the recovery prompt when a source publishes a mismatched version.
+- Manual app update checks now show the update banner so you can choose when to install.
+- Fixed Steam Workshop mods such as BaseLib not appearing after refresh when Steam stores them inside an extra folder.
+- Fixed Nexus updates so separate downloads on the same mod page, such as beta and release files, no longer trigger the wrong update prompt.
+- Fixed Nexus updates so stored SlayTheStats versions keep their downloaded version label instead of appearing as version 0.
+- Fixed version removal so broken versions can be cleaned from followed modpacks without duplicating the modpack first.
+- Fixed removing unused saved versions so the Versions dialog no longer errors or removes a matching installed mod.
+
 ## [1.8.2] - 2026-06-27
 
 ### Added

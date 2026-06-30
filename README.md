@@ -1,15 +1,16 @@
 <p align="center">
-  <img src="public/icon.png?v=2" alt="STS2 Mod Manager" width="128" height="128" />
+  <img src="public/icon.png?v=2" alt="STS2 Mod Manager" width="96" height="96" />
 </p>
 
 <h1 align="center">STS2 Mod Manager</h1>
 
 <p align="center">
-  A cross-platform mod manager for <strong>Slay the Spire 2</strong>.<br/>
-  Built around playing your friends' modpacks — share via code or one-click link.
+  A free, open-source <strong>Slay the Spire 2 mod manager</strong> focused on
+  fast launches, shareable modpacks, source-aware updates, and safe backups.
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/current-1.8.3-f4bf4f" alt="Current release: 1.8.3" />
   <img src="https://img.shields.io/badge/Windows-0078D6?logo=windows&logoColor=white" alt="Windows" />
   <img src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white" alt="macOS" />
   <img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" alt="Linux" />
@@ -17,423 +18,132 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest"><strong>Download latest →</strong></a>
-  ·
+  <a href="https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest"><strong>Download from GitHub Releases</strong></a>
+  &nbsp;|&nbsp;
   <a href="https://mohamedserhan.github.io/sts2-mod-manager/">Website</a>
-  ·
+  &nbsp;|&nbsp;
   <a href="https://github.com/MohamedSerhan/sts2-mod-manager/issues">Report a bug</a>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/hero-home.png?v=1" alt="STS2 Mod Manager Home view — active modpack hero with Launch and a share-code chip" width="900" />
+  <img src="docs/screenshots/hero-home.png?v=2" alt="STS2 Mod Manager Home view with the current top bar interface and fake modpack data" width="960" />
 </p>
 
----
+## At a Glance
 
-## Why this one
+| Need | What the app does |
+| --- | --- |
+| Install the manager | Download Windows, macOS, and Linux builds from [GitHub Releases](https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest). |
+| Play the same setup as friends | Paste a share code or click an `sts2mm://` link to install, switch to, or update a modpack. |
+| Keep sources clear | Track GitHub releases, Nexus pages/downloads, Steam Workshop subscriptions, and manual archives without pretending they are the same thing. |
+| Avoid broken launches | Repair chooses the newest mod release compatible with your Slay the Spire 2 game version. |
+| Recover quickly | The app auto-backs up before launch and can restore a previous setup. |
+| Stay private | No telemetry. Optional accounts and support bundles are only used when you choose those flows. |
 
-This mod manager has a social focus — built around sharing modpacks and
-playing the same builds as your friends. The bits that don't usually
-exist elsewhere:
+## Why Players Use It
 
-- **Share by code or one-click link.** Friend pastes you
-  `jess/AA5A-315D-61AE`, or clicks `sts2mm://import/jess/AA5A-315D-61AE`.
-  Either way the app installs the pack — bundled mods and GitHub releases
-  pull automatically; any Nexus-only mods the curator didn't bundle show
-  up as pending so you know what to grab from Nexus. Re-shares reuse the
-  same code so followers see "update available" instead of having to
-  follow a new one.
-- **One Library for GitHub, Nexus Mods, and Steam Workshop.** The manager
-  keeps those sources visible side by side, tracks the exact source a pack
-  chose, and avoids silently swapping you to a different copy just because
-  Steam or Nexus has the same version number.
-- **Smart import.** Click a friend's link and the app figures out what to
-  do: brand-new pack → confirm + install; you already have it but it's
-  not active → "Switch to *X*?"; an update is pending → "Apply update?";
-  already on the latest → friendly "you're already on this" toast.
-- **Game-version aware Repair.** When a mod's latest release needs a
-  newer Slay the Spire 2 build than yours, Repair walks back through
-  the mod's release history and installs the newest version that's
-  *actually compatible* with your game. No more "the manager says it's
-  installed but the game won't load it."
-- **Drift detection.** If your installed mods diverge from the active
-  profile (you toggled something, an update reshaped a mod), the app
-  flags it with a one-click Repair that re-applies the manifest.
-- **Pin locks both version and on/off state.** Most managers only pin
-  versions; a curator's modpack update can still toggle your pinned
-  mods. This one prevents that.
-- **No account, no telemetry.** Open source, MIT, ships standalone.
-  Network calls go to GitHub releases and (optionally) the Nexus API. The
-  only other outbound traffic is opt-in: if you hit **Report a bug**, a
-  redacted diagnostic report (tokens, file paths, and your username stripped)
-  is uploaded so it can be linked in a GitHub issue — nothing leaves the app
-  unless you choose to send it.
+- **Modpacks first.** Follow a friend's pack by code, publish your own, browse public packs, and keep followers on the same share code when you re-share.
+- **Current topbar workflow.** Home, Modpacks, Mod Library, and Settings live in the top bar; the active pack and launch controls stay reachable.
+- **Source-aware updates.** GitHub releases can auto-update, Nexus files are handled through the browser/download watcher, and Workshop items stay Steam-owned.
+- **Pin with intent.** Pinning locks both version and enabled/disabled state so a curator update cannot flip a mod you deliberately pinned.
+- **Drift detection.** If disk state no longer matches the active modpack, the app flags it and offers one-click repair.
+- **Open and inspectable.** MIT licensed, built in public with Tauri 2, React, TypeScript, and Rust.
 
----
+## Screenshots
 
-## Status
+These screenshots use fake sample data and the current no-sidebar/topbar UI.
 
-**Feature-complete and usable for daily play.** Designed to keep working through
-the Slay the Spire 2 1.0 launch and beyond without needing a manager update —
-the game-version, mod-source, and share pipelines all read what the game and
-mods ship today rather than baking in current values. PRs welcome; the codebase
-is small enough that most additions are straightforward.
+| Home | Modpacks | Mod Library |
+| --- | --- | --- |
+| <img src="docs/screenshots/hero-home.png?v=2" alt="Home view with Daily Cheese Build sample pack" width="320" /> | <img src="docs/screenshots/modpacks-dark.png?v=2" alt="Modpacks view with fake share codes and update state" width="320" /> | <img src="docs/screenshots/library-dark.png?v=2" alt="Mod Library view with fake installed mods and source labels" width="320" /> |
 
-If you hit a bug, the **Home footer → Report a bug** button builds a redacted
-report (recent logs, mod list, active modpack + load order, app and game
-version) and opens a prefilled GitHub issue. On official release builds the
-full report is uploaded and linked automatically — no token, nothing
-truncated; otherwise the full report is copied to your clipboard to paste in.
+## Quick Start
 
----
+1. Download the latest installer or portable build from [GitHub Releases](https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest).
+2. Launch the app and let onboarding find Slay the Spire 2, or pick the game folder manually.
+3. Add mods with a drag-and-drop archive, a GitHub/Nexus URL, the download watcher, or a Workshop subscription already managed by Steam.
+4. Paste a friend's `username/CODE`, click an `sts2mm://import/...` link, import a `.sts2pack`, or browse public modpacks in-app.
+5. Press **Launch**. The app backs up first, then starts the selected modpack.
 
-## Features
+## Source Compatibility
 
-### Modpacks & sharing
-- **Import by code or link.** Paste a friend's `username/CODE` into the
-  **Modpacks** page, or click their `sts2mm://import/...` link. Bundled mods +
-  GitHub releases pull automatically; un-bundled Nexus mods surface as pending.
-- **Smart import.** A code or link routes to the right action — install a new
-  pack, switch to one you already have, apply a pending update, or just a
-  "you're up to date" toast.
-- **Same-code re-share.** Re-publishing a profile reuses the same share code —
-  followers see "update available" instead of having to follow a new code.
-- **Modpack switcher.** Top-bar modpack chip → popover with every pack;
-  one click to activate.
-- **Drift detection.** If your mods on disk diverge from the active profile's
-  manifest, you get a banner with a one-click Repair (re-applies the manifest).
+App downloads are hosted on **GitHub Releases only**. The source integrations below are for mods and modpacks, not for distributing the manager itself.
 
-> **Your `sts2mm-profiles` repo on GitHub stays public.** The manager
-> creates it that way and your share codes only work for friends
-> because the manifest is publicly fetchable. Don't flip it to private
-> on GitHub — your friends will get "Profile not found" when they try
-> to install your code.
+| Source | Supported behavior |
+| --- | --- |
+| GitHub releases | Link a repo, install compatible release assets, update from releases, and include redistributable assets in shared packs. |
+| Nexus Mods | Link mod pages, audit known sources, open the Files page in your browser, then let the downloads-folder watcher install the saved archive. |
+| Steam Workshop | Show subscribed Workshop mods in the Library and reference them in modpacks by Workshop item ID. Steam remains the owner; the manager does not copy, delete, repair, or auto-update Workshop files. |
+| Manual archives | Drag and drop or import local `.zip`, `.7z`, and `.rar` archives when a mod source is not linkable. |
 
-> **If you never publish a pack, no repo is created.** The
-> `sts2mm-profiles` repo only appears on your GitHub the first time
-> you hit Share. Solo users who only consume friends' packs never
-> have anything written to their account.
+## Modpack Sharing
 
-### About modpack sharing
+Share and Re-share publish a small manifest to a public `<your-username>/sts2mm-profiles` repo on your GitHub account. Friends can install with a code, and public packs can appear in the in-app Browse Modpacks tab when you opt in.
 
-Share / Re-share uploads your pack to a public `<your-username>/sts2mm-profiles`
-repo the manager creates on first share (via your GitHub OAuth login). It lives
-on **your** account — nothing is hosted centrally, and no list of who's sharing
-what is kept anywhere.
+- Packs default to code-only sharing.
+- Re-sharing reuses the same code, so followers see an update instead of needing a new link.
+- If you later want a pack gone, delete its JSON file or the `sts2mm-profiles` repo from your GitHub account.
+- The manager project does not host a central catalog of private packs.
+- The manager itself is distributed through GitHub Releases, not Nexus Mods or Steam Workshop.
 
-- **Remove a pack later:** delete its `.json` from your `sts2mm-profiles` repo,
-  or delete the whole repo on GitHub.
-- **Visibility:** the publish dialog offers Friends only (default — code-only)
-  or Public (also listed in Browse Modpacks); switch anytime.
-- **Sharing others' mods:** a glance at the mod's permissions page is good
-  practice — a few authors mark mods "do not redistribute." The manager won't
-  check for you.
-- **Mod authors:** to request removal of a share, open an issue on the curator's
-  `https://github.com/<owner>/sts2mm-profiles` repo or use GitHub's
-  [DMCA process](https://github.com/contact/dmca) — the manager project can't
-  act on content in other users' repos.
+## Privacy and Openness
 
-### Languages
+STS2 Mod Manager does not include telemetry. GitHub sign-in is only needed for publishing packs or higher GitHub API limits, and a Nexus API key is only needed for Nexus browsing/audits. The in-app support bundle is generated and sent only when you choose to report a bug; release builds redact sensitive paths, tokens, and usernames before upload.
 
-- **English**, **Simplified Chinese (简体中文)**, **Russian (Русский)** and
-  **Arabic (العربية)** are bundled — Arabic lays the UI out right-to-left.
-- The picker lives in **Settings → General → Language** and the onboarding
-  header. `Auto` follows your system locale (`zh-*` routes to Simplified
-  Chinese until a Traditional translation exists).
-- **The maintainer doesn't read most of these languages**, so accuracy depends
-  on community contributors; non-English users get a What's New notice pointing
-  at the translation tracker on each update. Spotted a mistake? Open an issue
-  with the [`translation` label](https://github.com/MohamedSerhan/sts2-mod-manager/issues/new?labels=translation)
-  or PR `src/i18n/locales/<code>.json`. New languages welcome — see
-  [Translations](#translations).
+<details>
+<summary><strong>Install notes</strong></summary>
 
-### Mods
-- **Toggle on/off** per-mod with instant effect.
-- **Auto-updates.** "Update all" pulls fresh GitHub releases; pinned mods
-  are skipped so a known-good version survives modpack updates.
-- **Pin** locks both the version *and* the on/off state — pinned mods don't
-  auto-update and modpack updates can't toggle them. Useful when a mod
-  works perfectly at v1 and you want it to stay that way regardless of what
-  the curator pushes.
-- **Source linking.** Link a mod to its GitHub repo or Nexus page. GitHub
-  links join the auto-update flow ("Update all"); Nexus links surface updates
-  in the audit so you know to re-download from Nexus. Auto-detect button
-  scans filenames against known sources.
-- **Drag and drop** any `.zip` onto the window to install a mod.
-- **Quick Add by URL** for one-off installs from a GitHub or Nexus URL.
+### Windows
 
-### Supported mod sources
-- **GitHub.** Link a repo, install compatible releases, and include GitHub
-  release mods directly in shareable modpacks when redistribution is allowed.
-- **Nexus Mods.** Link Nexus pages, audit for available updates, and use the
-  downloads-folder watcher after you click Nexus's free Slow Download /
-  Manual button in your browser.
-- **Steam Workshop.** Subscribed Workshop mods appear in the normal Library
-  with Steam source labels and can be saved in modpacks by Workshop item ID.
-  The manager treats Workshop files as Steam-owned: it will not copy, move,
-  delete, repair, or auto-update them.
+Use the setup `.exe` for the normal installed app and updater flow, or the portable `.zip` if you want a self-contained folder. Unsigned hobby apps can trigger generic antivirus warnings; releases are built publicly by GitHub Actions from this repository.
 
-### Browse Mods
-- **GitHub search.** Full text search of GitHub repos with a Slay the Spire 2
-  topic.
-- **Nexus trending / latest.** Browse what's hot on Nexus directly inside the
-  app (requires a free Nexus API key — Settings → Accounts). Nexus's free API
-  doesn't expose general text search, so this surface is Trending and Latest
-  Added only.
-- **One-click install for GitHub cards.** Nexus cards open the mod's Files
-  page in your browser — see the Nexus note below.
-- **Browse Modpacks.** The **Browse** tab on the Modpacks page shows public
-  modpacks people have opted into listing. Each pack is one click to install
-  (same smart-import flow as paste-a-code). Your own packs default to
-  unlisted — when you Share or Re-share, the Publish dialog has a
-  Visibility option — Friends only (default) or Public. You can flip
-  it anytime from the Publish dialog.
+### macOS
 
-> **Nexus integration is free-tier only.** Installing a Nexus mod (via Quick
-> Add or Browse Mods) opens the mod's Files page in your browser — click
-> Nexus's **Slow Download** / **Manual** button (the free one) and the app's
-> downloads-folder watcher picks up the saved zip and installs it. The **Mod
-> Manager Download** (`nxm://`) button isn't wired in, and Nexus Premium's
-> instant-download API isn't either — so stick to Slow / Manual, and paid
-> subscribers don't get faster downloads here.
+The app is not signed with an Apple Developer certificate. On first launch, macOS may block it until you open **System Settings -> Privacy & Security** and choose **Open Anyway** for STS2 Mod Manager.
 
-### Backups
-- **Auto-backup before every launch.** Keeps the last 5 by default.
-- **Backup-current-first on restore.** The restore confirm dialog ships
-  with a pre-checked "save current as a new backup before restoring" option,
-  so you can roll forward again if the restored state isn't what you wanted.
-
-### Audit
-- **Check for updates** scans each installed mod against its source and shows
-  up-to-date / has-update / no-compatible-release. Run it from **Mod Library**
-  for every mod, or from a modpack's detail page to check just that pack's
-  mods.
-- **Per-row pin toggle** to lock a mod at its current version even when the
-  source publishes updates.
-
-### App polish
-- **First-run onboarding** — a branched welcome asks whether you want to play
-  modpacks others made or make your own, then walks the matching path: detect
-  the game install, connect optional accounts, and pick a first modpack.
-- **Custom titlebar** with min / max / close controls.
-- **In-app log viewer** with filter chips (Info / Warn / Error / Debug),
-  free-text search, and "Send to support" that opens a GitHub issue prefilled
-  with the recent log tail.
-- **Keyboard shortcut.** `Ctrl/⌘ L` launches the active modpack from anywhere
-  in the app.
-- **Toasts** on every action with success / info / error severity.
-- **Confirm dialogs** for destructive actions, with optional checkbox
-  ("backup first") and typed-phrase confirmation for the really scary stuff.
-- **Vanilla launch** — top-bar Vanilla button starts the game with all mods
-  temporarily disabled (auto-backup runs first so the next launch puts
-  everything back).
-- **Launch mode (Steam vs Direct).** Defaults to Steam; Settings → General →
-  Launch can switch to **Direct**, which runs the game executable itself (and
-  drops a `steam_appid.txt` so Steamworks still inits). Useful for **Family
-  Sharing borrowers** and **offline mode** — Steam still has to be running.
-  On Linux, Direct needs a native binary; Proton-only installs get a clear
-  error pointing back at Steam launch mode.
-
----
-
-## Download
-
-Grab the latest installer for your platform from the
-[Releases page](https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest):
-
-- **Windows**: `*_x64-setup.exe` (recommended) or portable `.zip`
-- **macOS**: `.dmg` (universal — Intel + Apple Silicon)
-- **Linux**: `.deb`, `.rpm`, or `.AppImage`
-
-Once installed, the app auto-updates: it checks GitHub for new releases on
-launch (at most once per day) and prompts you to install when one is available.
-On Windows, use the setup `.exe` for the installed app; it is the same
-installer family used by in-app updates.
-
-## macOS: First Launch Warning
-
-The app isn't signed with an Apple Developer certificate, so on first launch
-Gatekeeper shows *"…cannot be opened because the developer cannot be verified."*
-To open it anyway:
-
-1. Try opening the app once (it'll be blocked — that's expected).
-2. **System Settings → Privacy & Security** → scroll to **Security** → click
-   **Open Anyway** next to the STS2 Mod Manager notice, then confirm with your
-   password / Touch ID.
-
-You only need this once; in-app auto-updates afterward won't re-trigger it. If
-it still won't open, strip the quarantine flag manually:
+If needed:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/STS2 Mod Manager.app"
 ```
 
-## Windows: Antivirus False Positives
+### Linux
 
-Some antivirus engines, including Microsoft Defender, occasionally flag the
-Windows installer as a trojan or suspicious download. This can happen whether
-you download from GitHub/Nexus or install through the in-app updater, because
-both paths fetch the same release asset. **These are false positives when the
-detections are generic heuristics.** The installer is built in public by
-GitHub Actions from this repository's source — every release links the exact
-commit it was built from, and you can compare any release on
-[VirusTotal](https://www.virustotal.com) (typically 0–2 generic ML detections
-out of ~70 engines, no named malware family).
+Use `.deb`, `.rpm`, or `.AppImage` from GitHub Releases. If an AppImage opens to a blank window on an Arch-based distro with FUSE issues, try the `.deb` or `.rpm` package instead.
 
-Why it happens: the app is not Authenticode-signed (certificates cost money
-this free project doesn't have), and it legitimately does things heuristic
-scanners score as suspicious in *unsigned* binaries — it downloads and
-extracts mod archives, self-updates, registers the `sts2mm://` link handler,
-and checks whether the game process is running. Signed software does all of
-the same things silently.
+</details>
 
-What you can do:
+<details>
+<summary><strong>Build from source</strong></summary>
 
-1. **Verify instead of trust**: upload the installer you downloaded to
-   [VirusTotal](https://www.virustotal.com) and check that the few engines
-   flagging it report only generic heuristics ("ML", "Gen", "Heur"), not a
-   named family.
-2. **Report the false positive** — this actually helps every other user:
-   for Microsoft Defender, open **Windows Security → Protection history**,
-   select the STS2 Mod Manager detection, and use Microsoft's false-positive
-   submission flow. Kaspersky accepts samples at
-   [opentip.kaspersky.com](https://opentip.kaspersky.com); most other vendors
-   have similar portals.
-3. **Allow-list the install folder** (`%LOCALAPPDATA%\STS2 Mod Manager`)
-   if your AV keeps quarantining updates.
-
-If a release is *widely* flagged with a named detection (not 1–2 generic
-hits), do not install it — report it on the
-[issue tracker](https://github.com/MohamedSerhan/sts2-mod-manager/issues)
-immediately.
-
-## Linux Notes
-
-Some Arch-based distros (e.g. CachyOS) have a known FUSE issue with AppImages
-that causes a blank window. If you hit this, install the **`.deb`** or
-**`.rpm`** package instead — they use the system's WebKitGTK directly and work
-around the issue.
-
-**`sts2mm://` deep links:** the `.deb`, `.rpm`, `.exe`, and `.dmg`
-installers all register the `sts2mm://` URL scheme automatically so clicking
-a share link opens the app. The AppImage is a portable bundle with no install
-step, so it tries to register the scheme at runtime on first launch. If that
-fails (sandboxed Flatpak, read-only mount, restrictive distro policy), the
-link won't open the app — paste the code into Home instead.
-
----
-
-## Quick start
-
-1. Install (see Download above).
-2. On first launch, the **onboarding** runs. It first asks whether you want to
-   play modpacks others made or make your own, then walks you through:
-   1. **Find Slay the Spire 2** — auto-detected from Steam, or pick the
-      install folder manually.
-   2. **Connect accounts (optional)** — paste a Nexus API key for Nexus
-      browsing; sign in to GitHub for higher API limits. You can skip both.
-   3. **Pick your first modpack** — start vanilla, follow a friend's code, or
-      import a JSON.
-3. Hit the **Launch STS2** button in the top bar. An auto-backup runs first.
-
-That's it. Day-to-day from there:
-
-- **Got a friend's code or `sts2mm://` link?** Paste the code into the
-  **Modpacks** page, or just click the link — the app routes you to the right
-  action (install, switch, sync, or "you're already on it").
-- **Following a pack that updated?** Home shows a **Sync** button on the active
-  pack; the **Modpacks** sidebar badges any other followed pack with an update.
-- **Publishing your own?** Open it in **Modpacks** → **Share**; you get back a
-  code plus a paste-ready Discord message with the `sts2mm://` link.
-- **Something broke?** Settings → Backups → **Restore** the most recent.
-
----
-
-## Building from Source
-
-Requires Rust (stable), Node.js 22+, and the
-[Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your
-platform.
+Requires Rust stable, Node.js 22+, and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 
 ```bash
 git clone https://github.com/MohamedSerhan/sts2-mod-manager
 cd sts2-mod-manager
 npm install
-npm run tauri dev    # development with HMR
-npm run tauri build  # production bundle in src-tauri/target/release/bundle
+npm run tauri dev
+npm run tauri build
 ```
 
-The Rust backend lives in `src-tauri/`, the React frontend in `src/`. All
-Tauri commands are registered in [src-tauri/src/lib.rs](src-tauri/src/lib.rs)
-and exposed to TS via [src/hooks/useTauri.ts](src/hooks/useTauri.ts).
+Frontend code lives in `src/`, Rust backend code lives in `src-tauri/`, and Tauri command bindings are exposed to TypeScript through `src/hooks/useTauri.ts`.
 
-### Project layout
+</details>
 
-```
-src/
-  App.tsx                 # chrome (titlebar, sidebar, top bar, banners)
-  views/                  # Home / Profiles (Modpacks) / Mods (Mod Library) /
-                          #   Browse / BrowseModpacks / Settings / Help
-  components/             # shared UI — dialogs, modals, tables, onboarding, …
-  contexts/               # ToastContext, AppContext
-  hooks/useTauri.ts       # all Tauri command bindings (one place)
-  i18n/                   # i18next init + locale routing;
-                          # locales/{en,zh-Hans,ru,ar}.json (parity-tested vs en)
-  styles.css              # all theme tokens + utility classes (gf-*)
-src-tauri/
-  src/                    # Rust backend (game.rs, mods/, sharing/, backup.rs,
-                          # download.rs, updater.rs, etc.)
-  tauri.conf.json         # window config, bundle settings, updater config
-.github/workflows/        # CI + release (ci.yml, build.yml)
-```
+<details>
+<summary><strong>Contributing and translations</strong></summary>
 
----
+PRs are welcome. User-visible strings must go through `react-i18next` and keep every locale file in sync; see [AGENTS.md](AGENTS.md) for the full rules. Player-facing behavior changes need focused tests/QA ownership, and docs-only changes do not need a changelog fragment.
 
-## Contributing
+Bundled languages include English, Simplified Chinese, Russian, and Arabic. Translation accuracy depends on community contributors.
 
-Forks and PRs welcome — the codebase is small, so most additions are
-straightforward. The Rust backend lives in `src-tauri/`, the React frontend in
-`src/`. Wanted features (dependency auto-install + a dependency-tree view,
-conflict detection, per-mod update progress) are tracked in the
-[issues](https://github.com/MohamedSerhan/sts2-mod-manager/issues).
+Credits:
 
-### Adding or changing user-visible strings
+- Simplified Chinese translation: initial work by [@xiatinfeng](https://github.com/xiatinfeng).
+- Russian localization, QA, and feature ideas: [@Solomag](https://github.com/Solomag).
 
-Every user-facing string lives in `src/i18n/locales/*.json`, and all locales
-must stay key-for-key in sync with `en.json`. Add the English value, reference
-it with `t('your.key')` / `<Trans>` (never hardcode prose in JSX, toasts,
-`title=`, `aria-label=`, or `placeholder=`), and flag the PR for a human
-translator if you can't translate it yourself. The i18n gate (`npm run qa:i18n`)
-fails on missing keys or copied-English prose and **blocks release** — even
-emergency ones. Full rules, including for AI-assisted contributions, are in
-[`AGENTS.md`](AGENTS.md).
-
-### Translations
-
-PRs against `src/i18n/locales/*.json` are the fastest path — the maintainer
-can't review accuracy, so PRs from native speakers merge on trust + parity-test
-pass. To add a language: copy `en.json` to `<code>.json` (IETF tags like `fr`,
-`ja`, `zh-Hant`), register the code in `src/i18n/language.ts` and import it in
-`src/i18n/index.ts`. Family routing (e.g. `zh-Hant` → `zh-TW/HK/MO`) extends
-`resolveOneLocale` in `language.ts`.
-
-### Credits
-
-- **Simplified Chinese translation:** initial work by
-  [@xiatinfeng](https://github.com/xiatinfeng) in PR
-  [#45](https://github.com/MohamedSerhan/sts2-mod-manager/pull/45),
-  reworked onto current `main` and extended for new strings by the
-  maintainer.
-- **Russian localization, QA & feature ideas:**
-  [@Solomag](https://github.com/Solomag) — *Chief Bug-Hunter &
-  Idea-Smith.* Relentless playtesting, a steady stream of ideas that
-  shaped the manager, and the full Russian translation.
-
----
+</details>
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Use it, fork it, ship your own version.
-
-Built by [Mohamed Serhan](https://github.com/MohamedSerhan) with Tauri 2 +
-React + Rust.
+MIT - see [LICENSE](LICENSE). Slay the Spire 2 is a trademark of Mega Crit; this project is unaffiliated.

@@ -1548,14 +1548,27 @@ function assertEqual(actual, expected, label) {
   }
 }
 
+function isStaleElementError(error) {
+  return error?.name === 'StaleElementReferenceError';
+}
+
+async function findElementsIgnoringStale(driver, locator) {
+  try {
+    return await driver.findElements(locator);
+  } catch (error) {
+    if (isStaleElementError(error)) return [];
+    throw error;
+  }
+}
+
 async function waitForElement(driver, locator, label, timeoutMs = 10_000) {
   return driver.wait(async () => {
-    const candidates = await driver.findElements(locator);
+    const candidates = await findElementsIgnoringStale(driver, locator);
     for (const candidate of candidates) {
       try {
         if (await candidate.isDisplayed()) return candidate;
       } catch (error) {
-        if (error?.name === 'StaleElementReferenceError') return false;
+        if (isStaleElementError(error)) return false;
         throw error;
       }
     }
@@ -1565,7 +1578,7 @@ async function waitForElement(driver, locator, label, timeoutMs = 10_000) {
 
 async function clickLocated(driver, locator, label, timeoutMs = 10_000) {
   await driver.wait(async () => {
-    const candidates = await driver.findElements(locator);
+    const candidates = await findElementsIgnoringStale(driver, locator);
     for (const candidate of candidates) {
       try {
         if (!(await candidate.isDisplayed()) || !(await candidate.isEnabled())) continue;
@@ -1576,7 +1589,7 @@ async function clickLocated(driver, locator, label, timeoutMs = 10_000) {
         await candidate.click();
         return true;
       } catch (error) {
-        if (error?.name === 'StaleElementReferenceError') return false;
+        if (isStaleElementError(error)) return false;
         if (error?.name === 'ElementClickInterceptedError') {
           await driver.executeScript('arguments[0].click();', candidate);
           return true;
@@ -1590,7 +1603,7 @@ async function clickLocated(driver, locator, label, timeoutMs = 10_000) {
 
 async function clickLocatedByScript(driver, locator, label, timeoutMs = 10_000) {
   await driver.wait(async () => {
-    const candidates = await driver.findElements(locator);
+    const candidates = await findElementsIgnoringStale(driver, locator);
     for (const candidate of candidates) {
       try {
         if (!(await candidate.isDisplayed()) || !(await candidate.isEnabled())) continue;
@@ -1600,7 +1613,7 @@ async function clickLocatedByScript(driver, locator, label, timeoutMs = 10_000) 
         );
         return true;
       } catch (error) {
-        if (error?.name === 'StaleElementReferenceError') return false;
+        if (isStaleElementError(error)) return false;
         throw error;
       }
     }

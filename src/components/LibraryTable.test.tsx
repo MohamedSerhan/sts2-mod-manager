@@ -1365,6 +1365,39 @@ describe('<LibraryTable modpackName={null}>', () => {
     ).toBeInTheDocument();
   });
 
+  it('does not infer GitHub or Nexus from URL path text in version sources', async () => {
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'spoof-current',
+        name: 'Spoof Test',
+        version: '2.0.0',
+        folder_name: 'SpoofTest',
+        mod_id: 'SpoofTest',
+        enabled: true,
+        source: 'https://example.test/downloads/github.com/nexusmods.com/archive.zip',
+        install_source: 'local',
+      }),
+      mkModInfo({
+        mod_version_id: 'spoof-stored',
+        name: 'Spoof Test',
+        version: '1.0.0',
+        folder_name: 'SpoofTest-v1',
+        mod_id: 'SpoofTest',
+        enabled: false,
+        source: 'https://cdn.example.test/releases/spoof-test.zip',
+        install_source: 'local',
+      }),
+    ]);
+
+    render(<Wrap modpackName={null} />);
+
+    const picker = await screen.findByRole('combobox', { name: /Choose version/i });
+    expect(picker).toHaveTextContent(/2\.0\.0 \(active\)/i);
+    expect(picker).toHaveTextContent(/Link/i);
+    expect(picker).not.toHaveTextContent(/GitHub/i);
+    expect(picker).not.toHaveTextContent(/Nexus/i);
+  });
+
   it('keeps same-version source variants grouped under one row', async () => {
     const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
     registerInvokeHandler('get_installed_mods', () => [

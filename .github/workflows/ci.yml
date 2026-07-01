@@ -182,7 +182,7 @@ jobs:
         # The signing key IS required: tauri.conf.json sets
         # bundle.createUpdaterArtifacts: true, so the build errors without it. We still
         # publish nothing — this just lets the bundle build so we can verify it compiles.
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

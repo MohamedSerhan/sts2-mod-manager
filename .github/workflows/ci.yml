@@ -31,7 +31,7 @@ jobs:
       workflows: ${{ steps.classify.outputs.workflows }}
       qa: ${{ steps.classify.outputs.qa }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v5
@@ -56,7 +56,7 @@ jobs:
     if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.scripts == 'true' }}
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -81,7 +81,7 @@ jobs:
     if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.qa == 'true' || needs.changes.outputs.scripts == 'true' || needs.changes.outputs.workflows == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
@@ -95,7 +95,7 @@ jobs:
     if: ${{ needs.changes.outputs.app == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
@@ -122,7 +122,7 @@ jobs:
         platform: [ubuntu-22.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install system dependencies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -156,7 +156,7 @@ jobs:
             args: ""
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install system dependencies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -201,7 +201,7 @@ jobs:
     if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.qa == 'true' }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -229,7 +229,7 @@ jobs:
     if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.qa == 'true' }}
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -256,7 +256,7 @@ jobs:
     if: ${{ needs.changes.outputs.scripts == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
@@ -278,7 +278,7 @@ jobs:
     if: ${{ needs.changes.outputs.workflows == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: YAML parse all workflows
         run: |
           python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]; print('YAML OK')"
@@ -293,7 +293,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.openai_smoke }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
@@ -333,7 +333,7 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.app == 'true' && !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v5

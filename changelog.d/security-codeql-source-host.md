@@ -1,1 +1,1 @@
-Version-source labels now check the real link host before calling a saved file GitHub or Nexus.
+Saved-version labels now check the real site behind a link before calling it GitHub or Nexus.

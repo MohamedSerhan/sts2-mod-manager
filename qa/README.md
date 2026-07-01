@@ -51,7 +51,9 @@ Conceptually:
 |---|---|---|
 | Rust unit + integration | `npm run qa:rust` (or `cargo test --manifest-path=src-tauri/Cargo.toml`) | ~10s |
 | Rust cassette integration | `npm run qa:rust:cassette` | ~15s |
-| Coverage matrix + interaction inventory guard | `npm run qa:matrix` | <1s |
+| Coverage matrix + interaction inventory guard, including owner-reference validation | `npm run qa:matrix` | <1s |
+| QA owner-reference validator | `npm run qa:owners` | <1s |
+| Changed-file impact report | `npm run qa:impact -- --json` (or pipe paths into `node scripts/qa-impact.mjs --json`) | <1s |
 | Backend coverage report | `cargo llvm-cov --manifest-path src-tauri/Cargo.toml --summary-only` | ~30s |
 | Frontend unit tests | `npm run qa:unit` | ~5s |
 | Frontend coverage + gate | `npm run qa:coverage` (enforces vitest.config.ts thresholds) | ~10s |
@@ -74,6 +76,13 @@ regression once these gates pass:
 - `npm run qa:rust:cassette`
 - `npm run qa:coverage`
 - `npm run qa:smoke` / `npm run qa:smoke:cassette` where the platform supports it
+
+`npm run qa:matrix` also runs `qa:owners`, which verifies that inline owner
+references point at real files and that `path::test_name` references still name
+real Vitest, smoke, or Rust test symbols. `npm run qa:impact` is the no-look
+diff triage report: pass changed paths on stdin for deterministic output, or use
+`--base <ref>` to compare against a specific Git ref instead of the default
+`origin/main`/`HEAD` fallback.
 
 Manual checks are limited to rows marked `Manual` in
 `qa/interaction-inventory.md`. Those rows must keep a reason and review date so

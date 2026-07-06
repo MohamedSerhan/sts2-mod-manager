@@ -3753,7 +3753,12 @@ mod version_helper_tests {
     #[test]
     fn nexus_lane_resolver_keeps_watcher_release_off_beta_update() {
         let files = vec![
-            nexus_file(1422, "The Watcher - 1.4.22 - StS2 - v0.107.1", "1.4.22", 300),
+            nexus_file(
+                1422,
+                "The Watcher - 1.4.22 - StS2 - v0.107.1",
+                "1.4.22",
+                300,
+            ),
             nexus_file(143, "The Watcher - 1.4.3 - StS2 - v0.103.2", "1.4.3", 200),
         ];
         let entry = ModSourceEntry {
@@ -3770,8 +3775,18 @@ mod version_helper_tests {
     #[test]
     fn nexus_lane_resolver_advances_watcher_beta_within_beta_lane() {
         let files = vec![
-            nexus_file(1420, "The Watcher - 1.4.20 - StS2 - v0.107.1", "1.4.20", 200),
-            nexus_file(1422, "The Watcher - 1.4.22 - StS2 - v0.107.1", "1.4.22", 300),
+            nexus_file(
+                1420,
+                "The Watcher - 1.4.20 - StS2 - v0.107.1",
+                "1.4.20",
+                200,
+            ),
+            nexus_file(
+                1422,
+                "The Watcher - 1.4.22 - StS2 - v0.107.1",
+                "1.4.22",
+                300,
+            ),
             nexus_file(143, "The Watcher - 1.4.3 - StS2 - v0.103.2", "1.4.3", 250),
         ];
         let entry = ModSourceEntry {
@@ -3788,8 +3803,18 @@ mod version_helper_tests {
     #[test]
     fn nexus_lane_resolver_uses_saved_file_id_to_find_newer_same_lane_file() {
         let files = vec![
-            nexus_file(1420, "The Watcher - 1.4.20 - StS2 - v0.107.1", "1.4.20", 200),
-            nexus_file(1422, "The Watcher - 1.4.22 - StS2 - v0.107.1", "1.4.22", 300),
+            nexus_file(
+                1420,
+                "The Watcher - 1.4.20 - StS2 - v0.107.1",
+                "1.4.20",
+                200,
+            ),
+            nexus_file(
+                1422,
+                "The Watcher - 1.4.22 - StS2 - v0.107.1",
+                "1.4.22",
+                300,
+            ),
             nexus_file(143, "The Watcher - 1.4.3 - StS2 - v0.103.2", "1.4.3", 250),
         ];
         let entry = ModSourceEntry {
@@ -4514,10 +4539,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                         let sources_ver = source_record
                             .as_ref()
                             .and_then(|record| record.source_version.as_deref())
-                            .or_else(|| {
-                                source_entry
-                                    .and_then(|e| e.installed_version.as_deref())
-                            })
+                            .or_else(|| source_entry.and_then(|e| e.installed_version.as_deref()))
                             .unwrap_or("");
                         let manifest_ver = strip_version_prefix(&m.version);
                         let current_ver = if !sources_ver.is_empty() {

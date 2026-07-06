@@ -1637,8 +1637,6 @@ pub(super) fn sync_profile_load_order_to_settings(
 mod profile_membership_tests {
     use super::*;
 
-    static STEAM_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     struct EnvOverride {
         key: &'static str,
         previous: Option<String>,
@@ -1650,6 +1648,12 @@ mod profile_membership_tests {
             std::env::set_var(key, value);
             Self { key, previous }
         }
+    }
+
+    fn lock_test_steam_env() -> std::sync::MutexGuard<'static, ()> {
+        crate::game::TEST_STEAM_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     impl Drop for EnvOverride {
@@ -2160,7 +2164,7 @@ mod profile_membership_tests {
 
     #[test]
     fn set_profile_mod_membership_adds_workshop_mod_by_source_hint() {
-        let _steam_guard = STEAM_ENV_LOCK.lock().unwrap();
+        let _steam_guard = lock_test_steam_env();
         let config_tmp = tempfile::tempdir().unwrap();
         let steam_tmp = tempfile::tempdir().unwrap();
         let _env = EnvOverride::set("STS2_FIXTURE_STEAM_PATH", steam_tmp.path());
@@ -2213,7 +2217,7 @@ mod profile_membership_tests {
 
     #[test]
     fn membership_matrix_deduplicates_stale_workshop_artifact_rows_by_item_id() {
-        let _steam_guard = STEAM_ENV_LOCK.lock().unwrap();
+        let _steam_guard = lock_test_steam_env();
         let config_tmp = tempfile::tempdir().unwrap();
         let cache_tmp = tempfile::tempdir().unwrap();
         let steam_tmp = tempfile::tempdir().unwrap();
@@ -2311,7 +2315,7 @@ mod profile_membership_tests {
 
     #[test]
     fn select_library_version_from_workshop_to_local_preserves_workshop_files() {
-        let _steam_guard = STEAM_ENV_LOCK.lock().unwrap();
+        let _steam_guard = lock_test_steam_env();
         let config_tmp = tempfile::tempdir().unwrap();
         let cache_tmp = tempfile::tempdir().unwrap();
         let steam_tmp = tempfile::tempdir().unwrap();
@@ -2392,7 +2396,7 @@ mod profile_membership_tests {
 
     #[test]
     fn select_library_version_from_local_to_workshop_stores_local_shadow_copy() {
-        let _steam_guard = STEAM_ENV_LOCK.lock().unwrap();
+        let _steam_guard = lock_test_steam_env();
         let config_tmp = tempfile::tempdir().unwrap();
         let cache_tmp = tempfile::tempdir().unwrap();
         let steam_tmp = tempfile::tempdir().unwrap();

@@ -293,7 +293,8 @@ pub(crate) fn scan_workshop_mods_for_mods_path(mods_path: &Path) -> Vec<ModInfo>
     let Some(steam_path) = find_steam_path() else {
         return Vec::new();
     };
-    let Some(library) = workshop_library_for_mods_path(mods_path, parse_library_folders(&steam_path))
+    let Some(library) =
+        workshop_library_for_mods_path(mods_path, parse_library_folders(&steam_path))
     else {
         return Vec::new();
     };
@@ -443,9 +444,10 @@ mod tests {
         assert_eq!(info.folder_name.as_deref(), Some("BaseLib"));
         assert_eq!(info.workshop_manifest.as_deref(), Some("base-manifest"));
         assert_eq!(info.workshop_time_updated, Some(1782068851));
-        assert!(info.files.iter().any(|file| {
-            file.replace('\\', "/") == "3737335127/BaseLib/BaseLib.json"
-        }));
+        assert!(info
+            .files
+            .iter()
+            .any(|file| { file.replace('\\', "/") == "3737335127/BaseLib/BaseLib.json" }));
     }
 
     #[test]

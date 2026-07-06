@@ -204,19 +204,27 @@ function collapseAvailableMods(candidates: ModInfo[]): ModInfo[] {
 }
 
 /** Source badges for a row, derived from the matching installed
- *  ModInfo (GitHub / Nexus / local). Pure presentation — no links, just
+ *  ModInfo (Steam Workshop / GitHub / Nexus / local). Pure presentation — no links, just
  *  the at-a-glance source pills used elsewhere in the app. */
 function SourceBadges({ mod }: { mod: ModInfo | undefined }) {
   const { t } = useTranslation();
   if (!mod) return null;
+  const source = mod.source ?? '';
+  const hasWorkshop =
+    isWorkshopMod(mod) ||
+    !!mod.workshop_item_id ||
+    !!mod.workshop_url ||
+    source.includes('steamcommunity.com/sharedfiles') ||
+    source.startsWith('steam://');
   const hasGithub = !!mod.github_url;
   const hasNexus = !!mod.nexus_url;
-  if (!hasGithub && !hasNexus) {
+  if (!hasWorkshop && !hasGithub && !hasNexus) {
     if (!mod.source) return null;
     return <Badge variant="local">{t('mods.local')}</Badge>;
   }
   return (
     <>
+      {hasWorkshop && <Badge variant="default">{t('mods.steamWorkshop')}</Badge>}
       {hasGithub && <Badge variant="github">{t('mods.gitHub')}</Badge>}
       {hasNexus && <Badge variant="nexus">{t('mods.nexus')}</Badge>}
     </>

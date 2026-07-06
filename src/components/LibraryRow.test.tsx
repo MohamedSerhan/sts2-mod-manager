@@ -381,6 +381,26 @@ describe('<LibraryRow> kebab + audit pills', () => {
     expect(screen.getByText('ManifestName')).toBeInTheDocument();
   });
 
+  it('shows Steam-managed guidance when Steam reports a Workshop update is pending', () => {
+    renderRow({
+      row: baseMod({
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747602295',
+        workshop_url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295',
+        workshop_update_pending: true,
+      }),
+      mod: baseModInfo({
+        source: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295',
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747602295',
+        workshop_url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295',
+        workshop_update_pending: true,
+      }),
+    });
+
+    expect(screen.getByTitle(/Steam owns these files; use Steam Workshop to update/i)).toBeInTheDocument();
+  });
+
   it('clusters source badges + audit pills next to the name (in the title row)', () => {
     const { container } = renderRow({
       mod: baseModInfo({ github_url: 'https://github.com/x/y', nexus_url: 'https://nexusmods.com/z' }),

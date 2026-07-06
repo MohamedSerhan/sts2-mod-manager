@@ -51,6 +51,17 @@ test('Windows setup EXE corrects stale install metadata only when no install dir
   assert.match(hooks, /SetOutPath\s+"\$INSTDIR"/);
 });
 
+test('Windows setup EXE offers an opt-in app-data cleanup on uninstall', () => {
+  const hooks = read('src-tauri/nsis-hooks.nsh');
+  assert.match(hooks, /NSIS_HOOK_PREUNINSTALL/);
+  assert.match(hooks, /Remove STS2 Mod Manager saved modpacks, settings, backups, logs, and cached downloads/);
+  assert.match(hooks, /MB_YESNO\|MB_ICONQUESTION/);
+  assert.match(hooks, /RMDir\s+\/r\s+"\$APPDATA\\sts2-mod-manager"/);
+  assert.match(hooks, /RMDir\s+\/r\s+"\$LOCALAPPDATA\\sts2-mod-manager"/);
+  assert.match(hooks, /RMDir\s+\/r\s+"\$APPDATA\\sts2-mod-manager-dev"/);
+  assert.match(hooks, /RMDir\s+\/r\s+"\$LOCALAPPDATA\\sts2-mod-manager-dev"/);
+});
+
 test('user-facing update install buttons do not bypass the pinned backend installer', () => {
   const app = read('src/App.tsx');
   assert.match(app, /installAppUpdate\(\)/, 'App banner install button must use installAppUpdate()');

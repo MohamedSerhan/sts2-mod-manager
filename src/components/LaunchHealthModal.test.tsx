@@ -54,7 +54,7 @@ describe('<LaunchHealthModal>', () => {
     expect(screen.getByRole('dialog', { name: /STS2 changed since this pack last launched/i })).toBeInTheDocument();
     expect(screen.getByText(/no active modpack was last used with a different STS2 build/i)).toBeInTheDocument();
     expect(screen.getByText(/Previous: vUnknown/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Store blocked mods and launch/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Move blocked mods to storage and launch/i })).toBeNull();
 
     await user.click(container.querySelector('.gf-modal-back') as HTMLElement);
     expect(callbacks.onCancel).toHaveBeenCalledTimes(1);
@@ -97,7 +97,7 @@ describe('<LaunchHealthModal>', () => {
     expect(screen.getByText(/missing Missing0/i)).toBeInTheDocument();
     expect(screen.getByText(/needs STS2 v0.100.0/i)).toBeInTheDocument();
     expect(screen.getAllByText('+1 more')).toHaveLength(3);
-    expect(screen.getByRole('button', { name: /Store blocked mods and launch/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Move blocked mods to storage and launch/i })).toBeInTheDocument();
   });
 
   it('uses dependency and incompatible titles when those are the leading blockers', () => {
@@ -121,6 +121,7 @@ describe('<LaunchHealthModal>', () => {
     );
 
     expect(screen.getByRole('dialog', { name: /Review 1 mod with missing dependencies/i })).toBeInTheDocument();
+    expect(screen.getByText(/Save changes only updates this modpack's saved list/i)).toBeInTheDocument();
 
     rerender(
       <AllProviders>
@@ -159,7 +160,7 @@ describe('<LaunchHealthModal>', () => {
 
     expect(screen.getByRole('dialog', { name: /STS2 changed since this pack last launched/i })).toBeInTheDocument();
     expect(screen.getByText(/Daily Pack was last used with a different STS2 build/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Store blocked mods and launch/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Move blocked mods to storage and launch/i })).toBeNull();
   });
 
   it('disables modal exits and launch actions while storing blockers', async () => {

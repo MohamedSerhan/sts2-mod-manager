@@ -1320,7 +1320,7 @@ describe('<LibraryTable modpackName={null}>', () => {
     });
   });
 
-  it('labels version choices by source and keeps the local source as the effective active copy', async () => {
+  it('labels version choices by source and prefers a newer active Steam Workshop copy', async () => {
     const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
     registerInvokeHandler('get_installed_mods', () => [
       mkModInfo({
@@ -1353,14 +1353,14 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
 
     const picker = await screen.findByRole('combobox', { name: /Choose version/i });
-    expect(picker).toHaveTextContent(/0\.4\.26 \(active\)/i);
-    expect(picker).toHaveTextContent(/GitHub \+ Nexus/i);
+    expect(picker).toHaveTextContent(/0\.4\.41 \(active\)/i);
+    expect(picker).toHaveTextContent(/Steam Workshop/i);
 
     await user.click(picker);
     const listbox = await screen.findByRole('listbox');
     expect(
       within(listbox).getByRole('option', {
-        name: /0\.4\.41 \(active\).*Steam Workshop/i,
+        name: /0\.4\.26 \(active\).*GitHub \+ Nexus/i,
       }),
     ).toBeInTheDocument();
   });

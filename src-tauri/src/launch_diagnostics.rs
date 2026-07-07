@@ -151,13 +151,6 @@ pub fn get_launch_health(
     .map_err(|e| e.to_string())
 }
 
-fn scan_local_launch_mods(mods_path: &Path, config_path: &Path) -> Vec<ModInfo> {
-    let mut active_mods = crate::mods::scan_mods(mods_path);
-    crate::mod_sources::enrich_mods_with_sources(&mut active_mods, config_path);
-    crate::mod_versions::enrich_mods_with_versions(&mut active_mods, config_path);
-    active_mods
-}
-
 fn scan_launch_health_mods(mods_path: &Path, config_path: &Path) -> Vec<ModInfo> {
     let mut active_mods = crate::mods::scan_mods(mods_path);
     active_mods.extend(crate::mods::scan_workshop_mods_for_mods_path(mods_path));
@@ -463,8 +456,12 @@ pub(crate) fn resolve_launch_health_blockers_from_paths(
     game_version: Option<String>,
     log_path: Option<&Path>,
 ) -> Result<LaunchQuarantineResult> {
-    let active_mods = scan_local_launch_mods(mods_path, config_path);
     let launch_health_mods = scan_launch_health_mods(mods_path, config_path);
+    let active_mods: Vec<ModInfo> = launch_health_mods
+        .iter()
+        .filter(|m| !m.install_source.is_workshop())
+        .cloned()
+        .collect();
     let diagnostics = diagnose_launch_log(
         log_text,
         &launch_health_mods,

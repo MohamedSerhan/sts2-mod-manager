@@ -30,12 +30,20 @@ const REPO_ROOT = resolve(__dirname, '..', '..');
 
 const IS_WINDOWS = process.platform === 'win32';
 const MSEDGEDRIVER = resolve(__dirname, 'msedgedriver.exe');
+// By default, keep local smoke runs from stealing the developer's focus every
+// time WebDriver launches a native app/driver process. Set STS2_SMOKE_VISIBLE=1
+// when you intentionally want to watch the Tauri window while debugging.
+const LOW_DISRUPTION_MODE = process.env.STS2_SMOKE_VISIBLE !== '1';
+
+function quietProcessOptions(options = {}) {
+  return IS_WINDOWS ? { ...options, windowsHide: true } : options;
+}
 
 function findOnPath(command) {
-  const res = spawnSync('sh', ['-lc', `command -v ${command}`], {
+  const res = spawnSync('sh', ['-lc', `command -v ${command}`], quietProcessOptions({
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  }));
   return res.status === 0 && res.stdout.trim() ? res.stdout.trim() : command;
 }
 
@@ -56,7 +64,7 @@ function cargoTargetDir() {
         '1',
         '--no-deps',
       ],
-      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+      quietProcessOptions({ encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }),
     );
     if (res.status === 0 && res.stdout) {
       const dir = JSON.parse(res.stdout).target_directory;
@@ -441,7 +449,7 @@ function reapZombieProcesses() {
     basename(APP_BINARY), // sts2-mod-manager.exe
   ];
   for (const name of names) {
-    spawnSync('taskkill', ['/F', '/IM', name, '/T'], { stdio: 'ignore' });
+    spawnSync('taskkill', ['/F', '/IM', name, '/T'], quietProcessOptions({ stdio: 'ignore' }));
   }
 }
 
@@ -489,6 +497,9 @@ function startTauriDriver() {
     env.STS2_CASSETTE_DIR = CASSETTE_DIR;
     console.error(`[smoke] CASSETTE=1 — STS2_CASSETTE_DIR=${CASSETTE_DIR}`);
   }
+  if (LOW_DISRUPTION_MODE) {
+    env.STS2_SMOKE_LOW_DISRUPTION = '1';
+  }
   const child = spawn(
     'tauri-driver',
     [
@@ -496,7 +507,7 @@ function startTauriDriver() {
       '--native-port', String(NATIVE_PORT),
       '--native-driver', NATIVE_DRIVER,
     ],
-    { stdio: ['ignore', 'pipe', 'pipe'], env },
+    quietProcessOptions({ stdio: ['ignore', 'pipe', 'pipe'], env }),
   );
   child.stdout.on('data', (b) => process.stderr.write(`[tauri-driver] ${b}`));
   child.stderr.on('data', (b) => process.stderr.write(`[tauri-driver] ${b}`));
@@ -506,6 +517,21 @@ function startTauriDriver() {
     }
   });
   return child;
+}
+
+async function keepSmokeWindowOutOfTheWay(driver) {
+  if (!LOW_DISRUPTION_MODE) return;
+
+  // WebView2/Tauri does not expose a true headless mode for native app smokes.
+  // Keep the window technically visible (so WebDriver can still click and read
+  // layout) but move it off-screen immediately after session creation so local
+  // runs do not keep stealing focus from the user's current desktop work.
+  try {
+    await driver.manage().window().setRect({ x: -32000, y: -32000, width: 1100, height: 700 });
+    console.error('[smoke] low-disruption mode: moved Tauri test window off-screen (set STS2_SMOKE_VISIBLE=1 to watch it).');
+  } catch (e) {
+    console.error(`[smoke] low-disruption window move failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 async function buildDriver() {
@@ -2211,6 +2237,7 @@ async function main() {
   let failed = false;
   try {
     driver = await buildDriver();
+    await keepSmokeWindowOutOfTheWay(driver);
     for (const entry of SPECS) {
       const [name, fn] = entry;
       // STATE_SPECS mutate disk state; give each one a pristine

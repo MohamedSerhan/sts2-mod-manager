@@ -480,7 +480,7 @@ pub(crate) fn resolve_launch_health_blockers_from_paths(
             direct_keys.insert(mod_key(installed));
         }
     }
-    let target_keys = hard_blocker_target_keys(&active_mods, direct_keys);
+    let target_keys = hard_blocker_target_keys(&launch_health_mods, &active_mods, direct_keys);
 
     store_launch_blocker_mods_from_paths(
         target_keys,
@@ -881,11 +881,12 @@ fn quarantine_target_keys(
 }
 
 fn hard_blocker_target_keys(
+    all_mods: &[ModInfo],
     active_mods: &[ModInfo],
     direct_keys: BTreeSet<String>,
 ) -> BTreeSet<String> {
     let mut broken_ids: BTreeSet<String> = BTreeSet::new();
-    for installed in active_mods {
+    for installed in all_mods {
         if direct_keys.contains(&mod_key(installed)) {
             for token in mod_identity_tokens(installed) {
                 broken_ids.insert(normalize_token(&token));
@@ -1927,6 +1928,60 @@ mod tests {
         assert!(!disabled.join("EndRunGraph").exists());
         let updated = crate::profiles::load_profile("active", &profiles).unwrap();
         assert!(updated.mods.iter().all(|profile_mod| profile_mod.enabled));
+    }
+
+    #[test]
+    fn launch_resolver_cascades_dependents_of_crashed_workshop_mod() {
+        let _guard = lock_test_steam_env();
+        let root = tempdir().unwrap();
+        let steam = root.path().join("steam");
+        let game = steam
+            .join("steamapps")
+            .join("common")
+            .join("Slay the Spire 2");
+        let mods = game.join("mods");
+        let disabled = game.join("mods_disabled");
+        let profiles = root.path().join("profiles");
+        let config = root.path().join("config");
+        fs::create_dir_all(&mods).unwrap();
+        fs::create_dir_all(&disabled).unwrap();
+        fs::create_dir_all(&profiles).unwrap();
+        fs::create_dir_all(&config).unwrap();
+        let _steam_env = EnvOverride::set("STS2_FIXTURE_STEAM_PATH", &steam);
+        write_mod_fixture(
+            &mods,
+            "EndRunGraph",
+            r#"{"id":"EndRunGraph","name":"EndRunGraph","version":"0.1.0","dependencies":["STS2-RitsuLib"]}"#,
+        );
+        write_workshop_mod_fixture(
+            &steam,
+            "3747602295",
+            "STS2-RitsuLib",
+            r#"{"id":"STS2-RitsuLib","pck_name":"STS2-RitsuLib","name":"RitsuLib","version":"0.4.41","dependencies":[]}"#,
+        );
+        let mut active_profile = profile("active", "Active", None);
+        active_profile.mods = vec![profile_mod("EndRunGraph", "EndRunGraph", "EndRunGraph")];
+        crate::profiles::save_profile(&active_profile, &profiles).unwrap();
+        let log = "[com.ritsukage.sts2-STS2-RitsuLib] Critical patch(es) failed, mod loading blocked";
+
+        let result = resolve_launch_health_blockers_from_paths(
+            log,
+            &mods,
+            &disabled,
+            &profiles,
+            &config,
+            Some("active".into()),
+            Some("0.107.1".into()),
+            None,
+        )
+        .unwrap();
+
+        assert!(!mods.join("EndRunGraph").exists());
+        assert!(disabled.join("EndRunGraph").exists());
+        assert_eq!(result.moved.len(), 1);
+        assert_eq!(result.moved[0].folder_name.as_deref(), Some("EndRunGraph"));
+        let updated = crate::profiles::load_profile("active", &profiles).unwrap();
+        assert!(updated.mods.iter().all(|profile_mod| !profile_mod.enabled));
     }
 
     #[test]

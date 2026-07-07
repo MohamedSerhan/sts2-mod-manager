@@ -58,8 +58,9 @@ test('Windows setup EXE offers an opt-in app-data cleanup on uninstall', () => {
   assert.match(hooks, /MB_YESNO\|MB_ICONQUESTION/);
   assert.match(hooks, /RMDir\s+\/r\s+"\$APPDATA\\sts2-mod-manager"/);
   assert.match(hooks, /RMDir\s+\/r\s+"\$LOCALAPPDATA\\sts2-mod-manager"/);
-  assert.match(hooks, /RMDir\s+\/r\s+"\$APPDATA\\sts2-mod-manager-dev"/);
-  assert.match(hooks, /RMDir\s+\/r\s+"\$LOCALAPPDATA\\sts2-mod-manager-dev"/);
+  const removalLines = hooks.split('\n').filter((line) => /RMDir\s+\/r/.test(line)).join('\n');
+  assert.doesNotMatch(removalLines, /sts2-mod-manager-dev/);
+  assert.doesNotMatch(removalLines, /SlayTheSpire2|mods_disabled|steamapps|workshop/i);
 });
 
 test('user-facing update install buttons do not bypass the pinned backend installer', () => {

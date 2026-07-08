@@ -37,6 +37,16 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.8.4] - 2026-07-08
+
+### Fixed
+
+- Fixed Steam Workshop mod rows so they show the right source, prefer newer Workshop copies when both copies are active, stop treating Workshop-provided dependencies as missing during launch checks, clarify launch blockers, and offer saved-data cleanup during Windows uninstall.
+
+### Security
+
+- Saved-version labels now check the real site behind a link before calling it GitHub or Nexus.
+
 ## [1.8.3] - 2026-06-29
 
 ### Added

@@ -1962,7 +1962,8 @@ mod tests {
         let mut active_profile = profile("active", "Active", None);
         active_profile.mods = vec![profile_mod("EndRunGraph", "EndRunGraph", "EndRunGraph")];
         crate::profiles::save_profile(&active_profile, &profiles).unwrap();
-        let log = "[com.ritsukage.sts2-STS2-RitsuLib] Critical patch(es) failed, mod loading blocked";
+        let log =
+            "[com.ritsukage.sts2-STS2-RitsuLib] Critical patch(es) failed, mod loading blocked";
 
         let result = resolve_launch_health_blockers_from_paths(
             log,

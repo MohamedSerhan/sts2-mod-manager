@@ -41,11 +41,23 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ### Fixed
 
-- Fixed Steam Workshop mod rows so they show the right source, prefer newer Workshop copies when both copies are active, stop treating Workshop-provided dependencies as missing during launch checks, clarify launch blockers, and offer saved-data cleanup during Windows uninstall.
+- Steam Workshop dependencies such as **RitsuLib** now count as available during launch checks, so a local mod is no longer blocked just because its dependency is installed through Steam Workshop instead of the manager's local `mods` folder.
+- Steam Workshop mod rows now show the right source and version options in the Mod Library and modpack views.
+- When both a local copy and a Steam Workshop copy of the same mod are active, the manager now prefers the newer Workshop copy instead of silently sticking to the older local one.
+- Launch-health recovery now gives clearer guidance for missing dependencies, incompatible saves, and Steam-managed mods.
+- If a Steam Workshop-provided mod is the thing that crashes or blocks loading, recovery now keeps Steam-owned files in place and only quarantines local dependent mods when that is the safe action.
+- Windows uninstall now offers saved-data cleanup for normal installs while keeping developer/test build data out of that cleanup path.
+- The README, GitHub Pages site, screenshots, and download guidance were refreshed for the current app flow.
 
 ### Security
 
-- Saved-version labels now check the real site behind a link before calling it GitHub or Nexus.
+- Saved-version labels now check the real site behind a link before calling it GitHub or Nexus, preventing misleading source labels when a URL redirects somewhere unexpected.
+
+### Maintenance and verification
+
+- Refreshed npm, Cargo, Tauri Action, and GitHub Actions dependencies.
+- Hardened the release workflow and Windows installer policy checks.
+- Made WebDriver smoke tests lower-disruption/off-screen by default and expanded Workshop launch-health coverage.
 
 ## [1.8.3] - 2026-06-29
 

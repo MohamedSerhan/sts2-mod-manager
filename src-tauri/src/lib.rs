@@ -453,6 +453,18 @@ pub fn run() {
         .setup(|app| {
             use tauri::{Emitter, Manager};
 
+            // QA smoke harness low-disruption mode: keep the native WebView window
+            // off the user's active desktop while Selenium drives it. This is
+            // compiled only into qa-cassette builds; shipped binaries ignore the
+            // env var entirely.
+            #[cfg(feature = "qa-cassette")]
+            if std::env::var("STS2_SMOKE_LOW_DISRUPTION").ok().as_deref() == Some("1") {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(-32000, -32000)));
+                    log::info!("STS2_SMOKE_LOW_DISRUPTION enabled — main window moved off-screen for WebDriver smoke run.");
+                }
+            }
+
             // Nexus zips are caught via the Downloads-folder watcher
             // below — user clicks Nexus's Slow / Manual button, the zip
             // lands in ~/Downloads, watcher picks it up.

@@ -141,6 +141,9 @@ export function LaunchHealthModal({
               <div className="gf-launch-health-section-title">
                 {t('launchHealth.dependencySection', { count: dependencyBlocked.length })}
               </div>
+              <p className="gf-launch-health-meta">
+                {t('launchHealth.dependencySaveChangesNote')}
+              </p>
               <ul className="gf-launch-health-list">
                 {dependencyPreview.visible.map((mod) => (
                   <li key={`${mod.folder_name || mod.name}:${mod.missing_dependencies.join('|')}`}>

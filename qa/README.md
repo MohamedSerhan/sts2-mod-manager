@@ -102,6 +102,14 @@ unset, so a production build behaves identically without them:
   qa-cassette`, route outbound GitHub + Nexus GETs to this dir
   instead of the wire. Production builds ignore this entirely.
 
+Runner behaviour (not isolation):
+
+- `STS2_SMOKE_VISIBLE=1` — keep the Tauri test window on-screen during a
+  local smoke run. By default the window is moved off-screen immediately
+  after the WebDriver session starts so it does not steal focus from the
+  developer's current desktop work. Set this when you want to watch the app
+  during debugging. See `qa/runner/README.md` for details.
+
 ## Driving the app — three tiers
 
 Pick the right tier for the scenario:

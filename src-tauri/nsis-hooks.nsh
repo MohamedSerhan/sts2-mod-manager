@@ -8,3 +8,11 @@
     SetOutPath "$INSTDIR"
   ${EndIf}
 !macroend
+
+!macro NSIS_HOOK_PREUNINSTALL
+  MessageBox MB_YESNO|MB_ICONQUESTION "Remove STS2 Mod Manager saved modpacks, settings, backups, logs, and cached downloads for this Windows account? This will not remove Slay the Spire 2 mods, Steam Workshop files, game saves, or developer-build data. Choose No to keep manager data for a future reinstall." IDNO preuninstall_skip_cleanup
+  DetailPrint "Removing STS2 Mod Manager saved data"
+  RMDir /r "$APPDATA\sts2-mod-manager"
+  RMDir /r "$LOCALAPPDATA\sts2-mod-manager"
+  preuninstall_skip_cleanup:
+!macroend

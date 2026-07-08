@@ -132,12 +132,10 @@ pub fn get_launch_health(
         )
     };
 
-    let mut active_mods = mods_path
+    let active_mods = mods_path
         .as_deref()
-        .map(crate::mods::scan_mods)
+        .map(|mods_path| scan_launch_health_mods(mods_path, &config_path))
         .unwrap_or_default();
-    crate::mod_sources::enrich_mods_with_sources(&mut active_mods, &config_path);
-    crate::mod_versions::enrich_mods_with_versions(&mut active_mods, &config_path);
 
     let log_path = game_log_path();
     let log_text = read_log_tail_from_path(log_path.as_deref(), GAME_LOG_SCAN_LINES)?;
@@ -151,6 +149,14 @@ pub fn get_launch_health(
         log_path.as_deref(),
     )
     .map_err(|e| e.to_string())
+}
+
+fn scan_launch_health_mods(mods_path: &Path, config_path: &Path) -> Vec<ModInfo> {
+    let mut active_mods = crate::mods::scan_mods(mods_path);
+    active_mods.extend(crate::mods::scan_workshop_mods_for_mods_path(mods_path));
+    crate::mod_sources::enrich_mods_with_sources(&mut active_mods, config_path);
+    crate::mod_versions::enrich_mods_with_versions(&mut active_mods, config_path);
+    active_mods
 }
 
 #[tauri::command]
@@ -450,13 +456,22 @@ pub(crate) fn resolve_launch_health_blockers_from_paths(
     game_version: Option<String>,
     log_path: Option<&Path>,
 ) -> Result<LaunchQuarantineResult> {
-    let mut active_mods = crate::mods::scan_mods(mods_path);
-    crate::mod_versions::enrich_mods_with_versions(&mut active_mods, config_path);
-    let diagnostics = diagnose_launch_log(log_text, &active_mods, game_version.clone(), log_path);
+    let launch_health_mods = scan_launch_health_mods(mods_path, config_path);
+    let active_mods: Vec<ModInfo> = launch_health_mods
+        .iter()
+        .filter(|m| !m.install_source.is_workshop())
+        .cloned()
+        .collect();
+    let diagnostics = diagnose_launch_log(
+        log_text,
+        &launch_health_mods,
+        game_version.clone(),
+        log_path,
+    );
 
     let mut direct_keys: BTreeSet<String> =
         diagnostics.failed_mods.iter().map(failure_key).collect();
-    let available_dependencies = active_dependency_tokens(&active_mods);
+    let available_dependencies = active_dependency_tokens(&launch_health_mods);
     for installed in &active_mods {
         if !missing_dependencies_for_mod(installed, &available_dependencies).is_empty() {
             direct_keys.insert(mod_key(installed));
@@ -465,7 +480,7 @@ pub(crate) fn resolve_launch_health_blockers_from_paths(
             direct_keys.insert(mod_key(installed));
         }
     }
-    let target_keys = hard_blocker_target_keys(&active_mods, direct_keys);
+    let target_keys = hard_blocker_target_keys(&launch_health_mods, &active_mods, direct_keys);
 
     store_launch_blocker_mods_from_paths(
         target_keys,
@@ -866,11 +881,12 @@ fn quarantine_target_keys(
 }
 
 fn hard_blocker_target_keys(
+    all_mods: &[ModInfo],
     active_mods: &[ModInfo],
     direct_keys: BTreeSet<String>,
 ) -> BTreeSet<String> {
     let mut broken_ids: BTreeSet<String> = BTreeSet::new();
-    for installed in active_mods {
+    for installed in all_mods {
         if direct_keys.contains(&mod_key(installed)) {
             for token in mod_identity_tokens(installed) {
                 broken_ids.insert(normalize_token(&token));
@@ -1163,6 +1179,35 @@ mod tests {
     use chrono::Utc;
     use tempfile::tempdir;
 
+    struct EnvOverride {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvOverride {
+        fn set(key: &'static str, value: &Path) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    fn lock_test_steam_env() -> std::sync::MutexGuard<'static, ()> {
+        crate::game::TEST_STEAM_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    impl Drop for EnvOverride {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.as_ref() {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
     fn mod_info(name: &str, folder_name: &str, mod_id: &str) -> ModInfo {
         ModInfo {
             mod_version_id: None,
@@ -1254,6 +1299,23 @@ mod tests {
             manifest,
         )
         .unwrap();
+    }
+
+    fn write_workshop_mod_fixture(
+        steam_path: &Path,
+        item_id: &str,
+        folder_name: &str,
+        manifest: &str,
+    ) {
+        let item = steam_path
+            .join("steamapps")
+            .join("workshop")
+            .join("content")
+            .join(crate::game::STS2_STEAM_APPID)
+            .join(item_id);
+        fs::create_dir_all(&item).unwrap();
+        fs::write(item.join(format!("{folder_name}.dll")), b"dll").unwrap();
+        fs::write(item.join("mod_manifest.json"), manifest).unwrap();
     }
 
     #[test]
@@ -1486,6 +1548,53 @@ mod tests {
 
         assert_eq!(report.dependency_blocked_mods.len(), 1);
         assert!(disabled.join("STS2-RitsuLib").exists());
+    }
+
+    #[test]
+    fn launch_health_uses_workshop_mods_as_dependency_providers() {
+        let _guard = lock_test_steam_env();
+        let root = tempdir().unwrap();
+        let steam = root.path().join("steam");
+        let game = steam
+            .join("steamapps")
+            .join("common")
+            .join("Slay the Spire 2");
+        let mods = game.join("mods");
+        let profiles = root.path().join("profiles");
+        let config = root.path().join("config");
+        fs::create_dir_all(&mods).unwrap();
+        fs::create_dir_all(&profiles).unwrap();
+        fs::create_dir_all(&config).unwrap();
+        let _steam_env = EnvOverride::set("STS2_FIXTURE_STEAM_PATH", &steam);
+        write_mod_fixture(
+            &mods,
+            "EndRunGraph",
+            r#"{"id":"EndRunGraph","name":"EndRunGraph","version":"0.1.0","dependencies":["STS2-RitsuLib"]}"#,
+        );
+        write_workshop_mod_fixture(
+            &steam,
+            "3747602295",
+            "STS2-RitsuLib",
+            r#"{"id":"STS2-RitsuLib","pck_name":"STS2-RitsuLib","name":"RitsuLib","version":"0.4.41","dependencies":[]}"#,
+        );
+
+        let active = scan_launch_health_mods(&mods, &config);
+        assert!(active.iter().any(|info| {
+            info.install_source == crate::mods::ModInstallSource::SteamWorkshop
+                && info.mod_id.as_deref() == Some("STS2-RitsuLib")
+        }));
+        let report = launch_health_from_parts(
+            &active,
+            &profiles,
+            &config,
+            None,
+            Some("0.107.1".into()),
+            "",
+            None,
+        )
+        .unwrap();
+
+        assert!(report.dependency_blocked_mods.is_empty());
     }
 
     #[test]
@@ -1765,6 +1874,115 @@ mod tests {
         let updated = crate::profiles::load_profile("active", &profiles).unwrap();
         assert!(updated.mods.iter().all(|profile_mod| !profile_mod.enabled));
         assert_eq!(result.disabled_profile_entries.len(), 1);
+    }
+
+    #[test]
+    fn launch_resolver_keeps_mod_when_dependency_is_workshop_active() {
+        let _guard = lock_test_steam_env();
+        let root = tempdir().unwrap();
+        let steam = root.path().join("steam");
+        let game = steam
+            .join("steamapps")
+            .join("common")
+            .join("Slay the Spire 2");
+        let mods = game.join("mods");
+        let disabled = game.join("mods_disabled");
+        let profiles = root.path().join("profiles");
+        let config = root.path().join("config");
+        fs::create_dir_all(&mods).unwrap();
+        fs::create_dir_all(&disabled).unwrap();
+        fs::create_dir_all(&profiles).unwrap();
+        fs::create_dir_all(&config).unwrap();
+        let _steam_env = EnvOverride::set("STS2_FIXTURE_STEAM_PATH", &steam);
+        write_mod_fixture(
+            &mods,
+            "EndRunGraph",
+            r#"{"id":"EndRunGraph","name":"EndRunGraph","version":"0.1.0","dependencies":["STS2-RitsuLib"]}"#,
+        );
+        write_workshop_mod_fixture(
+            &steam,
+            "3747602295",
+            "STS2-RitsuLib",
+            r#"{"id":"STS2-RitsuLib","pck_name":"STS2-RitsuLib","name":"RitsuLib","version":"0.4.41","dependencies":[]}"#,
+        );
+        let mut active_profile = profile("active", "Active", None);
+        active_profile.mods = vec![profile_mod("EndRunGraph", "EndRunGraph", "EndRunGraph")];
+        crate::profiles::save_profile(&active_profile, &profiles).unwrap();
+
+        let result = resolve_launch_health_blockers_from_paths(
+            "",
+            &mods,
+            &disabled,
+            &profiles,
+            &config,
+            Some("active".into()),
+            Some("0.107.1".into()),
+            None,
+        )
+        .unwrap();
+
+        assert!(result.moved.is_empty());
+        assert!(result.failed.is_empty());
+        assert!(result.disabled_profile_entries.is_empty());
+        assert!(mods.join("EndRunGraph").exists());
+        assert!(!disabled.join("EndRunGraph").exists());
+        let updated = crate::profiles::load_profile("active", &profiles).unwrap();
+        assert!(updated.mods.iter().all(|profile_mod| profile_mod.enabled));
+    }
+
+    #[test]
+    fn launch_resolver_cascades_dependents_of_crashed_workshop_mod() {
+        let _guard = lock_test_steam_env();
+        let root = tempdir().unwrap();
+        let steam = root.path().join("steam");
+        let game = steam
+            .join("steamapps")
+            .join("common")
+            .join("Slay the Spire 2");
+        let mods = game.join("mods");
+        let disabled = game.join("mods_disabled");
+        let profiles = root.path().join("profiles");
+        let config = root.path().join("config");
+        fs::create_dir_all(&mods).unwrap();
+        fs::create_dir_all(&disabled).unwrap();
+        fs::create_dir_all(&profiles).unwrap();
+        fs::create_dir_all(&config).unwrap();
+        let _steam_env = EnvOverride::set("STS2_FIXTURE_STEAM_PATH", &steam);
+        write_mod_fixture(
+            &mods,
+            "EndRunGraph",
+            r#"{"id":"EndRunGraph","name":"EndRunGraph","version":"0.1.0","dependencies":["STS2-RitsuLib"]}"#,
+        );
+        write_workshop_mod_fixture(
+            &steam,
+            "3747602295",
+            "STS2-RitsuLib",
+            r#"{"id":"STS2-RitsuLib","pck_name":"STS2-RitsuLib","name":"RitsuLib","version":"0.4.41","dependencies":[]}"#,
+        );
+        let mut active_profile = profile("active", "Active", None);
+        active_profile.mods = vec![profile_mod("EndRunGraph", "EndRunGraph", "EndRunGraph")];
+        crate::profiles::save_profile(&active_profile, &profiles).unwrap();
+        let log =
+            "[com.ritsukage.sts2-STS2-RitsuLib] Critical patch(es) failed, mod loading blocked";
+
+        let result = resolve_launch_health_blockers_from_paths(
+            log,
+            &mods,
+            &disabled,
+            &profiles,
+            &config,
+            Some("active".into()),
+            Some("0.107.1".into()),
+            None,
+        )
+        .unwrap();
+
+        assert!(!mods.join("EndRunGraph").exists());
+        assert!(disabled.join("EndRunGraph").exists());
+        assert_eq!(result.moved.len(), 1);
+        assert_eq!(result.moved[0].folder_name.as_deref(), Some("EndRunGraph"));
+        let updated = crate::profiles::load_profile("active", &profiles).unwrap();
+        assert!(updated.mods.iter().all(|profile_mod| !profile_mod.enabled));
     }
 
     #[test]

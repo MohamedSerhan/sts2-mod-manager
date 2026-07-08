@@ -112,9 +112,7 @@ fn compute_profile_drift_with_registry(
     cache_path: Option<&Path>,
 ) -> ProfileDrift {
     let mut all_mods = crate::mods::scan_mods(mods_path);
-    all_mods.extend(crate::mods::scan_workshop_mods_for_mods_path(
-        mods_path,
-    ));
+    all_mods.extend(crate::mods::scan_workshop_mods_for_mods_path(mods_path));
     let enabled_count = all_mods.len();
     all_mods.extend(crate::mods::scan_disabled_mods(disabled_path));
     crate::mod_sources::enrich_mods_with_sources(&mut all_mods, config_path);

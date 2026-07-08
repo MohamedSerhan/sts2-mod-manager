@@ -10,6 +10,9 @@ use crate::state::{AppState, LaunchMode};
 pub const STS2_STEAM_APPID: &str = "2868840";
 const STEAM_URL: &str = "steam://rungameid/2868840";
 
+#[cfg(test)]
+pub(crate) static TEST_STEAM_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Information about the detected game installation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameInfo {

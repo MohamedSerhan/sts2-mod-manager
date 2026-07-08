@@ -886,6 +886,14 @@ export function LibraryTable({
           const byEffectiveSource =
             activeRepresentativePriority(b, bInfo) -
             activeRepresentativePriority(a, aInfo);
+          if (a.installed_enabled && b.installed_enabled) {
+            const byActiveVersion = modVersionSortValue(b.version).localeCompare(
+              modVersionSortValue(a.version),
+              undefined,
+              { sensitivity: 'base', numeric: true },
+            );
+            if (byActiveVersion) return byActiveVersion;
+          }
           if (byEffectiveSource) return byEffectiveSource;
           const byVersion = modVersionSortValue(b.version).localeCompare(
             modVersionSortValue(a.version),

@@ -89,6 +89,16 @@ uses `WebKitWebDriver` from the WebKitGTK driver package.
 node qa/runner/smoke.mjs
 ```
 
+Local smoke runs default to **low-disruption mode**: Windows child
+processes are launched with hidden consoles, and the Tauri test window is
+moved off-screen as soon as the WebDriver session starts so it does not
+steal focus from the developer's current desktop work. To watch the app
+window while debugging, opt into visible mode:
+
+```bash
+STS2_SMOKE_VISIBLE=1 node qa/runner/smoke.mjs
+```
+
 Exits 0 on success, non-zero with a stack trace on failure.
 
 ### Cassette mode (CASSETTE=1)

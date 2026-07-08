@@ -228,6 +228,34 @@ describe('<ModpackDetail>', () => {
     expect(screen.queryByText('v1.0.0')).not.toBeInTheDocument();
   });
 
+  it('labels Steam Workshop mods correctly in Add from your Library search results', async () => {
+    const user = userEvent.setup();
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    const profile = setupPack({
+      inPack: [modInfo({ name: 'Already Packed', folder_name: 'AlreadyPacked' })],
+      available: [
+        modInfo({
+          name: 'Workshop Skin',
+          version: '0.9.1',
+          folder_name: '3747602295',
+          mod_id: 'WorkshopSkin',
+          source: workshopUrl,
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+        }),
+      ],
+    });
+
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    const available = await expandLibrary(user);
+    const row = await within(available).findByText('Workshop Skin');
+    const card = row.closest('[data-testid="modpack-mod-row-available"]') as HTMLElement;
+
+    expect(within(card).getByText('Steam Workshop')).toBeInTheDocument();
+    expect(within(card).queryByText('Local')).toBeNull();
+  });
+
   it('shows a cached profile-pinned version after the Library copy is promoted', async () => {
     installMods([
       modInfo({

@@ -405,6 +405,8 @@ export function LibraryRow({
     !!audit?.latest_release_blocked_by_game_version && !audit.pinned;
   const showFrozenPill = !!mod?.pinned;
   const showSnoozedPill = !!audit?.snoozed;
+  const workshopUpdatePending =
+    workshopRow && !!(mod?.workshop_update_pending || row.workshop_update_pending);
   const auditError = audit?.error ?? null;
   const minGameViolated =
     !!mod?.min_game_version &&
@@ -647,6 +649,14 @@ export function LibraryRow({
                 )}
                 {/* Audit pills — one at a time. Update fires onUpdate; the
                   rest are informational. */}
+                {workshopUpdatePending && (
+                  <span
+                    className="gf-pill gf-pill-update"
+                    title={t('mods.workshopManagedDesc')}
+                  >
+                    <AlertTriangle size={9} /> {t('mods.steamWorkshop')}
+                  </span>
+                )}
                 {audit &&
                   isUpToDate(audit) &&
                   !showUpdatePill &&

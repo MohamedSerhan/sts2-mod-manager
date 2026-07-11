@@ -769,7 +769,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       // flooding a curated pack with the whole library. saveProfileDrift
       // adds just the enabled extras, drops missing mods, and syncs
       // toggled/version for mods still present.
-      const profile = await saveProfileDrift(targetKey);
+      const { profile, residual_drift: residualDrift } = await saveProfileDrift(targetKey);
+      if (residualDrift?.has_drift) {
+        throw new Error(t('profiles.drift.residualAfterSave'));
+      }
       if (shareInfoMap[targetKey]) markLocalOutOfSync(targetKey);
       setProfiles((prev) => {
         const exists = prev.some((p) => profileKey(p) === profileKey(profile));

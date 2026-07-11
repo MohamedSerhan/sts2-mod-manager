@@ -447,6 +447,14 @@ export interface ProfileDrift {
   has_drift: boolean;
 }
 
+/** Return value of `save_profile_drift`. Contains the reconciled profile and,
+ *  in the unlikely case that post-save drift is still detected (e.g. a
+ *  Workshop item Steam controls), the residual drift for diagnostics. */
+export interface SaveDriftResult {
+  profile: Profile;
+  residual_drift?: ProfileDrift;
+}
+
 export async function getProfileDrift(name: string): Promise<ProfileDrift> {
   return invoke('get_profile_drift', { name });
 }
@@ -455,7 +463,7 @@ export async function getProfileDrift(name: string): Promise<ProfileDrift> {
  *  only the diff (add enabled extras, drop missing mods, sync toggled/version
  *  for present mods). Unlike a full re-snapshot, this preserves the pack's
  *  curated set rather than absorbing the whole install. */
-export async function saveProfileDrift(name: string): Promise<Profile> {
+export async function saveProfileDrift(name: string): Promise<SaveDriftResult> {
   return invoke('save_profile_drift', { name });
 }
 

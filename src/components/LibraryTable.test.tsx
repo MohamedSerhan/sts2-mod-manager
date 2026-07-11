@@ -192,6 +192,119 @@ describe('<LibraryTable>', () => {
     ).toBe(2);
   });
 
+  it('does not warn when the same version has one active and one stored copy', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('list_profiles_cmd', () => [
+      baseProfile({ name: 'Stable' }),
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: 'RitsuLib',
+          mod_id: 'STS2-RitsuLib',
+          installed_enabled: true,  // active
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+          ],
+        },
+        {
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: '3747602295',
+          mod_id: 'STS2-RitsuLib',
+          source: workshopUrl,
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+          installed_enabled: false,  // stored/inactive — must NOT warn
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    const modInfoByKey = new Map<string, ModInfo>([
+      [
+        'RitsuLib',
+        mkModInfo({
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: 'RitsuLib',
+          mod_id: 'STS2-RitsuLib',
+        }),
+      ],
+      [
+        '3747602295',
+        mkModInfo({
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: '3747602295',
+          mod_id: 'STS2-RitsuLib',
+          source: workshopUrl,
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+        }),
+      ],
+    ]);
+
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+
+    // Wait for the rows to render, then verify no duplicate-source warning appears.
+    await screen.findAllByText('RitsuLib');
+    expect(
+      screen.queryAllByText(/STS2 may prefer the local mods folder copy/i),
+    ).toHaveLength(0);
+  });
+
+  it.each([
+    ['local active + Steam stored', true, false, 'STS2-RitsuLib', 'STS2-RitsuLib', false],
+    ['Steam active + local stored', false, true, 'STS2-RitsuLib', 'STS2-RitsuLib', false],
+    ['both stored', false, false, 'STS2-RitsuLib', 'STS2-RitsuLib', false],
+    ['same display name with different runtime IDs', true, true, 'local-runtime', 'steam-runtime', false],
+    ['both independently active', true, true, 'STS2-RitsuLib', 'STS2-RitsuLib', true],
+  ])(
+    'duplicate-provider warning matrix: %s',
+    async (_label, localActive, steamActive, localRuntimeId, steamRuntimeId, shouldWarn) => {
+      const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'RitsuLib', version: '0.4.41', folder_name: 'RitsuLib',
+            mod_id: localRuntimeId, installed_enabled: localActive,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: localActive, editable: true }],
+          },
+          {
+            name: 'RitsuLib', version: '0.4.41', folder_name: '3747602295',
+            mod_id: steamRuntimeId, source: workshopUrl, install_source: 'steam_workshop',
+            workshop_item_id: '3747602295', workshop_url: workshopUrl,
+            installed_enabled: steamActive,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+        ],
+      }));
+      const modInfoByKey = new Map<string, ModInfo>([
+        ['RitsuLib', mkModInfo({ name: 'RitsuLib', folder_name: 'RitsuLib', mod_id: localRuntimeId })],
+        ['3747602295', mkModInfo({
+          name: 'RitsuLib', folder_name: '3747602295', mod_id: steamRuntimeId,
+          source: workshopUrl, install_source: 'steam_workshop',
+          workshop_item_id: '3747602295', workshop_url: workshopUrl,
+        })],
+      ]);
+
+      render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+      await screen.findAllByText('RitsuLib');
+      expect(screen.queryAllByText(/STS2 may prefer the local mods folder copy/i).length)
+        .toBe(shouldWarn ? 2 : 0);
+    },
+  );
+
   it('appends extra rows once and ignores duplicates already in the membership grid', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [
       baseProfile({ name: 'Stable' }),

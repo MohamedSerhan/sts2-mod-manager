@@ -1375,6 +1375,41 @@ async function specDisabledLibraryExtrasArePreserved(driver) {
   }
 }
 
+async function specSaveChangesConverges(driver) {
+  const modpackName = `QA Save ${Date.now().toString(36)}`;
+  await navToMods(driver);
+  const refreshBtn = await waitForElement(driver,
+    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+    'Mods toolbar Refresh button');
+  await refreshBtn.click();
+  await navToModpacks(driver);
+  await createModpackNamed(driver, modpackName, { minSelected: 2 });
+
+  const addedDir = join(FIXTURE_DIRS.game, 'mods', 'SaveConvergenceMod');
+  mkdirSync(addedDir, { recursive: true });
+  writeFileSync(join(addedDir, 'SaveConvergenceMod.json'), JSON.stringify({
+    id: 'SaveConvergenceMod', name: 'Save Convergence Mod', version: '1.0.0', dependencies: [],
+  }));
+  writeFileSync(join(addedDir, 'SaveConvergenceMod.dll'), Buffer.from([0]));
+
+  const before = await invokeTauri(driver, 'get_profile_drift', { name: modpackName });
+  if (!before?.has_drift || !before.added?.includes('Save Convergence Mod')) {
+    throw new Error(`save convergence fixture did not create production drift: ${JSON.stringify(before)}`);
+  }
+  const first = await invokeTauri(driver, 'save_profile_drift', { name: modpackName });
+  if (first?.residual_drift?.has_drift) {
+    throw new Error(`first Save left residual production drift: ${JSON.stringify(first.residual_drift)}`);
+  }
+  const after = await invokeTauri(driver, 'get_profile_drift', { name: modpackName });
+  if (after?.has_drift) {
+    throw new Error(`production drift did not converge after Save: ${JSON.stringify(after)}`);
+  }
+  const second = await invokeTauri(driver, 'save_profile_drift', { name: modpackName });
+  if (second?.residual_drift?.has_drift || second?.profile?.updated_at !== first?.profile?.updated_at) {
+    throw new Error(`second Save was not a no-op: ${JSON.stringify(second)}`);
+  }
+}
+
 /* ── Helpers ────────────────────────────────────────────────────── */
 
 async function navToModpacks(driver) {
@@ -2212,6 +2247,7 @@ const STATE_SPECS = [
   ['modpack switch preserves freeze state (v1.3.1 contract)', specModpackSwitchPreservesFreeze],
   ['#22: toggle state sticky across modpack switch', specToggleStickyAcrossModpackSwitch],
   ['#20: disabled library extras are preserved', specDisabledLibraryExtrasArePreserved],
+  ['Save changes converges and the second Save is a no-op', specSaveChangesConverges],
   ['Steam Workshop references stay Steam-owned in mixed modpacks', specWorkshopModpackReferenceStaysSteamOwned],
   ['#21: incompatible mods stay out of created modpack', specIncompatibleModAbsentFromCreatedModpack],
 ];

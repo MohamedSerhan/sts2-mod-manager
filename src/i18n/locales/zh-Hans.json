@@ -361,6 +361,7 @@
       "toggledItems": "{{count}} 个切换",
       "versionChanged": "{{count}} 个版本变更",
       "outOfSyncFallback": "模组包与磁盘状态不同步",
+      "residualAfterSave": "保存后，当前启用的模组仍与已保存的模组包不一致。请刷新并检查剩余更改。",
       "saveChanges": "保存更改",
       "repair": "修复",
       "repairTitle": "恢复已保存的模组包，并将额外启用的模组移入存储"

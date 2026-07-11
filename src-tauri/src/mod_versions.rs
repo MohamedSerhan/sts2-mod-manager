@@ -3158,4 +3158,50 @@ mod tests {
         assert!(!disabled.path().join("Mod/manifest.json").exists());
         assert!(record_by_id(config.path(), &stored_id).is_none());
     }
+
+    #[test]
+    fn remove_local_copy_is_provider_scoped_and_does_not_recreate_beside_workshop() {
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+
+        write_manifest(disabled.path(), "1.0.0");
+        let mut local = mod_info("Test", "1.0.0", Some("stored"));
+        local.enabled = false;
+        local.mod_id = Some("shared-runtime".into());
+        let local_id = ensure_mod_info_id(&mut local, config.path()).unwrap();
+
+        let mut workshop = workshop_mod_info("3747602295", "1.0.0");
+        workshop.mod_id = Some("shared-runtime".into());
+        let workshop_id = ensure_mod_info_id(&mut workshop, config.path()).unwrap();
+        assert_ne!(
+            local_id, workshop_id,
+            "provider identity must remain distinct"
+        );
+
+        remove_local_mod_version(
+            config.path(),
+            cache.path(),
+            disabled.path(),
+            &[local, workshop.clone()],
+            &[],
+            &local_id,
+        )
+        .unwrap();
+
+        assert!(!disabled.path().join("Mod/manifest.json").exists());
+        assert!(record_by_id(config.path(), &local_id).is_none());
+        assert!(record_by_id(config.path(), &workshop_id).is_some());
+
+        let mut remaining = vec![workshop];
+        enrich_mods_with_versions(&mut remaining, config.path());
+        assert_eq!(
+            remaining[0].mod_version_id.as_deref(),
+            Some(workshop_id.as_str())
+        );
+        assert!(
+            record_by_id(config.path(), &local_id).is_none(),
+            "rescanning the Workshop sibling must not recreate the deleted local provider"
+        );
+    }
 }

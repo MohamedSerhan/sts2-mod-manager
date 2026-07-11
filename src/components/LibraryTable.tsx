@@ -726,6 +726,7 @@ export function LibraryTable({
     for (const row of effectiveGrid.mods) {
       const info = modInfoForRow(row);
       if (row.installed === false && !info) continue;
+      if (!row.installed_enabled) continue;
       const key = `${duplicateSourceFamilyKey(row, info)}::${modVersionSortValue(row.version)}`;
       const group =
         groups.get(key) ??

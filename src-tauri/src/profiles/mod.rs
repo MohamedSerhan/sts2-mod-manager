@@ -49,7 +49,7 @@ pub use crud::{
     export_profile, import_profile, list_profiles, load_profile, persist_profile_mod_sources,
     save_profile,
 };
-pub use drift::{ProfileDrift, RepairProfileResult, VersionMismatch};
+pub use drift::{ProfileDrift, RepairProfileResult, SaveDriftResult, VersionMismatch};
 pub use membership::SetProfileModsEnabledResult;
 
 use apply::switch_profile_from_paths;
@@ -1303,7 +1303,7 @@ pub fn get_profile_drift(
 pub fn save_profile_drift(
     name: String,
     state: tauri::State<'_, AppState>,
-) -> std::result::Result<Profile, String> {
+) -> std::result::Result<SaveDriftResult, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
@@ -1313,6 +1313,7 @@ pub fn save_profile_drift(
         disabled_path,
         &s.profiles_path,
         &s.config_path,
+        &s.cache_path,
     )
     .map_err(|e| e.to_string())
 }

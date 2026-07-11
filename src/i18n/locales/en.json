@@ -361,6 +361,7 @@
       "toggledItems": "{{count}} toggled",
       "versionChanged": "{{count}} version-changed",
       "outOfSyncFallback": "modpack and disk are out of sync",
+      "residualAfterSave": "The active loadout still does not match the saved modpack after saving. Refresh and review the remaining changes.",
       "saveChanges": "Save changes",
       "repair": "Repair",
       "repairTitle": "Restore saved modpack and move extra active mods to storage"

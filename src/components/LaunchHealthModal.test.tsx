@@ -45,6 +45,16 @@ function renderModal(
 }
 
 describe('<LaunchHealthModal>', () => {
+  it.each([1280, 800, 600, 360])('uses the responsive launch-only footer at %ipx with stable focus order', (width) => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    const { container } = renderModal(baseReport({ previous_failed_mods: [{ name: 'BrokenMod', version: '1', reasons: ['load_failed'] }] }));
+    const footer = container.querySelector('.gf-launch-health-foot');
+    expect(footer).toBeInTheDocument();
+    expect(footer).toHaveClass('gf-modal-foot');
+    const buttons = within(footer as HTMLElement).getAllByRole('button');
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual(['Cancel', 'Review in Library', 'Launch anyway', 'Store blocked & launch']);
+    expect(buttons[3]).toHaveClass('gf-launch-health-primary');
+  });
   it('shows a version-only warning without offering blocker storage', async () => {
     const user = userEvent.setup();
     const { callbacks, container } = renderModal(baseReport({
@@ -54,7 +64,7 @@ describe('<LaunchHealthModal>', () => {
     expect(screen.getByRole('dialog', { name: /STS2 changed since this pack last launched/i })).toBeInTheDocument();
     expect(screen.getByText(/no active modpack was last used with a different STS2 build/i)).toBeInTheDocument();
     expect(screen.getByText(/Previous: vUnknown/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Move blocked mods to storage and launch/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Store blocked & launch/i })).toBeNull();
 
     await user.click(container.querySelector('.gf-modal-back') as HTMLElement);
     expect(callbacks.onCancel).toHaveBeenCalledTimes(1);
@@ -97,7 +107,7 @@ describe('<LaunchHealthModal>', () => {
     expect(screen.getByText(/missing Missing0/i)).toBeInTheDocument();
     expect(screen.getByText(/needs STS2 v0.100.0/i)).toBeInTheDocument();
     expect(screen.getAllByText('+1 more')).toHaveLength(3);
-    expect(screen.getByRole('button', { name: /Move blocked mods to storage and launch/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Store blocked & launch/i })).toHaveClass('gf-launch-health-primary');
   });
 
   it('uses dependency and incompatible titles when those are the leading blockers', () => {
@@ -160,7 +170,7 @@ describe('<LaunchHealthModal>', () => {
 
     expect(screen.getByRole('dialog', { name: /STS2 changed since this pack last launched/i })).toBeInTheDocument();
     expect(screen.getByText(/Daily Pack was last used with a different STS2 build/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Move blocked mods to storage and launch/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Store blocked & launch/i })).toBeNull();
   });
 
   it('disables modal exits and launch actions while storing blockers', async () => {

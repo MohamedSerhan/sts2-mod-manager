@@ -924,6 +924,7 @@
     "launchAnyway": "التشغيل على أي حال",
     "storeAndLaunch": "حفظ التعديلات الفاشلة وتشغيل اللعبة",
     "storeBlockedAndLaunch": "نقل التعديلات المحجوبة إلى التخزين وتشغيل اللعبة",
+    "storeBlockedLaunchShort": "تخزين المحجوب وتشغيل اللعبة",
     "storing": "جارٍ الحفظ...",
     "storedFailedMods_one": "تم حفظ تعديل فاشل واحد قبل التشغيل",
     "storedFailedMods_other": "تم حفظ {{count}} تعديلات فاشلة قبل التشغيل",
@@ -1613,6 +1614,13 @@
       "run": "فحص المودات",
       "running": "جارٍ التحقّق…",
       "upToDate": "محدَّث"
+    },
+    "updatePlan": {
+      "title": "مراجعة التحديثات المتاحة", "subtitle": "اختر تنزيلات GitHub وراجع التحديثات التي تديرها مصادر أخرى.",
+      "selectAll": "تحديد الكل", "selectNone": "إلغاء التحديد", "selectItem": "تحديد {{name}}", "versionChange": "v{{current}} ← v{{target}}", "openManual": "فتح صفحة التنزيل اليدوي", "unfreeze": "إلغاء التجميد",
+      "downloadSelected_one": "تنزيل تحديث GitHub المحدد إلى الإصدارات", "downloadSelected_other": "تنزيل {{count}} من تحديثات GitHub المحددة إلى الإصدارات",
+      "capability": { "downloadable": "تنزيل GitHub", "manual": "تنزيل يدوي", "steam-managed": "تديره Steam", "frozen": "مستبعد أثناء التجميد" },
+      "result": { "updated": "تم التنزيل إلى الإصدارات", "stale": "تغير المصدر — أعد المعاينة", "skipped": "تم التخطي", "failed": "فشل التنزيل" }
     },
     "rollbackNoSource": "لا يحتوي «{{name}}» على مصدر GitHub مرتبط — يجلب الإرجاع من GitHub. أضِف مصدرًا عبر «تعديل المصادر…» أولاً.",
     "rollbackConfirmTitle": "إرجاع «{{name}}»؟",

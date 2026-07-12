@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { getActiveProfileId, getGameInfo, getInstalledMods, isGameRunning, checkSubscriptionUpdates, auditModVersions, updateAllMods, listProfiles } from '../hooks/useTauri';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { GameInfo, ModInfo, ModAuditEntry, ModAuditTarget, SubscriptionUpdate } from '../types';
+import type { GameInfo, ModInfo, ModAuditEntry, ModAuditTarget, SubscriptionUpdate, UpdateApplyResult, UpdatePlanItem } from '../types';
 import { useToast } from './ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { auditEntryKeys, auditTargetForMod, auditTargetKeys, type AuditRefreshTarget } from '../lib/auditState';
@@ -49,12 +49,12 @@ interface AppContextType {
    *  a confirm, toasts a summary, then re-audits just the touched rows.
    *  Safe to call with a single name. */
   updateAllGithub: (
-    githubUpdateNames: string[],
+    selectedPlans: Array<UpdatePlanItem | string>,
     opts?: {
       profileId?: string | null;
       afterUpdate?: (updated: ModInfo[]) => Promise<void> | void;
     },
-  ) => Promise<ModInfo[]>;
+  ) => Promise<UpdateApplyResult[]>;
 }
 
 function indexAuditEntries(entries: ModAuditEntry[]): Map<string, ModAuditEntry> {
@@ -337,22 +337,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateAllGithub = useCallback(async (
-    githubUpdateNames: string[],
+    selectedPlans: Array<UpdatePlanItem | string>,
     opts?: {
       profileId?: string | null;
       afterUpdate?: (updated: ModInfo[]) => Promise<void> | void;
     },
-  ): Promise<ModInfo[]> => {
-    if (updatingAll || githubUpdateNames.length === 0) return [];
-    const ok = await confirm({
-      title: t('app.updateConfirmTitle', { count: githubUpdateNames.length }),
-      body: t('app.updateConfirmBody'),
-      confirmLabel: t('app.updateConfirmLabel', { count: githubUpdateNames.length }),
-    });
-    if (!ok) return [];
+  ): Promise<UpdateApplyResult[]> => {
+    if (updatingAll || selectedPlans.length === 0) return [];
+    if (selectedPlans.some((plan) => typeof plan === 'string')) {
+      const ok = await confirm({ title: t('app.updateConfirmTitle', { count: selectedPlans.length }), body: t('app.updateConfirmBody'), confirmLabel: t('app.updateConfirmLabel', { count: selectedPlans.length }) });
+      if (!ok) return [];
+    }
+    const normalizedPlans = selectedPlans.map((plan) => typeof plan === 'string' ? ({ target: { name: plan }, current_version: '', target_version: '', provider: 'github', source: null, capability: 'downloadable', reason: '', selectable: true } satisfies UpdatePlanItem) : plan);
     setUpdatingAll(true);
     try {
-      const updated = await updateAllMods(opts?.profileId ?? null);
+      const results = await updateAllMods(normalizedPlans.map((plan) => ({ target: plan.target, expected_version: plan.target_version ?? '', provider: plan.provider })), opts?.profileId ?? null);
+      const updated = results.flatMap((result) => result && 'status' in result ? (result.updated_mod ? [result.updated_mod] : []) : [result as unknown as ModInfo]);
       if (updated.length > 0) setLibraryVersionRevision((n) => n + 1);
       await opts?.afterUpdate?.(updated);
       toast.success(
@@ -362,10 +362,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
       await refreshAll();
       await refreshAuditEntries([
-        ...githubUpdateNames,
+        ...selectedPlans.map((plan) => typeof plan === 'string' ? plan : plan.target),
         ...updated.map((m) => auditTargetForMod(m)),
       ]);
-      return updated;
+      return results;
     } catch (e) {
       toast.error(t('app.updateFailed', { error: e instanceof Error ? e.message : String(e) }));
       return [];

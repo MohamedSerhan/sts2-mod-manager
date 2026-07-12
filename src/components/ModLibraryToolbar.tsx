@@ -11,15 +11,18 @@
  * view can position them in its own body.
  */
 import { useTranslation } from 'react-i18next';
+import { useState } from 'react';
 import { ClipboardCheck, Download, RefreshCw } from 'lucide-react';
 
 import { Button } from './Button';
 import { AddModsMenu } from './AddModsMenu';
 import { countGithubUpdates, isGithubBulkUpdate } from '../lib/auditState';
 import type { ModLibrary } from '../hooks/useModLibrary';
+import { UpdatePlanSheet } from './UpdatePlanSheet';
 
 export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
   const { t } = useTranslation();
+  const [showPlan, setShowPlan] = useState(false);
   const {
     auditResults,
     auditing,
@@ -37,11 +40,10 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
       <AddModsMenu lib={lib} buttonClassName="gf-btn gf-btn-sm" />
       {(() => {
         const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
-        const ghUpdateNames = auditResults
-          ? auditResults
-              .filter(isGithubBulkUpdate)
-              .map((r) => r.mod_name)
-          : [];
+        const plans = (auditResults ?? []).flatMap((entry) => entry.update_plan ? [entry.update_plan] : []);
+        const legacyNames = (auditResults ?? []).filter((entry) => !entry.update_plan && isGithubBulkUpdate(entry)).map((entry) => entry.mod_name);
+        const pendingPlans = plans.filter((plan) => plan.selectable || plan.capability === 'manual' || plan.capability === 'steam-managed' || plan.capability === 'frozen');
+        const hasPending = pendingPlans.some((plan) => plan.selectable || plan.target_version);
 
         if (auditing) {
           return (
@@ -70,7 +72,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           );
         }
 
-        if (ghUpdateCount === 0) {
+        if (!hasPending && ghUpdateCount === 0) {
           return (
             <>
               <span className="gf-pill gf-pill-ok gf-pill-toolbar" title={t('mods.allUpToDate')}>
@@ -85,7 +87,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
 
         return (
           <>
-            <Button variant="primary" size="sm" onClick={() => updateAllGithub(ghUpdateNames)} title={t('mods.updateAllTitle')}>
+            <Button variant="primary" size="sm" onClick={() => plans.length ? setShowPlan(true) : void updateAllGithub(legacyNames)} title={t('mods.updateAllTitle')}>
               <Download size={14} />
               {t('mods.updateAllLabel', { count: ghUpdateCount })}
             </Button>
@@ -101,6 +103,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
         <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
         {refreshing ? t('common.refreshing') : t('common.refresh')}
       </Button>
+      {showPlan && <UpdatePlanSheet plans={(auditResults ?? []).flatMap((entry) => entry.update_plan ? [entry.update_plan] : [])} applying={updatingAll} onApply={updateAllGithub} onClose={() => setShowPlan(false)} onOpenSource={lib.openUpdatePlanSource} onUnfreeze={lib.unfreezeUpdatePlan} />}
     </div>
   );
 }

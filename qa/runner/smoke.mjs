@@ -1710,6 +1710,16 @@ async function invokeTauri(driver, cmd, args = {}) {
   return result.value;
 }
 
+async function specUpdatePlanHonorsEmptySelection(driver) {
+  const before = await invokeTauri(driver, 'get_installed_mods');
+  if (!before.ok) throw new Error(`Could not read Library before update-plan smoke: ${before.error}`);
+  const applied = await invokeTauri(driver, 'update_all_mods', { profileId: null, selected: [] });
+  if (!applied.ok) throw new Error(`Empty update plan failed: ${applied.error}`);
+  if (!Array.isArray(applied.value) || applied.value.length !== 0) throw new Error('Empty update plan returned unexpected item results');
+  const after = await invokeTauri(driver, 'get_installed_mods');
+  if (!after.ok || JSON.stringify(after.value) !== JSON.stringify(before.value)) throw new Error('Empty update selection changed the Library');
+}
+
 async function waitForToastContaining(driver, parts, label, timeoutMs = 10_000) {
   return driver.wait(async () => {
     const toasts = await driver.findElements(By.css('.gf-toast'));
@@ -2239,6 +2249,7 @@ const CASSETTE_SPECS = [
 // these because the cassette specs already exercise QaTestMod and
 // running both groups would double-mutate the fixture.
 const STATE_SPECS = [
+  ['update apply honors an empty stable-target selection', specUpdatePlanHonorsEmptySelection],
   ['toggle off moves QaTestMod to mods_disabled/', specToggleMovesQaTestModToDisabled],
   ['display-name override updates the Mod Library row immediately', specDisplayNameOverrideUpdatesRow],
   ['auto-detected GitHub save promotes the source for updates', specAutoDetectedGitHubSavePromotesSource],

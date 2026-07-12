@@ -34,7 +34,7 @@ import { nexusFilesUrl } from '../lib/nexusUrl';
 import { loadAutoAddInstallsToModpack } from '../lib/installPolicy';
 import { auditEntryKeys, auditTargetForMod } from '../lib/auditState';
 import { profileDisplayName } from '../lib/profileDisplay';
-import type { ModAuditEntry, ModInfo } from '../types';
+import type { ModAuditEntry, ModInfo, UpdatePlanItem } from '../types';
 import {
   deleteMod,
   installModFromFile,
@@ -375,10 +375,15 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     }
   }
 
-  async function updateAllGithubForSurface(githubUpdateNames: string[]) {
-    const updated = await updateAllGithub(githubUpdateNames, targetPack ? { profileId: targetPack } : undefined);
-    if (updated.length > 0) setLocalVersionRevision((n) => n + 1);
-    return updated;
+  async function updateAllGithubForSurface(selectedPlans: Array<UpdatePlanItem | string>) {
+    const results = await updateAllGithub(selectedPlans, targetPack ? { profileId: targetPack } : undefined);
+    if (results.some((result) => result.status === 'updated')) setLocalVersionRevision((n) => n + 1);
+    return results;
+  }
+
+  async function unfreezeUpdatePlan(plan: UpdatePlanItem) {
+    await unpinMod(plan.target.name, plan.target.folder_name ?? null);
+    await refreshAuditEntries([plan.target]);
   }
 
   async function handleTogglePin(mod: ModInfo) {
@@ -847,6 +852,8 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     handleQuickAdd,
     handleRefresh,
     handleCheckUpdates,
+    unfreezeUpdatePlan,
+    openUpdatePlanSource: (url: string) => openExternalUrl(url),
     // Toolbar render helpers (quick-add form + auto-detect modal).
     renderQuickAddForm,
     renderAutoDetectModal,

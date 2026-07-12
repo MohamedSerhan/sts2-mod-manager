@@ -924,6 +924,7 @@
     "launchAnyway": "仍然启动",
     "storeAndLaunch": "存放失败 Mod 并启动",
     "storeBlockedAndLaunch": "将受阻 Mod 移入存放区并启动",
+    "storeBlockedLaunchShort": "存放受阻 Mod 并启动",
     "storing": "存放中...",
     "storedFailedMods_one": "启动前已存放 1 个失败 Mod",
     "storedFailedMods_other": "启动前已存放 {{count}} 个失败 Mod",
@@ -1614,6 +1615,20 @@
       "run": "审计模组",
       "running": "检查中…",
       "upToDate": "已是最新"
+    },
+    "updatePlan": {
+      "title": "查看可用更新",
+      "subtitle": "选择 GitHub 下载，并查看由其他来源管理的更新。",
+      "selectAll": "全选",
+      "selectNone": "全不选",
+      "selectItem": "选择 {{name}}",
+      "versionChange": "v{{current}} → v{{target}}",
+      "openManual": "打开手动下载页面",
+      "unfreeze": "取消冻结",
+      "downloadSelected_one": "将选中的 {{count}} 个 GitHub 更新下载到“版本”",
+      "downloadSelected_other": "将选中的 {{count}} 个 GitHub 更新下载到“版本”",
+      "capability": { "downloadable": "GitHub 下载", "manual": "手动下载", "steam-managed": "由 Steam 管理", "frozen": "冻结时排除" },
+      "result": { "updated": "已下载到“版本”", "stale": "上游已更改，请重新预览", "skipped": "已跳过", "failed": "下载失败" }
     },
     "rollbackNoSource": "'{{name}}' 尚未关联 GitHub 来源 — 回滚需要从 GitHub 获取。请先通过「编辑来源…」添加来源。",
     "rollbackConfirmTitle": "回滚「{{name}}」？",

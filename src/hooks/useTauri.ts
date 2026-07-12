@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption, LocalModVersionRemovalPreview, ManualModVersionRemovalMode, ManualModVersionProfileReplacement, ManualModVersionRemovalResult, LaunchDiagnostics, LaunchHealthReport, LaunchQuarantineResult } from '../types';
+import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption, LocalModVersionRemovalPreview, ManualModVersionRemovalMode, ManualModVersionProfileReplacement, ManualModVersionRemovalResult, LaunchDiagnostics, LaunchHealthReport, LaunchQuarantineResult, UpdatePlanSelection, UpdateApplyResult } from '../types';
 
 type LocalModVersionOptionWire = Partial<LocalModVersionOption> & {
   modVersionId?: string;
@@ -512,8 +512,8 @@ export async function rollbackMod(name: string, folderName: string | null = null
   return invoke('rollback_mod', { name, folderName });
 }
 
-export async function updateAllMods(profileId: string | null = null): Promise<ModInfo[]> {
-  return invoke('update_all_mods', { profileId });
+export async function updateAllMods(selected: UpdatePlanSelection[] = [], profileId: string | null = null): Promise<UpdateApplyResult[]> {
+  return invoke('update_all_mods', { profileId, selected });
 }
 
 /**

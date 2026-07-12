@@ -423,7 +423,7 @@ export function ModpackDetail({
   }, [mods, profile.mods]);
   // GitHub-updatable mods in THIS pack (drives the "N updates available"
   // pill + the update-all action).
-  const packUpdateNames = useMemo(() => {
+  const packUpdatePlans = useMemo(() => {
     const packKeys = new Set(
       profile.mods
         .flatMap((m) => [
@@ -441,9 +441,9 @@ export function ModpackDetail({
           (auditEntryKeys(r).some((key) => packKeys.has(key)) ||
             packKeys.has(r.mod_name)),
       )
-      .map((r) => r.mod_name);
+      .flatMap((r) => r.update_plan ? [r.update_plan] : []);
   }, [auditResults, profile.mods]);
-  const updatesCount = packUpdateNames.length;
+  const updatesCount = packUpdatePlans.length;
 
   // Available = installed mods NOT already in the pack. Drift-tolerant
   // (issue #174): a reinstalled mod whose folder_name changed but whose
@@ -804,7 +804,7 @@ export function ModpackDetail({
     <button
       type="button"
       className="gf-pill gf-pill-update gf-pill-toolbar"
-      onClick={() => lib.updateAllGithub(packUpdateNames)}
+      onClick={() => lib.updateAllGithub(packUpdatePlans)}
       title={t('mods.updateAllTitle')}
     >
       <Download size={12} />{' '}

@@ -924,6 +924,7 @@
     "launchAnyway": "Launch anyway",
     "storeAndLaunch": "Store failed mods and launch",
     "storeBlockedAndLaunch": "Move blocked mods to storage and launch",
+    "storeBlockedLaunchShort": "Store blocked & launch",
     "storing": "Storing...",
     "storedFailedMods_one": "Stored 1 failed mod before launch",
     "storedFailedMods_other": "Stored {{count}} failed mods before launch",
@@ -1614,6 +1615,20 @@
       "run": "Audit mods",
       "running": "Checking…",
       "upToDate": "Up to date"
+    },
+    "updatePlan": {
+      "title": "Review available updates",
+      "subtitle": "Choose GitHub downloads and review updates managed elsewhere.",
+      "selectAll": "Select all",
+      "selectNone": "Select none",
+      "selectItem": "Select {{name}}",
+      "versionChange": "v{{current}} → v{{target}}",
+      "openManual": "Open manual page",
+      "unfreeze": "Unfreeze",
+      "downloadSelected_one": "Download {{count}} selected GitHub update to Versions",
+      "downloadSelected_other": "Download {{count}} selected GitHub updates to Versions",
+      "capability": { "downloadable": "GitHub download", "manual": "Manual download", "steam-managed": "Managed in Steam", "frozen": "Excluded while frozen" },
+      "result": { "updated": "Downloaded to Versions", "stale": "Changed upstream — preview again", "skipped": "Skipped", "failed": "Download failed" }
     },
     "rollbackNoSource": "'{{name}}' has no GitHub source linked — rollback fetches from GitHub. Add a source via Edit sources… first.",
     "rollbackConfirmTitle": "Roll back '{{name}}'?",

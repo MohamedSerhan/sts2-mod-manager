@@ -3066,6 +3066,17 @@ body {
 .gf-launch-health {
   width: min(560px, calc(100vw - 32px));
 }
+.gf-launch-health-foot {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.gf-launch-health-primary {
+  white-space: normal;
+  text-align: center;
+  justify-content: center;
+  max-inline-size: min(100%, 210px);
+  overflow-wrap: anywhere;
+}
 .gf-launch-health-heading {
   display: flex;
   align-items: flex-start;
@@ -3146,9 +3157,13 @@ body {
   color: var(--ink-mute);
 }
 @media (max-width: 560px) {
-  .gf-launch-health .gf-modal-foot {
-    flex-wrap: wrap;
-    justify-content: flex-end;
+  .gf-launch-health-foot > button {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .gf-launch-health-primary {
+    flex-basis: 100% !important;
+    max-inline-size: 100%;
   }
   .gf-launch-health-list li {
     grid-template-columns: minmax(0, 1fr);
@@ -3157,6 +3172,20 @@ body {
   .gf-launch-health-list li span:last-child {
     white-space: normal;
   }
+}
+.gf-update-plan { width: min(680px, calc(100vw - 32px)); }
+.gf-update-plan-body { display: flex; flex-direction: column; gap: 10px; }
+.gf-update-plan-select-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.gf-update-plan-list { display: flex; flex-direction: column; gap: 7px; }
+.gf-update-plan-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--indigo-line); border-radius: 7px; }
+.gf-update-plan-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gf-update-plan-copy span { color: var(--ink-mute); font-size: 12px; overflow-wrap: anywhere; }
+.gf-update-plan-marker { display: grid; place-items: center; color: var(--ink-mute); }
+.gf-update-plan-foot { justify-content: flex-end; flex-wrap: wrap; }
+@media (max-width: 520px) {
+  .gf-update-plan-row { grid-template-columns: 22px minmax(0, 1fr); }
+  .gf-update-plan-row > button { grid-column: 2; justify-self: start; white-space: normal; }
+  .gf-update-plan-foot .gf-btn { white-space: normal; text-align: center; }
 }
 .gf-app-blocker {
   position: fixed;

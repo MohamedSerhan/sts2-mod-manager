@@ -495,7 +495,7 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
 
     await user.click(getTopBarLaunchButton());
-    await user.click(await screen.findByRole('button', { name: /Move blocked mods to storage and launch/i }));
+    await user.click(await screen.findByRole('button', { name: /Store blocked & launch/i }));
 
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'resolve_launch_health_blockers')).toBe(true);
@@ -527,7 +527,7 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
 
     await user.click(getTopBarLaunchButton());
-    await user.click(await screen.findByRole('button', { name: /Move blocked mods to storage and launch/i }));
+    await user.click(await screen.findByRole('button', { name: /Store blocked & launch/i }));
 
     await waitFor(() => {
       expect(getInvokeCalls().some((c) => c.cmd === 'resolve_launch_health_blockers')).toBe(true);
@@ -576,7 +576,7 @@ describe('<App>', () => {
     await user.click(getTopBarLaunchButton());
 
     expect(await screen.findByRole('dialog', { name: /STS2 changed since this pack last launched/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Move blocked mods to storage and launch/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Store blocked & launch/i })).toBeNull();
   });
 
   it('Launch health Review in Library dismisses the modal and routes to the Library', async () => {
@@ -656,7 +656,7 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
 
     await user.click(getTopBarLaunchButton());
-    await user.click(await screen.findByRole('button', { name: /Move blocked mods to storage and launch/i }));
+    await user.click(await screen.findByRole('button', { name: /Store blocked & launch/i }));
 
     expect(await screen.findByText(/Some blocked mods could not be stored: StillBroken/i)).toBeInTheDocument();
     expect(screen.getByText('StillBroken')).toBeInTheDocument();
@@ -682,7 +682,7 @@ describe('<App>', () => {
     await waitFor(() => { expect(screen.getByText('STS2 Mod Manager')).toBeInTheDocument(); });
 
     await user.click(getTopBarLaunchButton());
-    await user.click(await screen.findByRole('button', { name: /Move blocked mods to storage and launch/i }));
+    await user.click(await screen.findByRole('button', { name: /Store blocked & launch/i }));
 
     expect(await screen.findByText(/Couldn't store blocked mods: disk locked/i)).toBeInTheDocument();
     expect(screen.getByText('BrokenMod')).toBeInTheDocument();

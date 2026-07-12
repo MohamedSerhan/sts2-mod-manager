@@ -420,7 +420,7 @@ describe('useTauri wrappers — command names + arg shapes', () => {
     await updateAllMods();
     expect(lastCall()).toEqual({
       cmd: 'update_all_mods',
-      args: { profileId: null },
+      args: { profileId: null, selected: [] },
     });
 
     // The audit command omits the `only` field when no filter is passed,

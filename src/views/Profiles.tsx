@@ -770,9 +770,6 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       // adds just the enabled extras, drops missing mods, and syncs
       // toggled/version for mods still present.
       const { profile, residual_drift: residualDrift } = await saveProfileDrift(targetKey);
-      if (residualDrift?.has_drift) {
-        throw new Error(t('profiles.drift.residualAfterSave'));
-      }
       if (shareInfoMap[targetKey]) markLocalOutOfSync(targetKey);
       setProfiles((prev) => {
         const exists = prev.some((p) => profileKey(p) === profileKey(profile));
@@ -788,6 +785,10 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       await refreshAll();
       await loadProfiles();
       bumpRevision();
+      if (residualDrift?.has_drift) {
+        toastCtx.info(t('profiles.drift.residualAfterSave'));
+        return;
+      }
       const base = shareInfoMap[targetKey]
         ? t('profiles.toast.savedChangesWithReShare', { name: targetName })
         : t('profiles.toast.savedChanges', { name: targetName });

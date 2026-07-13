@@ -16,7 +16,7 @@ import { ClipboardCheck, ListChecks, RefreshCw } from 'lucide-react';
 
 import { Button } from './Button';
 import { AddModsMenu } from './AddModsMenu';
-import { isGithubBulkUpdate, projectProviderUpdates } from '../lib/auditState';
+import { projectProviderUpdates } from '../lib/auditState';
 import type { ModLibrary } from '../hooks/useModLibrary';
 import { UpdatePlanSheet } from './UpdatePlanSheet';
 
@@ -41,8 +41,6 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
       {(() => {
         const projection = projectProviderUpdates(auditResults ?? []);
         const reviewCount = projection.reviewCount;
-        const plans = projection.pendingPlans;
-        const legacyNames = (auditResults ?? []).filter((entry) => !entry.update_plan && isGithubBulkUpdate(entry)).map((entry) => entry.mod_name);
         const hasPending = projection.hasPending;
 
         if (auditing) {
@@ -87,7 +85,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
 
         return (
           <>
-            <Button variant="primary" size="sm" onClick={() => plans.length ? setShowPlan(true) : void updateAllGithub(legacyNames)} title={t('mods.reviewUpdatesTitle')}>
+            <Button variant="primary" size="sm" onClick={() => setShowPlan(true)} title={t('mods.reviewUpdatesTitle')}>
               <ListChecks size={14} />
               {t('mods.reviewUpdatesLabel', { count: reviewCount })}
             </Button>

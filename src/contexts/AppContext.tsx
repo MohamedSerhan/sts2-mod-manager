@@ -5,7 +5,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { GameInfo, ModInfo, ModAuditEntry, ModAuditTarget, SubscriptionUpdate, UpdateApplyResult, UpdatePlanItem } from '../types';
 import { useToast } from './ToastContext';
-import { useConfirm } from '../components/ConfirmDialog';
 import { auditEntryKeys, auditTargetForMod, auditTargetKeys, type AuditRefreshTarget } from '../lib/auditState';
 import { findProfileForIdentifier, isProfileUuid, safeProfileDisplayName } from '../lib/profileDisplay';
 
@@ -46,10 +45,10 @@ interface AppContextType {
    *  "Updating N…" disabled state in both Mods and Settings views. */
   updatingAll: boolean;
   /** Run a bulk update across every GitHub-sourced row in `names`. Shows
-   *  a confirm, toasts a summary, then re-audits just the touched rows.
-   *  Safe to call with a single name. */
+   *  an already-reviewed stable plan selection, toasts successful downloads,
+   *  then re-audits just the touched rows. */
   updateAllGithub: (
-    selectedPlans: Array<UpdatePlanItem | string>,
+    selectedPlans: UpdatePlanItem[],
     opts?: {
       profileId?: string | null;
       afterUpdate?: (updated: ModInfo[]) => Promise<void> | void;
@@ -144,7 +143,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [updatingAll, setUpdatingAll] = useState<boolean>(false);
   const gameRunningRef = useRef<boolean>(false);
   const toast = useToast();
-  const confirm = useConfirm();
   const { t } = useTranslation();
   // Tracks the active "Nexus pending install" sticky toast so we can
   // dismiss it when the watcher reports an install (or when the user
@@ -337,32 +335,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateAllGithub = useCallback(async (
-    selectedPlans: Array<UpdatePlanItem | string>,
+    selectedPlans: UpdatePlanItem[],
     opts?: {
       profileId?: string | null;
       afterUpdate?: (updated: ModInfo[]) => Promise<void> | void;
     },
   ): Promise<UpdateApplyResult[]> => {
     if (updatingAll || selectedPlans.length === 0) return [];
-    if (selectedPlans.some((plan) => typeof plan === 'string')) {
-      const ok = await confirm({ title: t('app.updateConfirmTitle', { count: selectedPlans.length }), body: t('app.updateConfirmBody'), confirmLabel: t('app.updateConfirmLabel', { count: selectedPlans.length }) });
-      if (!ok) return [];
-    }
-    const normalizedPlans = selectedPlans.map((plan) => typeof plan === 'string' ? ({ target: { name: plan }, current_version: '', target_version: '', provider: 'github', source: null, capability: 'downloadable', reason: '', selectable: true } satisfies UpdatePlanItem) : plan);
     setUpdatingAll(true);
     try {
-      const results = await updateAllMods(normalizedPlans.map((plan) => ({ target: plan.target, expected_version: plan.target_version ?? '', provider: plan.provider })), opts?.profileId ?? null);
-      const updated = results.flatMap((result) => result && 'status' in result ? (result.updated_mod ? [result.updated_mod] : []) : [result as unknown as ModInfo]);
+      const results = await updateAllMods(selectedPlans.map((plan) => ({ target: plan.target, expected_version: plan.target_version ?? '', provider: plan.provider })), opts?.profileId ?? null);
+      const updated = results.flatMap((result) => result.updated_mod ? [result.updated_mod] : []);
       if (updated.length > 0) setLibraryVersionRevision((n) => n + 1);
       await opts?.afterUpdate?.(updated);
-      toast.success(
-        updated.length === 0
-          ? t('app.nothingToUpdate')
-          : t('app.updated', { count: updated.length }),
-      );
+      if (updated.length > 0) toast.success(t('app.updated', { count: updated.length }));
       await refreshAll();
       await refreshAuditEntries([
-        ...selectedPlans.map((plan) => typeof plan === 'string' ? plan : plan.target),
+        ...selectedPlans.map((plan) => plan.target),
         ...updated.map((m) => auditTargetForMod(m)),
       ]);
       return results;
@@ -372,7 +361,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       setUpdatingAll(false);
     }
-  }, [updatingAll, confirm, toast, t, refreshAll, refreshAuditEntries]);
+  }, [updatingAll, toast, t, refreshAll, refreshAuditEntries]);
 
   // Auto-refresh audit rows when the downloads watcher catches a new mod
   // — only if an audit is currently loaded (don't surprise the user by

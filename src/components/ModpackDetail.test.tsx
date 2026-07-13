@@ -1928,6 +1928,39 @@ describe('<ModpackDetail>', () => {
     ).toBeInTheDocument();
   });
 
+  it('reviews pack updates before applying and keeps stale results visible', async () => {
+    const packMod = modInfo({
+      name: 'PackMod', folder_name: 'PackMod', mod_version_id: 'pack-version',
+      github_url: 'https://github.com/example/pack-mod',
+    });
+    const profile = setupPack({ inPack: [packMod] });
+    const plan = {
+      target: { name: 'PackMod', folder_name: 'PackMod', mod_version_id: 'pack-version' },
+      current_version: '1.0', target_version: '2.0', provider: 'github',
+      source: 'https://github.com/example/pack-mod', capability: 'downloadable',
+      reason: '', selectable: true, pending: true,
+    };
+    registerInvokeHandler('audit_mod_versions', () => [{
+      mod_name: 'PackMod', folder_name: 'PackMod', mod_version_id: 'pack-version',
+      github_repo: 'example/pack-mod', installed_version: '1.0', needs_update: true,
+      update_source: 'github', pinned: false, snoozed: false, update_plans: [plan],
+    }]);
+    registerInvokeHandler('update_all_mods', () => [{
+      target: plan.target, mod_name: 'PackMod', expected_version: '2.0',
+      actual_version: '3.0', status: 'stale', message: 'Preview again', updated_mod: null,
+    }]);
+
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await user.click(await screen.findByRole('button', { name: /Check for updates/i }));
+    await user.click(await screen.findByRole('button', { name: /1 update available/i }));
+
+    expect(screen.getByRole('dialog', { name: /Review available updates/i })).toBeInTheDocument();
+    expect(getInvokeCalls().filter((call) => call.cmd === 'update_all_mods')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: /Download 1 selected GitHub update/i }));
+    expect(await screen.findByText(/Changed upstream.*preview again/i)).toBeInTheDocument();
+  });
+
   // ── Available row presentation edge case ──────────────────────────
   it('shows the Local badge for an available mod with a source but no GitHub/Nexus link', async () => {
     const profile = setupPack({

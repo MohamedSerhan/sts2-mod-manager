@@ -183,6 +183,10 @@ fn validate_update_install_result(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModUpdate {
     pub mod_name: String,
+    /// Stable installed-artifact identity. Bulk apply must never resolve a
+    /// same-named candidate through display text when this is available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mod_version_id: Option<String>,
     /// On-disk folder of the mod that needs an update. Carries through so
     /// `update_all_mods` (and any single-mod follow-up) can target the
     /// exact install when two mods share a display name.
@@ -216,6 +220,9 @@ pub struct UpdatePlanItem {
     pub capability: UpdateAcquisitionCapability,
     pub reason: String,
     pub selectable: bool,
+    /// Source-authoritative pending state computed by the backend. Consumers
+    /// must not infer this from capability or the presence of a known version.
+    pub pending: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -480,6 +487,7 @@ pub async fn check_all_updates(
         github_updated.insert(dedup_id(m));
         updates.push(ModUpdate {
             mod_name: m.name.clone(),
+            mod_version_id: m.mod_version_id.clone(),
             folder_name: m.folder_name.clone(),
             current_version: m.version.clone(),
             latest_version: release.tag_name.clone(),
@@ -611,6 +619,7 @@ pub async fn check_all_updates(
                             }
                             updates.push(ModUpdate {
                                 mod_name: m.name.clone(),
+                                mod_version_id: m.mod_version_id.clone(),
                                 folder_name: m.folder_name.clone(),
                                 current_version: m.version.clone(),
                                 latest_version: nv.clone(),
@@ -2171,10 +2180,7 @@ pub async fn update_all_mods(
             continue;
         }
         let Some(update) = updates.iter().find(|candidate| {
-            candidate.source_type == "github"
-                && candidate.mod_name == old_info.name
-                && (candidate.folder_name.is_none()
-                    || candidate.folder_name == old_info.folder_name)
+            candidate.source_type == "github" && selection.target.matches_update(candidate)
         }) else {
             results.push(UpdateApplyResult {
                 target: selection.target.clone(),
@@ -2391,6 +2397,46 @@ mod version_helper_tests {
     }
 
     #[test]
+    fn update_plan_identity_does_not_fall_back_after_version_id_mismatch() {
+        let installed = mod_info(|m| {
+            m.name = "Same Name".into();
+            m.folder_name = Some("reused-folder".into());
+            m.mod_version_id = Some("new-artifact".into());
+        });
+        let stale = ModAuditTarget {
+            mod_version_id: Some("old-artifact".into()),
+            folder_name: Some("reused-folder".into()),
+            mod_id: installed.mod_id.clone(),
+            name: installed.name.clone(),
+        };
+
+        assert!(!stale.matches(&installed));
+    }
+
+    #[test]
+    fn update_candidate_resolution_uses_artifact_identity_before_display_name() {
+        let target = ModAuditTarget {
+            mod_version_id: Some("wanted-artifact".into()),
+            folder_name: Some("wanted-folder".into()),
+            mod_id: Some("same-runtime-id".into()),
+            name: "Same Name".into(),
+        };
+        let candidate = |mod_version_id: &str, folder_name: &str| ModUpdate {
+            mod_name: "Same Name".into(),
+            mod_version_id: Some(mod_version_id.into()),
+            folder_name: Some(folder_name.into()),
+            current_version: "1".into(),
+            latest_version: "2".into(),
+            source_type: "github".into(),
+            source_id: "owner/repo".into(),
+            download_url: String::new(),
+        };
+
+        assert!(!target.matches_update(&candidate("other-artifact", "wanted-folder")));
+        assert!(target.matches_update(&candidate("wanted-artifact", "other-folder")));
+    }
+
+    #[test]
     fn update_plan_capabilities_keep_manual_steam_and_frozen_unselectable() {
         let info = mod_info(|m| {
             m.name = "Example".into();
@@ -2412,6 +2458,11 @@ mod version_helper_tests {
             );
             assert_eq!(plan.capability, capability);
             assert!(!plan.selectable);
+            assert!(plan.pending);
+            assert_eq!(serde_json::to_value(&plan).unwrap()["pending"], true);
+            if provider == "steam" {
+                assert_eq!(plan.target_version, None);
+            }
         }
         assert!(
             update_plan_item(
@@ -4224,7 +4275,7 @@ pub struct ModAuditEntry {
     /// snoozing is "stop nagging me about THIS specific release."
     #[serde(default)]
     pub snoozed: bool,
-    pub update_plan: UpdatePlanItem,
+    pub update_plans: Vec<UpdatePlanItem>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -4247,20 +4298,38 @@ pub struct ModAuditTarget {
 
 impl ModAuditTarget {
     fn matches(&self, info: &ModInfo) -> bool {
-        self.mod_version_id
-            .as_deref()
-            .filter(|v| !v.is_empty())
-            .is_some_and(|v| info.mod_version_id.as_deref() == Some(v))
-            || self
-                .folder_name
-                .as_deref()
-                .filter(|v| !v.is_empty())
-                .is_some_and(|v| info.folder_name.as_deref() == Some(v))
-            || self
-                .mod_id
-                .as_deref()
-                .filter(|v| !v.is_empty())
-                .is_some_and(|v| info.mod_id.as_deref() == Some(v))
+        if let (Some(target), Some(actual)) = (
+            self.mod_version_id.as_deref().filter(|v| !v.is_empty()),
+            info.mod_version_id.as_deref().filter(|v| !v.is_empty()),
+        ) {
+            return target == actual;
+        }
+        if let (Some(target), Some(actual)) = (
+            self.folder_name.as_deref().filter(|v| !v.is_empty()),
+            info.folder_name.as_deref().filter(|v| !v.is_empty()),
+        ) {
+            return target == actual;
+        }
+        if let (Some(target), Some(actual)) = (
+            self.mod_id.as_deref().filter(|v| !v.is_empty()),
+            info.mod_id.as_deref().filter(|v| !v.is_empty()),
+        ) {
+            return target == actual;
+        }
+        self.mod_version_id.as_deref().is_none_or(str::is_empty)
+            && self.folder_name.as_deref().is_none_or(str::is_empty)
+            && self.mod_id.as_deref().is_none_or(str::is_empty)
+            && self.name == info.name
+    }
+
+    fn matches_update(&self, update: &ModUpdate) -> bool {
+        if let Some(target) = self.mod_version_id.as_deref().filter(|v| !v.is_empty()) {
+            return update.mod_version_id.as_deref() == Some(target);
+        }
+        if let Some(target) = self.folder_name.as_deref().filter(|v| !v.is_empty()) {
+            return update.folder_name.as_deref() == Some(target);
+        }
+        self.name == update.mod_name
     }
 }
 
@@ -4268,24 +4337,7 @@ impl ModAuditSelector {
     fn matches(&self, info: &ModInfo) -> bool {
         match self {
             ModAuditSelector::Name(name) => info.name == *name,
-            ModAuditSelector::Target(target) => {
-                target
-                    .mod_version_id
-                    .as_deref()
-                    .filter(|id| !id.trim().is_empty())
-                    .is_some_and(|id| info.mod_version_id.as_deref() == Some(id))
-                    || target
-                        .folder_name
-                        .as_deref()
-                        .filter(|folder| !folder.trim().is_empty())
-                        .is_some_and(|folder| info.folder_name.as_deref() == Some(folder))
-                    || target
-                        .mod_id
-                        .as_deref()
-                        .filter(|mod_id| !mod_id.trim().is_empty())
-                        .is_some_and(|mod_id| info.mod_id.as_deref() == Some(mod_id))
-                    || info.name == target.name
-            }
+            ModAuditSelector::Target(target) => target.matches(info),
         }
     }
 }
@@ -4452,6 +4504,7 @@ fn update_plan_item(
     pinned: bool,
     pending: bool,
 ) -> UpdatePlanItem {
+    let target_version = (provider != "steam").then_some(target_version).flatten();
     let capability = if pinned {
         UpdateAcquisitionCapability::Frozen
     } else if provider == "steam" {
@@ -4483,50 +4536,13 @@ fn update_plan_item(
         capability,
         reason,
         selectable,
+        pending,
     }
 }
 
 async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
-    if m.install_source == ModInstallSource::SteamWorkshop {
-        let pending = m.workshop_update_pending;
-        return ModAuditEntry {
-            mod_version_id: m.mod_version_id.clone(),
-            mod_name: m.name.clone(),
-            folder_name: m.folder_name.clone(),
-            github_repo: None,
-            manifest_version: m.version.clone(),
-            installed_source_version: m.workshop_manifest.clone(),
-            installed_version: m.version.clone(),
-            latest_release_tag: None,
-            latest_release_with_assets_tag: None,
-            latest_has_assets: false,
-            needs_update: pending,
-            asset_names: vec![],
-            releases_scanned: 0,
-            error: None,
-            nexus_url: None,
-            nexus_version: None,
-            nexus_update_available: false,
-            update_source: pending.then(|| "steam".into()),
-            github_auto_detected: false,
-            pinned: false,
-            min_game_version: m.min_game_version.clone(),
-            game_version_too_old: false,
-            latest_release_min_game_version: None,
-            latest_release_blocked_by_game_version: false,
-            latest_compatible_tag: None,
-            snoozed: false,
-            update_plan: update_plan_item(
-                m,
-                m.version.clone(),
-                m.workshop_manifest.clone(),
-                "steam",
-                m.workshop_url.clone(),
-                false,
-                pending,
-            ),
-        };
-    }
+    let workshop_pending =
+        m.install_source == ModInstallSource::SteamWorkshop && m.workshop_update_pending;
     // Source-entry lookup is folder-first to match enrich_mods_with_sources
     // and the pin_mod write path. Otherwise a mod pinned from the Mods view
     // (saved under its folder_name) wouldn't show as pinned in this audit,
@@ -4924,14 +4940,14 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
             latest_release_tag: None,
             latest_release_with_assets_tag: None,
             latest_has_assets: false,
-            needs_update: false,
+            needs_update: workshop_pending,
             asset_names: Vec::new(),
             releases_scanned: 0,
             error: None,
             nexus_url: None,
             nexus_version: None,
             nexus_update_available: false,
-            update_source: None,
+            update_source: workshop_pending.then(|| "steam".into()),
             github_auto_detected: false,
             pinned: is_pinned,
             min_game_version: m.min_game_version.clone(),
@@ -4943,15 +4959,20 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
             latest_release_blocked_by_game_version: false,
             latest_compatible_tag: None,
             snoozed: false,
-            update_plan: update_plan_item(
-                m,
-                m.version.clone(),
-                None,
-                "manual",
-                None,
-                is_pinned,
-                false,
-            ),
+            update_plans: (m.install_source == ModInstallSource::SteamWorkshop)
+                .then(|| {
+                    update_plan_item(
+                        m,
+                        m.version.clone(),
+                        None,
+                        "steam",
+                        m.workshop_url.clone(),
+                        false,
+                        workshop_pending,
+                    )
+                })
+                .into_iter()
+                .collect(),
         };
     }
 
@@ -4984,9 +5005,21 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
     // a chance to drop github_needs_update (it does so when the only
     // newer release is incompatible, or when the walked-back tag is
     // already what's installed).
-    let needs_update = !is_pinned && (github_needs_update || nexus_update_available);
-    let update_source = if github_needs_update && nexus_update_available {
+    let needs_update =
+        !is_pinned && (workshop_pending || github_needs_update || nexus_update_available);
+    let update_source = if [
+        workshop_pending,
+        github_needs_update,
+        nexus_update_available,
+    ]
+    .into_iter()
+    .filter(|pending| *pending)
+    .count()
+        > 1
+    {
         Some("both".to_string())
+    } else if workshop_pending {
+        Some("steam".to_string())
     } else if github_needs_update {
         Some("github".to_string())
     } else if nexus_update_available {
@@ -5006,36 +5039,42 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         .map(|version| version.to_string())
         .unwrap_or_else(|| m.version.clone());
     let installed_source_version = installed_source_version_for_display(m, &ctx.sources_db.mods);
-    let plan_provider = if github_needs_update {
-        "github"
-    } else if nexus_update_available {
-        "nexus"
-    } else if display_github.is_some() {
-        "github"
-    } else {
-        "nexus"
-    };
-    let plan_target = if plan_provider == "github" {
-        latest_compatible_tag
-            .clone()
-            .or_else(|| latest_release_with_assets_tag.clone())
-    } else {
-        nexus_version.clone()
-    };
-    let plan_source = if plan_provider == "github" {
-        display_github.clone()
-    } else {
-        nexus_url.clone()
-    };
-    let update_plan = update_plan_item(
-        m,
-        installed_version.clone(),
-        plan_target,
-        plan_provider,
-        plan_source,
-        is_pinned,
-        github_needs_update || nexus_update_available,
-    );
+    let mut update_plans = Vec::new();
+    if m.install_source == ModInstallSource::SteamWorkshop {
+        update_plans.push(update_plan_item(
+            m,
+            installed_version.clone(),
+            None,
+            "steam",
+            m.workshop_url.clone(),
+            false,
+            workshop_pending,
+        ));
+    }
+    if display_github.is_some() {
+        update_plans.push(update_plan_item(
+            m,
+            installed_version.clone(),
+            latest_compatible_tag
+                .clone()
+                .or_else(|| latest_release_with_assets_tag.clone()),
+            "github",
+            display_github.clone(),
+            is_pinned,
+            !is_pinned && !snoozed && github_needs_update,
+        ));
+    }
+    if nexus_url.is_some() || nexus_version.is_some() {
+        update_plans.push(update_plan_item(
+            m,
+            installed_version.clone(),
+            nexus_version.clone(),
+            "nexus",
+            nexus_url.clone(),
+            is_pinned,
+            !is_pinned && !snoozed && nexus_update_available,
+        ));
+    }
     ModAuditEntry {
         mod_version_id: m.mod_version_id.clone(),
         mod_name: m.name.clone(),
@@ -5063,7 +5102,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         latest_release_blocked_by_game_version,
         latest_compatible_tag,
         snoozed,
-        update_plan,
+        update_plans,
     }
 }
 

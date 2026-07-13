@@ -579,6 +579,7 @@ describe('<LibraryTable>', () => {
         github_auto_detected: false,
         pinned: false,
         latest_compatible_tag: 'v2.0.0',
+        update_plans: [{ target: { name: 'Beta', folder_name: 'Beta' }, current_version: '1.0.0', target_version: 'v2.0.0', provider: 'github', source: 'owner/beta', capability: 'downloadable' as const, reason: '', selectable: true, pending: true }],
       }],
     ]);
 
@@ -1611,19 +1612,22 @@ describe('<LibraryTable modpackName={null}>', () => {
       ],
     }));
     const auditByKey = new Map([
-      ['projection-steam', entryAudit('ProviderProjection', { mod_version_id: 'projection-steam', folder_name: '3747602295', update_plan: { target: { name: 'ProviderProjection', mod_version_id: 'projection-steam' }, current_version: '1.0.0', target_version: '1.1.0', provider: 'steam', source: workshopUrl, capability: 'steam-managed', reason: '', selectable: false } })],
-      ['projection-local', entryAudit('ProviderProjection', { mod_version_id: 'projection-local', folder_name: 'ProviderProjection', needs_update: true, update_source: provider === 'github+nexus' ? 'both' : provider, github_repo: githubUrl ? 'example/provider-projection' : null, nexus_url: nexusUrl ?? null, nexus_update_available: !!nexusUrl, latest_release_with_assets_tag: githubUrl ? 'v1.1.0' : null, update_plan: { target: { name: 'ProviderProjection', mod_version_id: 'projection-local' }, current_version: '0.9.0', target_version: '1.1.0', provider, source: githubUrl ?? nexusUrl ?? null, capability: provider === 'nexus' ? 'manual' : 'downloadable', reason: '', selectable: provider !== 'nexus' } })],
+      ['projection-steam', entryAudit('ProviderProjection', { mod_version_id: 'projection-steam', folder_name: '3747602295', update_plans: [{ target: { name: 'ProviderProjection', mod_version_id: 'projection-steam' }, current_version: '1.0.0', target_version: null, provider: 'steam', source: workshopUrl, capability: 'steam-managed', reason: '', selectable: false, pending: true }] })],
+      ['projection-local', entryAudit('ProviderProjection', { mod_version_id: 'projection-local', folder_name: 'ProviderProjection', needs_update: true, update_source: provider === 'github+nexus' ? 'both' : provider, github_repo: githubUrl ? 'example/provider-projection' : null, nexus_url: nexusUrl ?? null, nexus_update_available: !!nexusUrl, latest_release_with_assets_tag: githubUrl ? 'v1.1.0' : null, update_plans: (provider === 'github+nexus' ? ['github', 'nexus'] : [provider]).map((planProvider) => ({ target: { name: 'ProviderProjection', mod_version_id: 'projection-local' }, current_version: '0.9.0', target_version: '1.1.0', provider: planProvider, source: planProvider === 'github' ? githubUrl ?? null : nexusUrl ?? null, capability: planProvider === 'nexus' ? 'manual' as const : 'downloadable' as const, reason: '', selectable: planProvider !== 'nexus', pending: true })) })],
     ]);
     render(<Wrap modpackName={null} auditByKey={auditByKey} />);
 
     const row = await screen.findByTestId('library-row');
     expect(within(row).getByText('Steam Workshop Update')).toHaveClass('gf-pill-update-steam');
     expect(within(row).getByTitle('Steam Workshop updates this mod automatically when you launch Slay the Spire 2 from Steam.')).toBeInTheDocument();
-    expect(within(row).getByText((_, element) =>
-      element?.classList.contains('gf-pill-update') === true &&
-      element.textContent?.includes(sourceLabel) === true &&
-      element.textContent.includes('0.9.0') && element.textContent.includes('1.1.0'),
-    )).toBeInTheDocument();
+    const expectedLabels = provider === 'github+nexus' ? ['GitHub', 'Nexus'] : [sourceLabel];
+    for (const label of expectedLabels) {
+      expect(within(row).getByText((_, element) =>
+        element?.classList.contains('gf-pill-update') === true &&
+        element.textContent?.includes(label) === true &&
+        element.textContent.includes('0.9.0') && element.textContent.includes('1.1.0'),
+      )).toBeInTheDocument();
+    }
   });
 
   it('guides Steam deletion to the exact removable local sibling without deleting it', async () => {
@@ -2283,6 +2287,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           github_auto_detected: false,
           pinned: false,
           latest_compatible_tag: 'v2.0.0',
+          update_plans: [{ target: { name: 'Beta', folder_name: 'Beta' }, current_version: '1.0.0', target_version: 'v2.0.0', provider: 'github', source: 'owner/beta', capability: 'downloadable' as const, reason: '', selectable: true, pending: true }],
         }],
       ]);
       const modInfoByKey = new Map([
@@ -2347,6 +2352,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           github_auto_detected: false,
           pinned: false,
           latest_compatible_tag: 'v2.0.0',
+          update_plans: [{ target: { name: 'Beta', folder_name: 'Beta' }, current_version: '1.0.0', target_version: 'v2.0.0', provider: 'github', source: 'owner/beta', capability: 'downloadable' as const, reason: '', selectable: true, pending: true }],
         }],
       ]);
       const modInfoByKey = new Map([

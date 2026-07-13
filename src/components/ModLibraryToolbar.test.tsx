@@ -16,11 +16,11 @@ function auditPlan(id: string, provider: 'github' | 'nexus' | 'steam', capabilit
     nexus_url: null, nexus_version: null, nexus_update_available: false,
     update_source: provider === 'steam' ? null : provider,
     github_auto_detected: false, pinned: false,
-    update_plan: {
+    update_plans: [{
       target: { name: id, mod_version_id: id }, current_version: '1.0.0',
       target_version: '2.0.0', provider, source: provider === 'steam' ? null : 'https://example.com',
-      capability, reason: '', selectable,
-    },
+      capability, reason: '', selectable, pending: true,
+    }],
   };
 }
 

@@ -983,6 +983,7 @@ describe('<ProfilesView>', () => {
     await user.click(await screen.findByRole('button', { name: /Save changes/i }));
 
     expect(await screen.findByText(/still does not match the saved modpack/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't save changes/i)).toBeNull();
     expect(screen.queryByText(/Saved changes to "DriftedPack"/)).toBeNull();
   });
 

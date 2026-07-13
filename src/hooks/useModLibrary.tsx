@@ -376,7 +376,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     }
   }
 
-  async function updateAllGithubForSurface(selectedPlans: Array<UpdatePlanItem | string>) {
+  async function updateAllGithubForSurface(selectedPlans: UpdatePlanItem[]) {
     const results = await updateAllGithub(selectedPlans, targetPack ? { profileId: targetPack } : undefined);
     if (results.some((result) => result.status === 'updated')) setLocalVersionRevision((n) => n + 1);
     return results;

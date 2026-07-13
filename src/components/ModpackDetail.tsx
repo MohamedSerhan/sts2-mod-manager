@@ -58,6 +58,7 @@ import { HelpHint } from './HelpHint';
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { EditModpackModal } from './EditModpackModal';
 import { RenameModpackModal } from './RenameModpackModal';
+import { UpdatePlanSheet } from './UpdatePlanSheet';
 import { AddModsMenu } from './AddModsMenu';
 import { LibraryTable, NO_TAGS_FILTER_VALUE } from './LibraryTable';
 import { useApp } from '../contexts/AppContext';
@@ -73,9 +74,9 @@ import {
   setProfileModsEnabled,
   toggleMod,
 } from '../hooks/useTauri';
-import { identitiesMatch } from '../lib/modIdentity';
+import { identitiesMatch, isWorkshopSource } from '../lib/modIdentity';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
-import { auditEntryKeys, isGithubBulkUpdate } from '../lib/auditState';
+import { auditEntryKeys, projectProviderUpdates } from '../lib/auditState';
 import type {
   LocalModVersionOption,
   ModInfo,
@@ -135,7 +136,7 @@ function modKey(mod: {
 }
 
 function isWorkshopMod(mod: ModInfo): boolean {
-  return mod.install_source === 'steam_workshop';
+  return isWorkshopSource(mod);
 }
 
 function missingNameKey(name: string): string {
@@ -209,13 +210,7 @@ function collapseAvailableMods(candidates: ModInfo[]): ModInfo[] {
 function SourceBadges({ mod }: { mod: ModInfo | undefined }) {
   const { t } = useTranslation();
   if (!mod) return null;
-  const source = mod.source ?? '';
-  const hasWorkshop =
-    isWorkshopMod(mod) ||
-    !!mod.workshop_item_id ||
-    !!mod.workshop_url ||
-    source.includes('steamcommunity.com/sharedfiles') ||
-    source.startsWith('steam://');
+  const hasWorkshop = isWorkshopSource(mod);
   const hasGithub = !!mod.github_url;
   const hasNexus = !!mod.nexus_url;
   if (!hasWorkshop && !hasGithub && !hasNexus) {
@@ -294,6 +289,7 @@ export function ModpackDetail({
   const [editing, setEditing] = useState(false);
   // Rename this pack via the small inline-validation modal.
   const [renaming, setRenaming] = useState(false);
+  const [showUpdatePlan, setShowUpdatePlan] = useState(false);
 
   const hasDrift = !!drift?.has_drift;
   // Bug 5: the header count is manifest membership (profile.mods.length) while
@@ -434,14 +430,13 @@ export function ModpackDetail({
         ])
         .filter(Boolean),
     );
-    return (auditResults ?? [])
+    const packEntries = (auditResults ?? [])
       .filter(
         (r) =>
-          isGithubBulkUpdate(r) &&
           (auditEntryKeys(r).some((key) => packKeys.has(key)) ||
             packKeys.has(r.mod_name)),
-      )
-      .flatMap((r) => r.update_plan ? [r.update_plan] : []);
+      );
+    return projectProviderUpdates(packEntries).pendingPlans;
   }, [auditResults, profile.mods]);
   const updatesCount = packUpdatePlans.length;
 
@@ -780,7 +775,7 @@ export function ModpackDetail({
 
   // Updates affordance shown beside the section title. Mirrors the audit
   // button's states but scoped to this pack: not-yet-checked → "Check for
-  // updates"; checked-with-updates → "N updates available" (updates all);
+  // updates"; checked-with-updates → "N updates available" (opens review);
   // checked-current → quiet "Up to date".
   const updatesControl = lib.auditing ? (
     <span className="gf-pill gf-pill-ok gf-pill-toolbar">
@@ -804,8 +799,8 @@ export function ModpackDetail({
     <button
       type="button"
       className="gf-pill gf-pill-update gf-pill-toolbar"
-      onClick={() => lib.updateAllGithub(packUpdatePlans)}
-      title={t('mods.updateAllTitle')}
+      onClick={() => setShowUpdatePlan(true)}
+      title={t('mods.reviewUpdatesTitle')}
     >
       <Download size={12} />{' '}
       {t('modpack.detail.updatesAvailable', { count: updatesCount })}
@@ -1253,6 +1248,17 @@ export function ModpackDetail({
 
       {/* Auto-detect sources modal (shared). */}
       {lib.renderAutoDetectModal()}
+
+      {showUpdatePlan && (
+        <UpdatePlanSheet
+          plans={packUpdatePlans}
+          applying={lib.updatingAll}
+          onApply={lib.updateAllGithub}
+          onClose={() => setShowUpdatePlan(false)}
+          onOpenSource={lib.openUpdatePlanSource}
+          onUnfreeze={lib.unfreezeUpdatePlan}
+        />
+      )}
 
       {/* Bulk membership editor (checkbox picker). */}
       {editing && (

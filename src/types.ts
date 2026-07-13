@@ -557,7 +557,7 @@ export interface ModAuditEntry {
    *  upstream tag advances. Distinct from `pinned`: snooze suppresses
    *  the "update available" badge but doesn't block manual updates. */
   snoozed?: boolean;
-  update_plan?: UpdatePlanItem;
+  update_plans?: UpdatePlanItem[];
 }
 
 export type UpdateAcquisitionCapability = 'downloadable' | 'manual' | 'steam-managed' | 'frozen';
@@ -571,6 +571,7 @@ export interface UpdatePlanItem {
   capability: UpdateAcquisitionCapability;
   reason: string;
   selectable: boolean;
+  pending: boolean;
 }
 
 export interface UpdatePlanSelection {

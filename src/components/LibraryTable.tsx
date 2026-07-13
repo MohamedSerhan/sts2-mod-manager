@@ -52,6 +52,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { projectProviderUpdates } from '../lib/auditState';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
+import { isWorkshopSource } from '../lib/modIdentity';
 import { profileDisplayName } from '../lib/profileDisplay';
 import { Select } from './Select';
 import {
@@ -1762,11 +1763,7 @@ export function LibraryTable({
               ? renderSourceEditor(modInfo)
               : undefined;
           const versionRows = versionOptionsByKey.get(rowKey) ?? [];
-          const representativeIsWorkshop = modInfo?.install_source === 'steam_workshop' ||
-            !!modInfo?.workshop_item_id || !!modInfo?.workshop_url ||
-            !!modInfo?.source?.includes('steamcommunity.com/sharedfiles') ||
-            row.install_source === 'steam_workshop' || !!row.workshop_item_id ||
-            !!row.workshop_url || !!row.source?.includes('steamcommunity.com/sharedfiles');
+          const representativeIsWorkshop = isWorkshopSource(modInfo) || isWorkshopSource(row);
           const removableLocalOption = representativeIsWorkshop
             ? versionRows.find((option) => !!option.github_url || !!option.nexus_url || option.install_source === 'local')
             : undefined;

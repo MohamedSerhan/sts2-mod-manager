@@ -91,28 +91,31 @@ export interface ProviderUpdateProjection {
 }
 
 export function projectProviderUpdates(entries: ModAuditEntry[]): ProviderUpdateProjection {
-  const pendingPlans = entries.flatMap((entry) => {
-    const plan = entry.update_plan;
-    if (!plan) return [];
-    const pending = plan.selectable || plan.capability === 'manual' ||
-      plan.capability === 'steam-managed' || plan.capability === 'frozen';
-    return pending && (plan.selectable || plan.target_version) ? [plan] : [];
-  });
+  const pendingPlans: UpdatePlanItem[] = [];
+  const seen = new Set<string>();
+  for (const plan of entries.flatMap((entry) => entry.update_plans ?? [])) {
+    if (!plan.pending) continue;
+    const identity = plan.target.mod_version_id
+      ?? plan.target.folder_name
+      ?? plan.target.mod_id
+      ?? plan.target.name;
+    const key = `${identity}:${plan.provider}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pendingPlans.push(plan);
+  }
   const downloadablePlans = pendingPlans.filter(
     (plan) => plan.selectable && plan.capability === 'downloadable',
   );
-  const legacyDownloadableCount = entries.filter(
-    (entry) => !entry.update_plan && isGithubBulkUpdate(entry),
-  ).length;
   return {
     pendingPlans,
     downloadablePlans,
-    downloadableCount: downloadablePlans.length + legacyDownloadableCount,
-    reviewCount: pendingPlans.length + legacyDownloadableCount,
+    downloadableCount: downloadablePlans.length,
+    reviewCount: pendingPlans.length,
     actionableCount: pendingPlans.filter(
       (plan) => plan.provider !== 'steam' &&
         (plan.capability === 'downloadable' || plan.capability === 'manual'),
-    ).length + legacyDownloadableCount,
-    hasPending: pendingPlans.length > 0 || legacyDownloadableCount > 0,
+    ).length,
+    hasPending: pendingPlans.length > 0,
   };
 }

@@ -42,6 +42,14 @@ function entry(over: Partial<ModAuditEntry>): ModAuditEntry {
   };
 }
 
+function githubPlan(name: string, pending = true) {
+  return {
+    target: { name, mod_version_id: `${name}-version` },
+    current_version: '1', target_version: '2', provider: 'github', source: `https://github.com/x/${name}`,
+    capability: 'downloadable' as const, reason: '', selectable: pending, pending,
+  };
+}
+
 describe('isUpToDate', () => {
   it('returns true when a GitHub-linked mod has no pending update and no problems', () => {
     expect(
@@ -129,7 +137,7 @@ describe('isUpToDate', () => {
 describe('countGithubUpdates', () => {
   it('counts only GitHub rows that have installable assets and a pending update', () => {
     const rows: ModAuditEntry[] = [
-      entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2' }),
+      entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2', update_plans: [githubPlan('A')] }),
       entry({ mod_name: 'B', github_repo: 'b/b', needs_update: true, update_source: 'github', latest_release_with_assets_tag: null }),
       entry({ mod_name: 'C', github_repo: null, nexus_url: 'x', needs_update: true }),
       entry({ mod_name: 'D', github_repo: 'd/d', needs_update: false, latest_release_with_assets_tag: 'v1' }),
@@ -165,29 +173,67 @@ describe('countGithubUpdates', () => {
 });
 
 describe('projectProviderUpdates', () => {
-  it('counts only selectable downloads while retaining manual and Steam review evidence', () => {
-    const entries = [
-      entry({ mod_version_id: 'ritsu-local', mod_name: 'RitsuLib', update_plan: {
-        target: { name: 'RitsuLib', mod_version_id: 'ritsu-local' }, current_version: '0.4.41',
-        target_version: '0.4.42', provider: 'github+nexus', source: 'https://github.com/BAKAOLC/STS2-RitsuLib',
-        capability: 'downloadable', reason: '', selectable: true,
-      } }),
-      entry({ mod_version_id: 'ritsu-steam', mod_name: 'RitsuLib', update_plan: {
-        target: { name: 'RitsuLib', mod_version_id: 'ritsu-steam' }, current_version: '0.4.41',
-        target_version: '0.4.42', provider: 'steam', source: null,
-        capability: 'steam-managed', reason: '', selectable: false,
-      } }),
-      entry({ mod_version_id: 'manual', mod_name: 'Manual Mod', update_plan: {
-        target: { name: 'Manual Mod', mod_version_id: 'manual' }, current_version: '1.0.0',
-        target_version: '2.0.0', provider: 'nexus', source: 'https://www.nexusmods.com/slaythespire2/mods/1',
-        capability: 'manual', reason: '', selectable: false,
-      } }),
-    ];
+  it('keeps distinct pending Steam, GitHub, and Nexus plans from one audit record', () => {
+    const entries = [entry({
+      mod_version_id: 'ritsu',
+      mod_name: 'RitsuLib',
+      update_plans: [
+        {
+          target: { name: 'RitsuLib', mod_version_id: 'ritsu' }, current_version: '0.4.41',
+          target_version: '0.4.42', provider: 'github', source: 'https://github.com/BAKAOLC/STS2-RitsuLib',
+          capability: 'downloadable', reason: '', selectable: true, pending: true,
+        },
+        {
+          target: { name: 'RitsuLib', mod_version_id: 'ritsu' }, current_version: '0.4.41',
+          target_version: '0.4.42', provider: 'nexus', source: 'https://www.nexusmods.com/slaythespire2/mods/1',
+          capability: 'manual', reason: '', selectable: false, pending: true,
+        },
+        {
+          target: { name: 'RitsuLib', mod_version_id: 'ritsu' }, current_version: '0.4.41',
+          target_version: '0.4.42', provider: 'nexus', source: 'https://www.nexusmods.com/slaythespire2/mods/1',
+          capability: 'manual', reason: 'duplicate input', selectable: false, pending: true,
+        },
+        {
+          target: { name: 'RitsuLib', mod_version_id: 'ritsu' }, current_version: '0.4.41',
+          target_version: null, provider: 'steam', source: 'https://steamcommunity.com/sharedfiles/filedetails/?id=1',
+          capability: 'steam-managed', reason: '', selectable: false, pending: true,
+        },
+      ],
+    })];
 
     const projection = projectProviderUpdates(entries);
     expect(projection.downloadableCount).toBe(1);
     expect(projection.pendingPlans).toHaveLength(3);
+    expect(projection.pendingPlans.map((plan) => plan.provider)).toEqual(['github', 'nexus', 'steam']);
     expect(projection.hasPending).toBe(true);
+  });
+
+  it('ignores serialized up-to-date Nexus, Steam, GitHub, and frozen plans', () => {
+    const update_plans = [
+      ['nexus', 'manual'],
+      ['steam', 'steam-managed'],
+      ['github', 'downloadable'],
+      ['github', 'frozen'],
+    ].map(([provider, capability], index) => ({
+      target: { name: `Current ${index}`, mod_version_id: `current-${index}` },
+      current_version: '1.0.0',
+      target_version: provider === 'steam' ? null : '1.0.0',
+      provider,
+      source: null,
+      capability: capability as 'manual' | 'steam-managed' | 'downloadable' | 'frozen',
+      reason: '',
+      selectable: false,
+      pending: false,
+    }));
+
+    expect(projectProviderUpdates([entry({ update_plans })])).toEqual({
+      pendingPlans: [],
+      downloadablePlans: [],
+      downloadableCount: 0,
+      reviewCount: 0,
+      actionableCount: 0,
+      hasPending: false,
+    });
   });
 
   it('counts every non-Steam review action while retaining all provider plans', () => {
@@ -205,7 +251,7 @@ describe('projectProviderUpdates', () => {
       entry({
         mod_version_id: id,
         mod_name: id,
-        update_plan: {
+        update_plans: [{
           target: { name: id, mod_version_id: id },
           current_version: '1.0.0',
           target_version: '2.0.0',
@@ -214,7 +260,8 @@ describe('projectProviderUpdates', () => {
           capability,
           reason: '',
           selectable,
-        },
+          pending: true,
+        }],
       }),
     ));
 
@@ -293,8 +340,8 @@ describe('snooze', () => {
 
   it('excludes snoozed rows from the GitHub update count', () => {
     const rows: ModAuditEntry[] = [
-      entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2' }),
-      entry({ mod_name: 'B', github_repo: 'b/b', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2', snoozed: true }),
+      entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2', update_plans: [githubPlan('A')] }),
+      entry({ mod_name: 'B', github_repo: 'b/b', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2', snoozed: true, update_plans: [githubPlan('B', false)] }),
     ];
     expect(countGithubUpdates(rows)).toBe(1);
   });
@@ -310,6 +357,7 @@ describe('snooze', () => {
       update_source: 'github',
       latest_release_with_assets_tag: 'v3',
       snoozed: false,
+      update_plans: [githubPlan('a')],
     });
     expect(isUpToDate(row)).toBe(false);
     expect(countGithubUpdates([row])).toBe(1);

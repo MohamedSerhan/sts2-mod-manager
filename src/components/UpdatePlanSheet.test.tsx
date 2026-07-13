@@ -8,7 +8,7 @@ import { UpdatePlanSheet } from './UpdatePlanSheet';
 const plan = (name: string, id: string, capability: UpdatePlanItem['capability'], provider: string, target: string | null): UpdatePlanItem => ({
   target: { name, mod_version_id: id, folder_name: `${provider}-${id}` }, current_version: '1.0.0', target_version: target,
   provider, source: provider === 'nexus' ? 'https://www.nexusmods.com/slaythespire2/mods/1' : null,
-  capability, reason: '', selectable: capability === 'downloadable',
+  capability, reason: '', selectable: capability === 'downloadable', pending: true,
 });
 
 describe('<UpdatePlanSheet>', () => {
@@ -18,7 +18,7 @@ describe('<UpdatePlanSheet>', () => {
       plan('Same Name', 'github-a', 'downloadable', 'github', '2.0.0'),
       plan('Same Name', 'github-b', 'downloadable', 'github', '3.0.0'),
       plan('Nexus Mod', 'nexus-a', 'manual', 'nexus', '4.0.0'),
-      plan('Steam Mod', 'steam-a', 'steam-managed', 'steam', 'manifest-2'),
+      plan('Steam Mod', 'steam-a', 'steam-managed', 'steam', '1234567890123456789'),
       plan('Frozen Mod', 'frozen-a', 'frozen', 'github', '5.0.0'),
     ];
     const onApply = vi.fn(async () => []);
@@ -26,6 +26,7 @@ describe('<UpdatePlanSheet>', () => {
 
     expect(screen.getByText('Manual download')).toBeInTheDocument();
     expect(screen.getByText('Managed in Steam')).toBeInTheDocument();
+    expect(screen.queryByText(/1234567890123456789/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Unfreeze' })).toBeInTheDocument();
     const sameNameChecks = screen.getAllByRole('checkbox', { name: 'Select Same Name' });
     await user.click(sameNameChecks[1]);

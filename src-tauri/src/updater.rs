@@ -2175,12 +2175,32 @@ pub async fn update_all_mods(
         // is the GitHub auto-update path; Nexus updates require user
         // interaction (Slow Download / Manual) and surface separately.
         if update.source_type != "github" {
+            results.push(UpdateApplyResult {
+                target: selection.target.clone(),
+                mod_name: old_info.name.clone(),
+                expected_version: selection.expected_version.clone(),
+                actual_version: None,
+                status: UpdateApplyStatus::Stale,
+                message: Some("The update provider changed. Preview updates again.".into()),
+                updated_mod: None,
+            });
             continue;
         }
 
         let (owner, repo) = match parse_owner_repo(&update.source_id) {
             Some(pair) => pair,
-            None => continue,
+            None => {
+                results.push(UpdateApplyResult {
+                    target: selection.target.clone(),
+                    mod_name: old_info.name.clone(),
+                    expected_version: selection.expected_version.clone(),
+                    actual_version: None,
+                    status: UpdateApplyStatus::Failed,
+                    message: Some("The GitHub update source is invalid.".into()),
+                    updated_mod: None,
+                });
+                continue;
+            }
         };
 
         // Walk-back: find the newest release compatible with the user's
@@ -2223,6 +2243,18 @@ pub async fn update_all_mods(
                             "update_all_mods: skipping '{}' — already on newest compatible release (chosen {}, latest {} requires newer game)",
                             update.mod_name, c.tag, update.latest_version,
                         );
+                        results.push(UpdateApplyResult {
+                            target: selection.target.clone(),
+                            mod_name: old_info.name.clone(),
+                            expected_version: selection.expected_version.clone(),
+                            actual_version: Some(c.tag),
+                            status: UpdateApplyStatus::Skipped,
+                            message: Some(
+                                "The installed version is already the newest compatible release."
+                                    .into(),
+                            ),
+                            updated_mod: None,
+                        });
                         continue;
                     }
                     (c.tag, c.zip_path)
@@ -2235,6 +2267,15 @@ pub async fn update_all_mods(
                         repo,
                         e
                     );
+                    results.push(UpdateApplyResult {
+                        target: selection.target.clone(),
+                        mod_name: old_info.name.clone(),
+                        expected_version: selection.expected_version.clone(),
+                        actual_version: None,
+                        status: UpdateApplyStatus::Failed,
+                        message: Some(e.to_string()),
+                        updated_mod: None,
+                    });
                     continue;
                 }
             }
@@ -2263,6 +2304,15 @@ pub async fn update_all_mods(
                         update.latest_version,
                         e,
                     );
+                    results.push(UpdateApplyResult {
+                        target: selection.target.clone(),
+                        mod_name: old_info.name.clone(),
+                        expected_version: selection.expected_version.clone(),
+                        actual_version: None,
+                        status: UpdateApplyStatus::Failed,
+                        message: Some(e.to_string()),
+                        updated_mod: None,
+                    });
                     continue;
                 }
             };

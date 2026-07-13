@@ -557,6 +557,9 @@ export interface ModAuditEntry {
    *  upstream tag advances. Distinct from `pinned`: snooze suppresses
    *  the "update available" badge but doesn't block manual updates. */
   snoozed?: boolean;
+  /** Compatibility with audit payloads produced before provider fan-out.
+   *  New payloads use update_plans; consumers must not count both. */
+  update_plan?: UpdatePlanItem;
   update_plans?: UpdatePlanItem[];
 }
 

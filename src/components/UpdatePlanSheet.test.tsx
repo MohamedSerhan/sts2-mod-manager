@@ -35,7 +35,7 @@ describe('<UpdatePlanSheet>', () => {
     expect(onUnfreeze).toHaveBeenCalledWith(expect.objectContaining({
       target: expect.objectContaining({ mod_version_id: 'frozen-a' }),
     }));
-    const sameNameChecks = screen.getAllByRole('checkbox', { name: 'Select Same Name' });
+    const sameNameChecks = screen.getAllByRole('checkbox', { name: /Select Same Name/ });
     await user.click(sameNameChecks[1]);
     await user.click(screen.getByRole('button', { name: 'Download 1 selected GitHub update to Versions' }));
     expect(onApply).toHaveBeenCalledWith([expect.objectContaining({ target: expect.objectContaining({ mod_version_id: 'github-a' }), target_version: '2.0.0' })]);

@@ -37,34 +37,18 @@ export function auditTargetForMod(mod: {
   };
 }
 
-export function isActionableUpdate(entry: ModAuditEntry | undefined): boolean {
-  if (!entry) return false;
-  if (entry.pinned || entry.snoozed || !entry.needs_update) return false;
-  if (entry.game_version_too_old || entry.latest_release_blocked_by_game_version) return false;
-  if (entry.update_source === 'github') return Boolean(entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag);
-  if (entry.update_source === 'both') {
-    return Boolean(entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag ?? entry.nexus_update_available);
-  }
-  return Boolean(entry.nexus_update_available || entry.latest_compatible_tag || entry.latest_release_with_assets_tag);
-}
-
-export function isGithubBulkUpdate(entry: ModAuditEntry | undefined): boolean {
-  if (!entry) return false;
-  if (entry.pinned || entry.snoozed || !entry.needs_update) return false;
-  if (entry.game_version_too_old || entry.latest_release_blocked_by_game_version) return false;
-  if (entry.update_source !== 'github' && entry.update_source !== 'both') return false;
-  return Boolean(entry.github_repo && (entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag));
-}
-
 export function isUpToDate(entry: ModAuditEntry): boolean {
   const hasSource = Boolean(entry.github_repo || entry.nexus_url);
   if (!hasSource) return false;
+  const hasProviderPlanPayload = entry.update_plans !== undefined || entry.update_plan !== undefined;
   // Snoozed mods don't count as "needs update" — the user has explicitly
   // chosen to wait for the next upstream release. Treat them as up-to-date
   // from the audit's perspective so the row gets the "Latest" pill instead
   // of a stale "update available" badge.
   if (entry.snoozed) return true;
-  if (entry.needs_update) return false;
+  if (hasProviderPlanPayload ? projectProviderUpdates([entry]).hasPending : entry.needs_update) {
+    return false;
+  }
   const hasRealError = Boolean(entry.error) && !entry.github_auto_detected;
   if (hasRealError) return false;
   const goneNoAssets =
@@ -75,10 +59,6 @@ export function isUpToDate(entry: ModAuditEntry): boolean {
   if (entry.game_version_too_old) return false;
   if (entry.latest_release_blocked_by_game_version) return false;
   return true;
-}
-
-export function countGithubUpdates(entries: ModAuditEntry[]): number {
-  return projectProviderUpdates(entries).downloadableCount;
 }
 
 export interface ProviderUpdateProjection {
@@ -93,7 +73,11 @@ export interface ProviderUpdateProjection {
 export function projectProviderUpdates(entries: ModAuditEntry[]): ProviderUpdateProjection {
   const pendingPlans: UpdatePlanItem[] = [];
   const seen = new Set<string>();
-  for (const plan of entries.flatMap((entry) => entry.update_plans ?? [])) {
+  for (const plan of entries.flatMap((entry) => (
+    entry.update_plans !== undefined
+      ? entry.update_plans
+      : entry.update_plan ? [entry.update_plan] : []
+  ))) {
     if (!plan.pending) continue;
     const identity = plan.target.mod_version_id
       ?? plan.target.folder_name

@@ -47,6 +47,17 @@ export function isWorkshopOwned(entry: WorkshopSourceFields | null | undefined):
   return entry?.install_source === 'steam_workshop';
 }
 
+export function workshopSourceUrl(
+  entry: WorkshopSourceFields | null | undefined,
+): string | null {
+  if (!entry) return null;
+  if (entry.workshop_url) return entry.workshop_url;
+  const source = entry.source?.trim() ?? '';
+  return source.includes('steamcommunity.com/sharedfiles') || source.startsWith('steam://')
+    ? source
+    : null;
+}
+
 function pushKey(keys: string[], value: string | null | undefined) {
   if (!value) return;
   const trimmed = value.trim();
@@ -87,8 +98,8 @@ function keysIntersect(a: string[], b: string[]): boolean {
  * (which includes the normalized name).
  */
 export function identitiesMatch(a: IdentityFields, b: IdentityFields): boolean {
-  if (a.mod_version_id && b.mod_version_id && a.mod_version_id === b.mod_version_id) {
-    return true;
+  if (a.mod_version_id && b.mod_version_id) {
+    return a.mod_version_id === b.mod_version_id;
   }
   const aStrong = strongIdentityKeys(a);
   const bStrong = strongIdentityKeys(b);

@@ -52,7 +52,11 @@ import { Toggle } from './Toggle';
 import { Select } from './Select';
 import { useRowMenu } from '../contexts/RowMenuContext';
 import { isUpToDate } from '../lib/auditState';
-import { isWorkshopSource } from '../lib/modIdentity';
+import {
+  isWorkshopOwned as isWorkshopOwnedEntry,
+  isWorkshopSource,
+  workshopSourceUrl,
+} from '../lib/modIdentity';
 import {
   resolveRowMenuOrder,
   ROW_MENU_OPEN_EVENT,
@@ -100,16 +104,11 @@ function isWorkshopOwned(row: ProfileMembershipMod, mod?: ModInfo | null): boole
   // the install (install_source === 'steam_workshop'). Drives delete
   // guidance — we should not warn "Workshop-managed, use Steam" for a
   // mod that merely carries a workshop URL in its notes.
-  return mod?.install_source === 'steam_workshop' || row.install_source === 'steam_workshop';
+  return isWorkshopOwnedEntry(mod) || isWorkshopOwnedEntry(row);
 }
 
 function workshopUrlFor(row: ProfileMembershipMod, mod?: ModInfo | null): string | null {
-  const source = mod?.source ?? row.source ?? null;
-  return mod?.workshop_url ?? row.workshop_url ?? (
-    source?.includes('steamcommunity.com/sharedfiles') || source?.startsWith('steam://')
-      ? source
-      : null
-  );
+  return workshopSourceUrl(mod) ?? workshopSourceUrl(row);
 }
 
 /**
@@ -406,12 +405,16 @@ export function LibraryRow({
   // tag (compatibleTag); Nexus-only updates fall back to nexus_version so
   // the pill shows a real version string rather than undefined.
   const updateDisplayVersion = compatibleTag ?? audit?.nexus_version ?? null;
+  const hasProviderPlanPayload = audit
+    ? audit.update_plans !== undefined || audit.update_plan !== undefined
+    : false;
   // Show the update pill for a GitHub update (when compatibleTag is known)
   // OR for a Nexus-only update (nexus_update_available is true). Bundles
   // and Nexus-only mods have no github_url, so gating on github_url alone
   // was silently hiding their "update available" state.
   const showUpdatePill =
     !!audit &&
+    !hasProviderPlanPayload &&
     audit.needs_update &&
     !workshopOwned &&
     !audit.pinned &&
@@ -726,7 +729,7 @@ export function LibraryRow({
                   </button>
                 )}
                 {updatePlans.map((plan) => {
-                  const pillKey = `${plan.target.mod_version_id ?? plan.target.folder_name ?? plan.target.name}:${plan.provider}`;
+                  const pillKey = `${plan.target.mod_version_id ?? plan.target.folder_name ?? plan.target.mod_id ?? plan.target.name}:${plan.provider}`;
                   const pillClassName = `gf-pill gf-pill-update${plan.provider === 'steam' ? ' gf-pill-update-steam' : ''}`;
                   const pillTitle = plan.provider === 'steam'
                     ? t('mods.steamUpdateTitle')
@@ -1308,7 +1311,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
   const canSnooze =
     !!audit?.snoozed || (!!audit?.needs_update && !!snoozeTargetVersion);
   const hasUserConfirmedGithub = !!mod.github_url && !mod.github_auto_detected;
-  const workshopOwned = mod.install_source === 'steam_workshop';
+  const workshopOwned = isWorkshopOwnedEntry(mod);
 
   // Rebuilt per render — cheap, and the menu only mounts/opens on demand. Don't memoize (it would force listing every closure capture as a dep).
   // One descriptor per customizable id: contextual availability + how to render.

@@ -61,35 +61,6 @@ fn is_newer_version(current: &str, latest: &str) -> bool {
     }
 }
 
-fn apply_last_installed_source_authority(
-    mod_name: &str,
-    installed_source: Option<&str>,
-    github_needs_update: &mut bool,
-    nexus_update_available: &mut bool,
-) {
-    match installed_source {
-        Some("nexus") => {
-            if *github_needs_update {
-                log::info!(
-                    "audit: suppressing GitHub update for '{}' because Nexus was the last installed source",
-                    mod_name
-                );
-            }
-            *github_needs_update = false;
-        }
-        Some("github") => {
-            if *nexus_update_available {
-                log::info!(
-                    "audit: suppressing Nexus update for '{}' because GitHub was the last installed source",
-                    mod_name
-                );
-            }
-            *nexus_update_available = false;
-        }
-        _ => {}
-    }
-}
-
 /// Lenient version parse for GAME build strings. Steam beta branches
 /// suffix the build number ("0.106.1b", "0.106.1-beta.4257"), which the
 /// strict semver parse rejects — and a None game version silently
@@ -787,6 +758,9 @@ fn best_known_installed_version(
     mod_info: &ModInfo,
     sources: &std::collections::HashMap<String, ModSourceEntry>,
 ) -> Option<semver::Version> {
+    if mod_info.install_source.is_workshop() {
+        return usable_version(&mod_info.version);
+    }
     let mut versions = Vec::new();
     if let Some(version) = lookup_entry(
         sources,
@@ -809,6 +783,10 @@ fn installed_source_version_for_display(
     mod_info: &ModInfo,
     sources: &std::collections::HashMap<String, ModSourceEntry>,
 ) -> Option<String> {
+    if mod_info.install_source.is_workshop() {
+        return crate::mod_versions::usable_source_version_label(&mod_info.version)
+            .map(|version| version.trim_start_matches(['v', 'V']).to_string());
+    }
     lookup_entry(
         sources,
         mod_info.folder_name.as_deref(),
@@ -2411,6 +2389,9 @@ mod version_helper_tests {
         };
 
         assert!(!stale.matches(&installed));
+        let mut missing_id = installed.clone();
+        missing_id.mod_version_id = None;
+        assert!(!stale.matches(&missing_id));
     }
 
     #[test]
@@ -2476,6 +2457,102 @@ mod version_helper_tests {
             )
             .selectable
         );
+    }
+
+    #[test]
+    fn mixed_source_records_keep_every_pending_provider_plan() {
+        let workshop = mod_info(|m| {
+            m.name = "BaseLib".into();
+            m.mod_version_id = Some("baselib-workshop".into());
+            m.install_source = ModInstallSource::SteamWorkshop;
+            m.workshop_url =
+                Some("https://steamcommunity.com/sharedfiles/filedetails/?id=123".into());
+        });
+        let cases = [
+            (None, Some("2.0.0"), vec!["steam", "nexus"]),
+            (Some("owner/repo"), None, vec!["steam", "github"]),
+            (
+                Some("owner/repo"),
+                Some("2.0.0"),
+                vec!["steam", "github", "nexus"],
+            ),
+        ];
+
+        for (github, nexus_version, expected) in cases {
+            let plans = build_update_plans(
+                &workshop,
+                "1.0.0",
+                github,
+                github.map(|_| "2.0.0"),
+                github.is_some(),
+                nexus_version.map(|_| "https://www.nexusmods.com/slaythespire2/mods/1"),
+                nexus_version,
+                nexus_version.is_some(),
+                false,
+                false,
+                true,
+            );
+            let pending: Vec<_> = plans
+                .iter()
+                .filter(|plan| plan.pending)
+                .map(|plan| plan.provider.as_str())
+                .collect();
+            assert_eq!(pending, expected);
+            assert_eq!(
+                plans
+                    .iter()
+                    .find(|plan| plan.provider == "steam")
+                    .unwrap()
+                    .target_version,
+                None,
+                "Steam's manifest/internal revision must never become display version text",
+            );
+        }
+    }
+
+    #[test]
+    fn workshop_display_versions_ignore_numeric_source_metadata() {
+        let workshop = mod_info(|m| {
+            m.name = "Workshop Mod".into();
+            m.version = "v3.3.2".into();
+            m.install_source = ModInstallSource::SteamWorkshop;
+        });
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                installed_version: Some("7697508620998582885".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            best_known_installed_version(&workshop, &sources)
+                .unwrap()
+                .to_string(),
+            "3.3.2",
+        );
+        assert_eq!(
+            installed_source_version_for_display(&workshop, &sources).as_deref(),
+            Some("3.3.2"),
+        );
+    }
+
+    #[test]
+    fn github_pending_uses_newer_source_version_over_stale_manifest() {
+        let info = mod_info(|m| m.version = "1.0.0".into());
+        let mut sources = std::collections::HashMap::new();
+        sources.insert(
+            "RitsuLib".into(),
+            ModSourceEntry {
+                installed_version: Some("2.0.0".into()),
+                ..Default::default()
+            },
+        );
+
+        let current = best_known_installed_version(&info, &sources).unwrap();
+        assert_eq!(current.to_string(), "2.0.0");
+        assert!(!is_newer_version(&current.to_string(), "1.5.0"));
     }
 
     fn mod_info(overrides: impl FnOnce(&mut crate::mods::ModInfo)) -> crate::mods::ModInfo {
@@ -2984,35 +3061,6 @@ mod version_helper_tests {
             "1.1.3",
         );
         assert_eq!(info.version, "1.0.0");
-    }
-
-    #[test]
-    fn last_installed_source_suppresses_alternate_update_channel() {
-        let mut github_needs_update = true;
-        let mut nexus_update_available = false;
-        apply_last_installed_source_authority(
-            "Watcher",
-            Some("nexus"),
-            &mut github_needs_update,
-            &mut nexus_update_available,
-        );
-        assert!(
-            !github_needs_update,
-            "Nexus-installed rows should not keep a stale GitHub update pill"
-        );
-
-        github_needs_update = false;
-        nexus_update_available = true;
-        apply_last_installed_source_authority(
-            "Watcher",
-            Some("github"),
-            &mut github_needs_update,
-            &mut nexus_update_available,
-        );
-        assert!(
-            !nexus_update_available,
-            "GitHub-installed rows should not keep a stale Nexus update pill"
-        );
     }
 
     fn write_mod_folder(
@@ -4298,11 +4346,8 @@ pub struct ModAuditTarget {
 
 impl ModAuditTarget {
     fn matches(&self, info: &ModInfo) -> bool {
-        if let (Some(target), Some(actual)) = (
-            self.mod_version_id.as_deref().filter(|v| !v.is_empty()),
-            info.mod_version_id.as_deref().filter(|v| !v.is_empty()),
-        ) {
-            return target == actual;
+        if let Some(target) = self.mod_version_id.as_deref().filter(|v| !v.is_empty()) {
+            return info.mod_version_id.as_deref().filter(|v| !v.is_empty()) == Some(target);
         }
         if let (Some(target), Some(actual)) = (
             self.folder_name.as_deref().filter(|v| !v.is_empty()),
@@ -4540,6 +4585,57 @@ fn update_plan_item(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn build_update_plans(
+    m: &ModInfo,
+    installed_version: &str,
+    display_github: Option<&str>,
+    github_target: Option<&str>,
+    github_needs_update: bool,
+    nexus_url: Option<&str>,
+    nexus_version: Option<&str>,
+    nexus_update_available: bool,
+    is_pinned: bool,
+    snoozed: bool,
+    workshop_pending: bool,
+) -> Vec<UpdatePlanItem> {
+    let mut plans = Vec::new();
+    if m.install_source == ModInstallSource::SteamWorkshop {
+        plans.push(update_plan_item(
+            m,
+            installed_version.to_string(),
+            None,
+            "steam",
+            m.workshop_url.clone(),
+            false,
+            workshop_pending,
+        ));
+    }
+    if let Some(github) = display_github {
+        plans.push(update_plan_item(
+            m,
+            installed_version.to_string(),
+            github_target.map(str::to_string),
+            "github",
+            Some(github.to_string()),
+            is_pinned,
+            !is_pinned && !snoozed && github_needs_update,
+        ));
+    }
+    if nexus_url.is_some() || nexus_version.is_some() {
+        plans.push(update_plan_item(
+            m,
+            installed_version.to_string(),
+            nexus_version.map(str::to_string),
+            "nexus",
+            nexus_url.map(str::to_string),
+            is_pinned,
+            !is_pinned && !snoozed && nexus_update_available,
+        ));
+    }
+    plans
+}
+
 async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
     let workshop_pending =
         m.install_source == ModInstallSource::SteamWorkshop && m.workshop_update_pending;
@@ -4633,7 +4729,8 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
             // Determine if a GitHub update is needed using semver
             if let Some(ref assets_tag) = latest_release_with_assets_tag {
                 let latest_ver = assets_tag.trim_start_matches('v');
-                let current_ver = m.version.trim_start_matches('v');
+                let current_ver = best_known_installed_version(m, &ctx.sources_db.mods)
+                    .map(|version| version.to_string());
 
                 // Folder-first lookup so a bundle (whose source is keyed by
                 // container folder_name) isn't missed by a name-only get.
@@ -4647,9 +4744,10 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                 .map(|iv| iv.trim_start_matches('v') == latest_ver)
                 .unwrap_or(false);
 
-                if !installed_ver_matches && current_ver != "unknown" && current_ver != "0.0.0" {
+                if !installed_ver_matches && current_ver.is_some() {
                     // Use semver comparison — only flag if latest > current
-                    github_needs_update = is_newer_version(current_ver, latest_ver);
+                    github_needs_update =
+                        is_newer_version(current_ver.as_deref().unwrap_or(""), latest_ver);
                     if github_needs_update
                         && crate::mod_versions::has_local_version_for_mod(
                             ctx.config_path,
@@ -4994,13 +5092,6 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         (Some(gv), Some(req)) if !game_version_satisfies(gv, req)
     );
 
-    apply_last_installed_source_authority(
-        &m.name,
-        source_entry.and_then(|e| e.installed_version_source.as_deref()),
-        &mut github_needs_update,
-        &mut nexus_update_available,
-    );
-
     // Compute needs_update + update_source AFTER the walk-back has had
     // a chance to drop github_needs_update (it does so when the only
     // newer release is incompatible, or when the walked-back tag is
@@ -5039,42 +5130,22 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         .map(|version| version.to_string())
         .unwrap_or_else(|| m.version.clone());
     let installed_source_version = installed_source_version_for_display(m, &ctx.sources_db.mods);
-    let mut update_plans = Vec::new();
-    if m.install_source == ModInstallSource::SteamWorkshop {
-        update_plans.push(update_plan_item(
-            m,
-            installed_version.clone(),
-            None,
-            "steam",
-            m.workshop_url.clone(),
-            false,
-            workshop_pending,
-        ));
-    }
-    if display_github.is_some() {
-        update_plans.push(update_plan_item(
-            m,
-            installed_version.clone(),
-            latest_compatible_tag
-                .clone()
-                .or_else(|| latest_release_with_assets_tag.clone()),
-            "github",
-            display_github.clone(),
-            is_pinned,
-            !is_pinned && !snoozed && github_needs_update,
-        ));
-    }
-    if nexus_url.is_some() || nexus_version.is_some() {
-        update_plans.push(update_plan_item(
-            m,
-            installed_version.clone(),
-            nexus_version.clone(),
-            "nexus",
-            nexus_url.clone(),
-            is_pinned,
-            !is_pinned && !snoozed && nexus_update_available,
-        ));
-    }
+    let github_target = latest_compatible_tag
+        .as_deref()
+        .or(latest_release_with_assets_tag.as_deref());
+    let update_plans = build_update_plans(
+        m,
+        &installed_version,
+        display_github.as_deref(),
+        github_target,
+        github_needs_update,
+        nexus_url.as_deref(),
+        nexus_version.as_deref(),
+        nexus_update_available,
+        is_pinned,
+        snoozed,
+        workshop_pending,
+    );
     ModAuditEntry {
         mod_version_id: m.mod_version_id.clone(),
         mod_name: m.name.clone(),

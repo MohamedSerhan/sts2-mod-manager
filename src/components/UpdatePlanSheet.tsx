@@ -9,7 +9,14 @@ function planKey(plan: UpdatePlanItem): string {
   return `${identity}:${plan.provider}`;
 }
 
-export function UpdatePlanSheet({ plans, applying, onApply, onClose, onOpenSource, onUnfreeze }: {
+export function UpdatePlanSheet({
+  plans,
+  applying,
+  onApply,
+  onClose,
+  onOpenSource,
+  onUnfreeze,
+}: {
   plans: UpdatePlanItem[];
   applying: boolean;
   onApply: (plans: UpdatePlanItem[]) => Promise<UpdateApplyResult[]>;
@@ -22,19 +29,43 @@ export function UpdatePlanSheet({ plans, applying, onApply, onClose, onOpenSourc
   const [selected, setSelected] = useState(() => new Set(selectable.map(planKey)));
   const [results, setResults] = useState<UpdateApplyResult[] | null>(null);
   const selectedPlans = selectable.filter((plan) => selected.has(planKey(plan)));
+  const handleApply = async () => {
+    setResults(await onApply(selectedPlans));
+  };
 
   return (
     <div className="gf-modal-back" role="presentation">
       <section className="gf-modal gf-update-plan" role="dialog" aria-modal="true" aria-labelledby="update-plan-title">
         <div className="gf-modal-head">
-          <div><div id="update-plan-title" className="gf-modal-title">{t('mods.updatePlan.title')}</div><div className="gf-modal-sub">{t('mods.updatePlan.subtitle')}</div></div>
-          <button className="gf-icon-btn" onClick={onClose} disabled={applying} aria-label={t('common.close')}><X size={16} /></button>
+          <div>
+            <div id="update-plan-title" className="gf-modal-title">
+              {t('mods.updatePlan.title')}
+            </div>
+            <div className="gf-modal-sub">{t('mods.updatePlan.subtitle')}</div>
+          </div>
+          <button
+            className="gf-icon-btn"
+            onClick={onClose}
+            disabled={applying}
+            aria-label={t('common.close')}
+          >
+            <X size={16} />
+          </button>
         </div>
         <div className="gf-modal-body gf-update-plan-body">
-          {!results && <div className="gf-update-plan-select-actions">
-            <button className="gf-btn-3 gf-btn-sm" onClick={() => setSelected(new Set(selectable.map(planKey)))}>{t('mods.updatePlan.selectAll')}</button>
-            <button className="gf-btn-3 gf-btn-sm" onClick={() => setSelected(new Set())}>{t('mods.updatePlan.selectNone')}</button>
-          </div>}
+          {!results && (
+            <div className="gf-update-plan-select-actions">
+              <button
+                className="gf-btn-3 gf-btn-sm"
+                onClick={() => setSelected(new Set(selectable.map(planKey)))}
+              >
+                {t('mods.updatePlan.selectAll')}
+              </button>
+              <button className="gf-btn-3 gf-btn-sm" onClick={() => setSelected(new Set())}>
+                {t('mods.updatePlan.selectNone')}
+              </button>
+            </div>
+          )}
           <div className="gf-update-plan-list">
             {plans.map((plan) => {
               const key = planKey(plan);
@@ -57,7 +88,14 @@ export function UpdatePlanSheet({ plans, applying, onApply, onClose, onOpenSourc
                       type="checkbox"
                       checked={selected.has(key)}
                       onChange={handleToggle}
-                      aria-label={t('mods.updatePlan.selectItem', { name: plan.target.name })}
+                      aria-label={t('mods.updatePlan.selectItem', {
+                        name: [
+                          plan.target.name,
+                          plan.target.folder_name,
+                          t('mods.gitHub'),
+                          plan.target_version,
+                        ].filter(Boolean).join(' — '),
+                      })}
                     />
                   ) : (
                     <span className="gf-update-plan-marker" aria-hidden>
@@ -97,8 +135,18 @@ export function UpdatePlanSheet({ plans, applying, onApply, onClose, onOpenSourc
           </div>
         </div>
         <div className="gf-modal-foot gf-update-plan-foot">
-          <button className="gf-btn-3" onClick={onClose} disabled={applying}>{results ? t('common.close') : t('common.cancel')}</button>
-          {!results && <button className="gf-btn" disabled={applying || selectedPlans.length === 0} onClick={() => void onApply(selectedPlans).then(setResults)}>{t('mods.updatePlan.downloadSelected', { count: selectedPlans.length })}</button>}
+          <button className="gf-btn-3" onClick={onClose} disabled={applying}>
+            {results ? t('common.close') : t('common.cancel')}
+          </button>
+          {!results && (
+            <button
+              className="gf-btn"
+              disabled={applying || selectedPlans.length === 0}
+              onClick={() => void handleApply()}
+            >
+              {t('mods.updatePlan.downloadSelected', { count: selectedPlans.length })}
+            </button>
+          )}
         </div>
       </section>
     </div>

@@ -52,7 +52,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
 import { projectProviderUpdates } from '../lib/auditState';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
-import { isWorkshopSource } from '../lib/modIdentity';
+import { isWorkshopOwned, isWorkshopSource } from '../lib/modIdentity';
 import { profileDisplayName } from '../lib/profileDisplay';
 import { Select } from './Select';
 import {
@@ -307,10 +307,7 @@ function duplicateSourceBucket(
   row: ProfileMembershipMod,
   info?: ModInfo,
 ): 'workshop' | 'local' {
-  if (
-    info?.install_source === 'steam_workshop' ||
-    row.install_source === 'steam_workshop'
-  ) {
+  if (isWorkshopOwned(info) || isWorkshopOwned(row)) {
     return 'workshop';
   }
   return 'local';
@@ -336,7 +333,7 @@ function versionOptionIdentity(option: LocalModVersionOption): string {
 }
 
 function versionOptionSourceIdentity(option: LocalModVersionOption): string {
-  if (option.install_source === 'steam_workshop') {
+  if (isWorkshopSource(option)) {
     return `workshop:${option.workshop_item_id ?? option.workshop_url ?? option.folder_name ?? 'unknown'}`;
   }
   return [
@@ -383,11 +380,7 @@ function sourceHasNexus(source: string | null | undefined): boolean {
 function versionOptionSourceKeys(
   option: LocalModVersionOption,
 ): Array<'steamWorkshop' | 'gitHub' | 'nexus' | 'link' | 'manual'> {
-  if (
-    option.install_source === 'steam_workshop' ||
-    option.workshop_item_id ||
-    option.workshop_url
-  ) {
+  if (isWorkshopSource(option)) {
     return ['steamWorkshop'];
   }
   const keys: Array<'gitHub' | 'nexus'> = [];
@@ -399,14 +392,7 @@ function versionOptionSourceKeys(
 }
 
 function rowSourceIdentity(row: ProfileMembershipMod, info?: ModInfo): string {
-  if (
-    row.install_source === 'steam_workshop' ||
-    info?.install_source === 'steam_workshop' ||
-    row.workshop_item_id ||
-    info?.workshop_item_id ||
-    row.workshop_url ||
-    info?.workshop_url
-  ) {
+  if (isWorkshopSource(row) || isWorkshopSource(info)) {
     return `workshop:${row.workshop_item_id ?? info?.workshop_item_id ?? row.workshop_url ?? info?.workshop_url ?? row.folder_name ?? 'unknown'}`;
   }
   return [
@@ -437,7 +423,7 @@ function versionOptionForSourceLabel(
   row: ProfileMembershipMod,
   info?: ModInfo | null,
 ): LocalModVersionOption {
-  if (option.install_source === 'steam_workshop') return option;
+  if (isWorkshopOwned(option)) return option;
   return {
     ...option,
     github_url: option.github_url ?? info?.github_url ?? row.github_url ?? null,

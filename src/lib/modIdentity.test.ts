@@ -70,4 +70,13 @@ describe('mod identity helpers', () => {
       ),
     ).toBe(true);
   });
+
+  it('does not fall through after a mod_version_id mismatch', () => {
+    expect(
+      identitiesMatch(
+        { mod_version_id: 'artifact-old', folder_name: 'same', mod_id: 'same', name: 'Same' },
+        { mod_version_id: 'artifact-new', folder_name: 'same', mod_id: 'same', name: 'Same' },
+      ),
+    ).toBe(false);
+  });
 });

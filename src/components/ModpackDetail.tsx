@@ -76,7 +76,7 @@ import {
 } from '../hooks/useTauri';
 import { identitiesMatch, isWorkshopSource } from '../lib/modIdentity';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
-import { auditEntryKeys, projectProviderUpdates } from '../lib/auditState';
+import { projectProviderUpdates } from '../lib/auditState';
 import type {
   LocalModVersionOption,
   ModInfo,
@@ -420,22 +420,17 @@ export function ModpackDetail({
   // GitHub-updatable mods in THIS pack (drives the "N updates available"
   // pill + the update-all action).
   const packUpdatePlans = useMemo(() => {
-    const packKeys = new Set(
-      profile.mods
-        .flatMap((m) => [
-          m.mod_version_id ?? '',
-          m.folder_name ?? '',
-          m.mod_id ?? '',
-          m.name,
-        ])
-        .filter(Boolean),
-    );
     const packEntries = (auditResults ?? [])
-      .filter(
-        (r) =>
-          (auditEntryKeys(r).some((key) => packKeys.has(key)) ||
-            packKeys.has(r.mod_name)),
-      );
+      .filter((entry) => {
+        const plan = entry.update_plans?.[0] ?? entry.update_plan;
+        const auditIdentity = {
+          mod_version_id: entry.mod_version_id ?? plan?.target.mod_version_id,
+          folder_name: entry.folder_name ?? plan?.target.folder_name,
+          mod_id: plan?.target.mod_id,
+          name: entry.mod_name,
+        };
+        return profile.mods.some((mod) => identitiesMatch(mod, auditIdentity));
+      });
     return projectProviderUpdates(packEntries).pendingPlans;
   }, [auditResults, profile.mods]);
   const updatesCount = packUpdatePlans.length;
@@ -567,10 +562,7 @@ export function ModpackDetail({
         source: m.source ?? null,
       }));
       for (const m of targets) {
-        const steamOwned =
-          !!m.source &&
-          (m.source.includes('steamcommunity.com/sharedfiles') ||
-            m.source.startsWith('steam://'));
+        const steamOwned = isWorkshopSource(m);
         if (!steamOwned) {
           await deleteMod(m.name, m.folder_name);
         }

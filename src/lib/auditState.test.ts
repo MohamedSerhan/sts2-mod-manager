@@ -6,10 +6,7 @@ import {
   auditTargetForMod,
   auditTargetKeys,
   auditTargetKey,
-  isActionableUpdate,
-  isGithubBulkUpdate,
   isUpToDate,
-  countGithubUpdates,
   projectProviderUpdates,
 } from './auditState';
 
@@ -134,44 +131,6 @@ describe('isUpToDate', () => {
   });
 });
 
-describe('countGithubUpdates', () => {
-  it('counts only GitHub rows that have installable assets and a pending update', () => {
-    const rows: ModAuditEntry[] = [
-      entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2', update_plans: [githubPlan('A')] }),
-      entry({ mod_name: 'B', github_repo: 'b/b', needs_update: true, update_source: 'github', latest_release_with_assets_tag: null }),
-      entry({ mod_name: 'C', github_repo: null, nexus_url: 'x', needs_update: true }),
-      entry({ mod_name: 'D', github_repo: 'd/d', needs_update: false, latest_release_with_assets_tag: 'v1' }),
-    ];
-    expect(countGithubUpdates(rows)).toBe(1);
-  });
-
-  it('does not count a GitHub row that lacks installable assets', () => {
-    expect(countGithubUpdates([
-      entry({ github_repo: 'a/a', needs_update: true, update_source: 'github', latest_release_with_assets_tag: null }),
-    ])).toBe(0);
-  });
-
-  it('does not count a non-GitHub row even when needs_update is true', () => {
-    expect(countGithubUpdates([
-      entry({ nexus_url: 'x', needs_update: true }),
-    ])).toBe(0);
-  });
-
-  it('does not count a Nexus-sourced update just because the row also has GitHub metadata', () => {
-    const row = entry({
-      github_repo: 'BAKAOLC/STS2-RitsuLib',
-      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/137',
-      needs_update: true,
-      update_source: 'nexus',
-      latest_release_with_assets_tag: 'v0.4.23',
-      nexus_update_available: true,
-    });
-
-    expect(isGithubBulkUpdate(row)).toBe(false);
-    expect(countGithubUpdates([row])).toBe(0);
-  });
-});
-
 describe('projectProviderUpdates', () => {
   it('keeps distinct pending Steam, GitHub, and Nexus plans from one audit record', () => {
     const entries = [entry({
@@ -208,6 +167,44 @@ describe('projectProviderUpdates', () => {
     expect(projection.hasPending).toBe(true);
   });
 
+  it.each([
+    ['Steam + Nexus', ['steam', 'nexus']],
+    ['Steam + GitHub', ['steam', 'github']],
+    ['Steam + GitHub + Nexus', ['steam', 'github', 'nexus']],
+  ] as const)('keeps every pending provider for %s on the same record', (_label, providers) => {
+    const update_plans = providers.map((provider) => ({
+      target: { name: 'BaseLib', mod_version_id: 'baselib-workshop' },
+      current_version: '1.0.0',
+      target_version: provider === 'steam' ? null : '2.0.0',
+      provider,
+      source: `https://example.com/${provider}`,
+      capability: provider === 'steam' ? 'steam-managed' as const
+        : provider === 'github' ? 'downloadable' as const : 'manual' as const,
+      reason: '',
+      selectable: provider === 'github',
+      pending: true,
+    }));
+
+    expect(projectProviderUpdates([entry({ update_plans })]).pendingPlans.map(
+      (plan) => plan.provider,
+    )).toEqual(providers);
+  });
+
+  it('uses one legacy update_plan only when update_plans fan-out is absent', () => {
+    const legacy = githubPlan('Legacy');
+    const replacement = { ...githubPlan('Legacy'), target_version: '3.0.0' };
+
+    expect(projectProviderUpdates([entry({ update_plan: legacy })]).pendingPlans).toEqual([legacy]);
+    expect(projectProviderUpdates([entry({
+      update_plan: legacy,
+      update_plans: [replacement],
+    })]).pendingPlans).toEqual([replacement]);
+    expect(projectProviderUpdates([entry({
+      update_plan: legacy,
+      update_plans: [],
+    })]).pendingPlans).toEqual([]);
+  });
+
   it('ignores serialized up-to-date Nexus, Steam, GitHub, and frozen plans', () => {
     const update_plans = [
       ['nexus', 'manual'],
@@ -234,6 +231,26 @@ describe('projectProviderUpdates', () => {
       actionableCount: 0,
       hasPending: false,
     });
+  });
+
+  it('treats authoritative non-pending plans as current despite stale legacy needs_update', () => {
+    const current = entry({
+      github_repo: 'owner/repo',
+      needs_update: true,
+      update_plans: [{
+        ...githubPlan('Current'),
+        selectable: false,
+        pending: false,
+        target_version: '1.0.0',
+      }],
+    });
+
+    expect(isUpToDate(current)).toBe(true);
+    expect(isUpToDate(entry({
+      github_repo: 'owner/repo',
+      needs_update: true,
+      update_plans: [],
+    }))).toBe(true);
   });
 
   it('counts every non-Steam review action while retaining all provider plans', () => {
@@ -307,23 +324,6 @@ describe('audit identity helpers', () => {
   });
 });
 
-describe('isActionableUpdate', () => {
-  it('requires a non-pinned, non-snoozed update with an actionable target', () => {
-    expect(isActionableUpdate(undefined)).toBe(false);
-    expect(isActionableUpdate(entry({ needs_update: true, pinned: true, latest_release_with_assets_tag: 'v2' }))).toBe(false);
-    expect(isActionableUpdate(entry({ needs_update: true, snoozed: true, latest_release_with_assets_tag: 'v2' }))).toBe(false);
-    expect(isActionableUpdate(entry({ needs_update: true, game_version_too_old: true, latest_release_with_assets_tag: 'v2' }))).toBe(false);
-    expect(isActionableUpdate(entry({ needs_update: true, latest_release_blocked_by_game_version: true, latest_release_with_assets_tag: 'v2' }))).toBe(false);
-    expect(isActionableUpdate(entry({ needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2' }))).toBe(true);
-    expect(isActionableUpdate(entry({ needs_update: true, update_source: 'github', latest_release_with_assets_tag: null }))).toBe(false);
-    expect(isActionableUpdate(entry({ needs_update: true, update_source: 'nexus', nexus_update_available: true }))).toBe(true);
-    expect(isActionableUpdate(entry({ needs_update: true, update_source: 'both', nexus_update_available: true }))).toBe(true);
-    expect(isActionableUpdate(entry({ needs_update: true, update_source: 'both', latest_release_with_assets_tag: 'v2' }))).toBe(true);
-    expect(isActionableUpdate(entry({ needs_update: true, update_source: null, latest_compatible_tag: 'v2' }))).toBe(true);
-    expect(isActionableUpdate(entry({ needs_update: false, latest_release_with_assets_tag: 'v2' }))).toBe(false);
-  });
-});
-
 describe('snooze', () => {
   it('treats a snoozed mod as up-to-date even when needs_update is true', () => {
     // Audit's needs_update reflects upstream truth (a newer tag exists).
@@ -343,7 +343,7 @@ describe('snooze', () => {
       entry({ mod_name: 'A', github_repo: 'a/a', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2', update_plans: [githubPlan('A')] }),
       entry({ mod_name: 'B', github_repo: 'b/b', needs_update: true, update_source: 'github', latest_release_with_assets_tag: 'v2', snoozed: true, update_plans: [githubPlan('B', false)] }),
     ];
-    expect(countGithubUpdates(rows)).toBe(1);
+    expect(projectProviderUpdates(rows).downloadableCount).toBe(1);
   });
 
   it('reverts to "needs update" once snoozed is false (auto-expiry happens on backend)', () => {
@@ -360,51 +360,16 @@ describe('snooze', () => {
       update_plans: [githubPlan('a')],
     });
     expect(isUpToDate(row)).toBe(false);
-    expect(countGithubUpdates([row])).toBe(1);
+    expect(projectProviderUpdates([row]).downloadableCount).toBe(1);
   });
 });
 
-describe('key fallbacks and source-specific actionability', () => {
+describe('key fallbacks', () => {
   it('falls back to the bare mod name when an entry exposes no identity keys', () => {
     expect(auditEntryKey(entry({ mod_version_id: null, folder_name: null, mod_name: '' }))).toBe('');
   });
 
   it('falls back to an empty key when a refresh target exposes no identity', () => {
     expect(auditTargetKey({ mod_version_id: null, folder_name: null, mod_id: null, name: '' })).toBe('');
-  });
-
-  it('actions a GitHub mod off its compatible tag before the assets tag', () => {
-    expect(
-      isActionableUpdate(entry({
-        needs_update: true,
-        update_source: 'github',
-        latest_compatible_tag: 'v9',
-        latest_release_with_assets_tag: null,
-      })),
-    ).toBe(true);
-  });
-
-  it('actions a default-source mod off its release-with-assets tag alone', () => {
-    expect(
-      isActionableUpdate(entry({
-        needs_update: true,
-        update_source: null,
-        nexus_update_available: false,
-        latest_compatible_tag: null,
-        latest_release_with_assets_tag: 'v9',
-      })),
-    ).toBe(true);
-  });
-
-  it('does not action a default-source mod with no usable target', () => {
-    expect(
-      isActionableUpdate(entry({
-        needs_update: true,
-        update_source: null,
-        nexus_update_available: false,
-        latest_compatible_tag: null,
-        latest_release_with_assets_tag: null,
-      })),
-    ).toBe(false);
   });
 });

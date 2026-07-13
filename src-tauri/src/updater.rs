@@ -2536,6 +2536,7 @@ mod version_helper_tests {
                 github.map(|_| "2.0.0"),
                 github.is_some(),
                 nexus_version.map(|_| "https://www.nexusmods.com/slaythespire2/mods/1"),
+                Some("1.0.0"),
                 nexus_version,
                 nexus_version.is_some(),
                 false,
@@ -4648,6 +4649,7 @@ fn build_update_plans(
     github_target: Option<&str>,
     github_needs_update: bool,
     nexus_url: Option<&str>,
+    nexus_installed_version: Option<&str>,
     nexus_version: Option<&str>,
     nexus_update_available: bool,
     is_pinned: bool,
@@ -4680,7 +4682,9 @@ fn build_update_plans(
     if nexus_url.is_some() || nexus_version.is_some() {
         plans.push(update_plan_item(
             m,
-            installed_version.to_string(),
+            nexus_installed_version
+                .unwrap_or(installed_version)
+                .to_string(),
             nexus_version.map(str::to_string),
             "nexus",
             nexus_url.map(str::to_string),
@@ -4941,6 +4945,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
 
     // --- Nexus version check ---
     let mut nexus_version: Option<String> = None;
+    let mut nexus_installed_version: Option<String> = None;
     let mut nexus_update_available = false;
     let source_record = m
         .mod_version_id
@@ -5017,6 +5022,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                         let current_ver = nexus_sources_ver
                             .map(strip_version_prefix)
                             .unwrap_or(manifest_ver);
+                        nexus_installed_version = Some(current_ver.to_string());
                         let nexus_ver = strip_version_prefix(nv);
                         if current_ver != "unknown" && current_ver != "0.0.0" {
                             nexus_update_available = is_newer_version(current_ver, nexus_ver);
@@ -5200,6 +5206,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
         github_target,
         github_needs_update,
         nexus_url.as_deref(),
+        nexus_installed_version.as_deref(),
         nexus_version.as_deref(),
         nexus_update_available,
         is_pinned,

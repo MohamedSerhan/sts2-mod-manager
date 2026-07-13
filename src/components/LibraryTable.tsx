@@ -333,12 +333,23 @@ function versionOptionIdentity(option: LocalModVersionOption): string {
 }
 
 function versionOptionSourceIdentity(option: LocalModVersionOption): string {
+  // Version records can inherit Workshop linkage from the logical mod even
+  // when this particular artifact came from Nexus/GitHub. Artifact-owned
+  // provenance must win; otherwise one Steam item appears as several
+  // selectable "Steam Workshop versions".
+  if (isWorkshopOwned(option)) {
+    return `workshop:${option.workshop_item_id ?? option.workshop_url ?? option.folder_name ?? 'unknown'}`;
+  }
+  if (option.nexus_url || sourceHasNexus(option.source)) {
+    return `nexus:${option.nexus_url ?? option.source ?? option.mod_version_id}`;
+  }
+  if (option.github_url || sourceHasGithub(option.source)) {
+    return `github:${option.github_url ?? option.source ?? option.mod_version_id}`;
+  }
   if (isWorkshopSource(option)) {
     return `workshop:${option.workshop_item_id ?? option.workshop_url ?? option.folder_name ?? 'unknown'}`;
   }
   return [
-    option.github_url,
-    option.nexus_url,
     option.source,
     option.folder_name,
     option.mod_version_id,
@@ -380,13 +391,14 @@ function sourceHasNexus(source: string | null | undefined): boolean {
 function versionOptionSourceKeys(
   option: LocalModVersionOption,
 ): Array<'steamWorkshop' | 'gitHub' | 'nexus' | 'link' | 'manual'> {
-  if (isWorkshopSource(option)) {
+  if (isWorkshopOwned(option)) {
     return ['steamWorkshop'];
   }
   const keys: Array<'gitHub' | 'nexus'> = [];
   if (option.github_url || sourceHasGithub(option.source)) keys.push('gitHub');
   if (option.nexus_url || sourceHasNexus(option.source)) keys.push('nexus');
   if (keys.length > 0) return keys;
+  if (isWorkshopSource(option)) return ['steamWorkshop'];
   if (option.source?.trim()) return ['link'];
   return ['manual'];
 }

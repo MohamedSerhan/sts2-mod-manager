@@ -4992,26 +4992,31 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
 
                     if let Some(ref nv) = effective_version {
                         nexus_version = Some(nv.clone());
-                        // Use the current artifact's saved source version first,
-                        // then the source-entry cache, then the manifest version
-                        // on disk (which mod authors don't always update).
-                        let sources_ver = source_record
-                            .as_ref()
-                            .and_then(|record| record.source_version.as_deref())
-                            .or_else(|| source_entry.and_then(|e| e.installed_version.as_deref()))
-                            .unwrap_or("");
+                        // Compare a Nexus release against the version that came
+                        // from Nexus. The active artifact may instead be a newer
+                        // Steam Workshop copy; using its manifest version here
+                        // makes Steam silently suppress an independent Nexus
+                        // update for the same logical mod (for example BaseLib).
+                        // Fall back to the manifest only for legacy entries that
+                        // have no persisted Nexus provenance at all.
+                        let nexus_sources_ver = source_entry
+                            .filter(|entry| {
+                                entry.installed_version_source.as_deref() == Some("nexus")
+                            })
+                            .and_then(|entry| entry.installed_version.as_deref())
+                            .or_else(|| {
+                                source_record.as_ref().and_then(|record| {
+                                    let source_is_nexus = record.source.as_deref().is_some_and(|source| {
+                                        source.contains("nexusmods.com/") || source.starts_with("nexus:")
+                                    });
+                                    source_is_nexus
+                                        .then_some(record.source_version.as_deref().unwrap_or(&record.version))
+                                })
+                            });
                         let manifest_ver = strip_version_prefix(&m.version);
-                        let current_ver = if !sources_ver.is_empty() {
-                            // Use whichever is higher: sources DB or manifest
-                            let sv = strip_version_prefix(sources_ver);
-                            if is_newer_version(manifest_ver, sv) {
-                                sv
-                            } else {
-                                manifest_ver
-                            }
-                        } else {
-                            manifest_ver
-                        };
+                        let current_ver = nexus_sources_ver
+                            .map(strip_version_prefix)
+                            .unwrap_or(manifest_ver);
                         let nexus_ver = strip_version_prefix(nv);
                         if current_ver != "unknown" && current_ver != "0.0.0" {
                             nexus_update_available = is_newer_version(current_ver, nexus_ver);

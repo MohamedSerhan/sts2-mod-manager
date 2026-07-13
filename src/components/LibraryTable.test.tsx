@@ -7,7 +7,7 @@
  * context-driven explainer banner is covered here too.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { LibraryTable } from './LibraryTable';
@@ -1482,6 +1482,8 @@ describe('<LibraryTable modpackName={null}>', () => {
     const picker = await screen.findByRole('combobox', { name: /Choose version/i });
     expect(picker).toHaveTextContent(/0\.4\.41 \(active\)/i);
     expect(picker).toHaveTextContent(/Steam Workshop/i);
+    expect(within(picker).getByText('Steam Workshop')).toHaveClass('gf-version-option-source');
+    expect(picker.querySelector('.gf-version-option-main')).toHaveTextContent(/0\.4\.41 \(active\)/i);
 
     await user.click(picker);
     const listbox = await screen.findByRole('listbox');
@@ -1492,10 +1494,12 @@ describe('<LibraryTable modpackName={null}>', () => {
     ).toBeInTheDocument();
     expect(within(listbox).getByRole('option', { name: /0\.4\.41 \(active\).*Steam Workshop/i })).toBeInTheDocument();
     expect(within(listbox).getByText('Steam Workshop')).toHaveClass('gf-version-option-source');
+    expect(within(listbox).getByText('GitHub + Nexus')).toHaveClass('gf-version-option-source');
     await user.keyboard('{Escape}');
     await user.click(screen.getByRole('button', { name: /Manage stored versions/i }));
     const manager = await screen.findByRole('dialog', { name: /Manage versions for RitsuLib/i });
     expect(within(manager).getByText('Steam Workshop')).toHaveClass('gf-version-manager-source');
+    expect(within(manager).getByText('GitHub + Nexus')).toHaveClass('gf-version-manager-source');
   });
 
   it('does not infer GitHub or Nexus from URL path text in version sources', async () => {
@@ -1591,26 +1595,35 @@ describe('<LibraryTable modpackName={null}>', () => {
     ).toBeInTheDocument();
   });
 
-  it('surfaces a hidden local provider update on the grouped Steam representative', async () => {
+  it.each([
+    { provider: 'nexus' as const, sourceLabel: 'Nexus', githubUrl: undefined, nexusUrl: 'https://www.nexusmods.com/slaythespire2/mods/42' },
+    { provider: 'github' as const, sourceLabel: 'GitHub', githubUrl: 'https://github.com/example/provider-projection', nexusUrl: undefined },
+    { provider: 'github+nexus' as const, sourceLabel: 'GitHub + Nexus', githubUrl: 'https://github.com/example/provider-projection', nexusUrl: 'https://www.nexusmods.com/slaythespire2/mods/42' },
+  ])('surfaces simultaneous Steam + $sourceLabel updates loaded through versionOptionsByKey', async ({ provider, sourceLabel, githubUrl, nexusUrl }) => {
     const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
     registerInvokeHandler('get_installed_mods', () => [
-      mkModInfo({ mod_version_id: 'ritsu-steam', name: 'RitsuLib', version: '0.4.41', folder_name: '3747602295', mod_id: 'STS2-RitsuLib', enabled: true, source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl }),
+      mkModInfo({ mod_version_id: 'projection-steam', name: 'ProviderProjection', version: '1.0.0', folder_name: '3747602295', mod_id: 'provider-projection', enabled: true, source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl }),
     ]);
     registerInvokeHandler('get_library_version_options', () => ({
-      'ritsu-steam': [
-        { mod_version_id: 'ritsu-steam', name: 'RitsuLib', version: '0.4.41', folder_name: '3747602295', mod_id: 'STS2-RitsuLib', installed: true, installed_enabled: true, cached: true, pinned: false, used_by_profiles: [], source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl },
-        { mod_version_id: 'ritsu-local', name: 'RitsuLib', version: '0.4.40', folder_name: 'STS2-RitsuLib', mod_id: 'STS2-RitsuLib', installed: false, installed_enabled: false, cached: true, pinned: false, used_by_profiles: [], source: 'github:BAKAOLC/STS2-RitsuLib', github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib', nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42', install_source: 'local' },
+      'projection-steam': [
+        { mod_version_id: 'projection-steam', name: 'ProviderProjection', version: '1.0.0', folder_name: '3747602295', mod_id: 'provider-projection', installed: true, installed_enabled: true, cached: true, pinned: false, used_by_profiles: [], source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl },
+        { mod_version_id: 'projection-local', name: 'ProviderProjection', version: '0.9.0', folder_name: 'ProviderProjection', mod_id: 'provider-projection', installed: false, installed_enabled: false, cached: true, pinned: false, used_by_profiles: [], source: githubUrl ?? nexusUrl, github_url: githubUrl, nexus_url: nexusUrl, install_source: 'local' },
       ],
     }));
     const auditByKey = new Map([
-      ['ritsu-steam', entryAudit('RitsuLib', { mod_version_id: 'ritsu-steam', folder_name: '3747602295', update_plan: { target: { name: 'RitsuLib', mod_version_id: 'ritsu-steam' }, current_version: '0.4.41', target_version: '0.4.42', provider: 'steam', source: workshopUrl, capability: 'steam-managed', reason: '', selectable: false } })],
-      ['ritsu-local', entryAudit('RitsuLib', { mod_version_id: 'ritsu-local', folder_name: 'STS2-RitsuLib', needs_update: true, update_source: 'both', github_repo: 'BAKAOLC/STS2-RitsuLib', nexus_update_available: true, latest_release_with_assets_tag: 'v0.4.42', update_plan: { target: { name: 'RitsuLib', mod_version_id: 'ritsu-local' }, current_version: '0.4.40', target_version: '0.4.42', provider: 'github+nexus', source: 'https://github.com/BAKAOLC/STS2-RitsuLib', capability: 'downloadable', reason: '', selectable: true } })],
+      ['projection-steam', entryAudit('ProviderProjection', { mod_version_id: 'projection-steam', folder_name: '3747602295', update_plan: { target: { name: 'ProviderProjection', mod_version_id: 'projection-steam' }, current_version: '1.0.0', target_version: '1.1.0', provider: 'steam', source: workshopUrl, capability: 'steam-managed', reason: '', selectable: false } })],
+      ['projection-local', entryAudit('ProviderProjection', { mod_version_id: 'projection-local', folder_name: 'ProviderProjection', needs_update: true, update_source: provider === 'github+nexus' ? 'both' : provider, github_repo: githubUrl ? 'example/provider-projection' : null, nexus_url: nexusUrl ?? null, nexus_update_available: !!nexusUrl, latest_release_with_assets_tag: githubUrl ? 'v1.1.0' : null, update_plan: { target: { name: 'ProviderProjection', mod_version_id: 'projection-local' }, current_version: '0.9.0', target_version: '1.1.0', provider, source: githubUrl ?? nexusUrl ?? null, capability: provider === 'nexus' ? 'manual' : 'downloadable', reason: '', selectable: provider !== 'nexus' } })],
     ]);
     render(<Wrap modpackName={null} auditByKey={auditByKey} />);
 
     const row = await screen.findByTestId('library-row');
-    expect(within(row).getByText('New Steam Workshop update available')).toBeInTheDocument();
-    expect(within(row).getByText(/GitHub \+ Nexus.*0\.4\.40.*0\.4\.42/i)).toBeInTheDocument();
+    expect(within(row).getByText('Steam Workshop Update')).toHaveClass('gf-pill-update-steam');
+    expect(within(row).getByTitle('Steam Workshop updates this mod automatically when you launch Slay the Spire 2 from Steam.')).toBeInTheDocument();
+    expect(within(row).getByText((_, element) =>
+      element?.classList.contains('gf-pill-update') === true &&
+      element.textContent?.includes(sourceLabel) === true &&
+      element.textContent.includes('0.9.0') && element.textContent.includes('1.1.0'),
+    )).toBeInTheDocument();
   });
 
   it('guides Steam deletion to the exact removable local sibling without deleting it', async () => {
@@ -1622,18 +1635,27 @@ describe('<LibraryTable modpackName={null}>', () => {
       { mod_version_id: 'ritsu-steam', name: 'RitsuLib', version: '0.4.41', folder_name: '3747602295', mod_id: 'STS2-RitsuLib', installed: true, installed_enabled: true, cached: true, pinned: false, used_by_profiles: [], source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl },
       { mod_version_id: 'ritsu-local', name: 'RitsuLib', version: '0.4.40', folder_name: 'STS2-RitsuLib', mod_id: 'STS2-RitsuLib', installed: false, installed_enabled: false, cached: true, pinned: false, used_by_profiles: [], github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib', nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42', install_source: 'local' },
     ] }));
-    const user = userEvent.setup();
     render(<AllProviders><IntegratedLibraryTable /></AllProviders>);
 
     const manage = await screen.findByRole('button', { name: /^Manage stored versions$/i });
     expect(manage).not.toHaveClass('is-guided');
-    await user.click(screen.getByRole('button', { name: /^Remove RitsuLib$/i }));
-    expect(await screen.findByText(/RitsuLib.*GitHub \+ Nexus.*v0\.4\.40.*Manage stored versions/i)).toBeInTheDocument();
-    const guidedManage = screen.getByRole('button', { name: /Manage stored versions.*GitHub \+ Nexus.*0\.4\.40/i });
-    expect(guidedManage).toHaveClass('is-guided');
-    expect(getInvokeCalls().some((call) => call.cmd === 'remove_library_mod_version')).toBe(false);
-    await user.click(guidedManage);
-    expect(guidedManage).not.toHaveClass('is-guided');
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^Remove RitsuLib$/i }));
+      });
+      const guidance = screen.getByText(/RitsuLib.*GitHub \+ Nexus.*v0\.4\.40.*Manage stored versions/i);
+      expect(guidance).toBeInTheDocument();
+      const guidedManage = screen.getByRole('button', { name: /Manage stored versions.*GitHub \+ Nexus.*0\.4\.40/i });
+      expect(guidedManage).toHaveClass('is-guided');
+      expect(getInvokeCalls().some((call) => call.cmd === 'remove_library_mod_version')).toBe(false);
+      act(() => vi.advanceTimersByTime(5000));
+      expect(guidance).toBeInTheDocument();
+      fireEvent.click(guidedManage);
+      expect(guidedManage).not.toHaveClass('is-guided');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('dedupes exact duplicate Workshop rows without splitting the modpack view', async () => {

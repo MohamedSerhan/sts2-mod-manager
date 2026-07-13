@@ -1337,7 +1337,7 @@ body {
   flex: 1 1 auto;
 }
 .gf-version-select .gf-select-value .gf-version-option-source {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
 }
 .gf-version-option-label {
   display: inline-flex;
@@ -1354,10 +1354,13 @@ body {
 }
 .gf-version-option-source,
 .gf-version-manager-source {
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
-  max-width: 100%;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  width: max-content;
+  max-width: none;
+  white-space: nowrap;
+  overflow-wrap: normal;
   padding: 2px 5px;
   border: 1px solid var(--indigo-line);
   border-radius: 999px;
@@ -1369,10 +1372,17 @@ body {
 }
 .gf-profile-library-meta .gf-version-option-source,
 .gf-version-manager .gf-version-manager-source {
-  max-width: 100%;
+  width: max-content;
+  max-width: none;
   overflow: visible;
   text-overflow: clip;
-  white-space: normal;
+  white-space: nowrap;
+}
+.gf-version-select .gf-select-panel {
+  width: max-content;
+  min-width: 100%;
+  max-width: min(420px, calc(100vw - 32px));
+  overflow-x: hidden;
 }
 .gf-version-tools {
   display: inline-flex;
@@ -2314,6 +2324,7 @@ body {
 .gf-select-option {
   display: flex;
   align-items: center;
+  min-width: 0;
   padding: 7px 10px;
   border-radius: 6px;
   font-size: 13px;
@@ -2324,6 +2335,7 @@ body {
 }
 .gf-select-option .gf-version-option-label {
   width: 100%;
+  min-width: 0;
   justify-content: space-between;
 }
 .gf-select-option.is-active { background: var(--indigo-nav-hover); }
@@ -2417,6 +2429,11 @@ body {
 .gf-pill-github { background: var(--indigo-pill); color: var(--ink-mute); }
 .gf-pill-nexus { background: color-mix(in oklch, var(--nexus-base) 18%, transparent); color: var(--nexus-ink); }
 .gf-pill-update { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
+.gf-pill-update-steam {
+  background: color-mix(in srgb, var(--info) 10%, var(--indigo-chip));
+  border-color: color-mix(in srgb, var(--info) 42%, var(--indigo-line));
+  color: var(--info-ink-2);
+}
 /* The update pill is a button — make it read as clickable. */
 .gf-pill-update { cursor: pointer; }
 .gf-pill-update:hover:not(:disabled) {

@@ -25,7 +25,7 @@ function auditPlan(id: string, provider: 'github' | 'nexus' | 'steam', capabilit
 }
 
 describe('<ModLibraryToolbar>', () => {
-  it('reviews all five user-actionable provider updates instead of calling two downloads', async () => {
+  it('reviews all eight provider plans, including Steam-managed updates', async () => {
     const auditResults = [
       auditPlan('alice', 'nexus', 'manual', false),
       auditPlan('deckstats', 'github', 'downloadable', true),
@@ -45,7 +45,7 @@ describe('<ModLibraryToolbar>', () => {
 
     render(<AllProviders><ModLibraryToolbar lib={lib} /></AllProviders>);
 
-    const review = screen.getByRole('button', { name: 'Review 5 updates' });
+    const review = screen.getByRole('button', { name: 'Review 8 updates' });
     expect(screen.queryByRole('button', { name: 'Download 2 updates' })).not.toBeInTheDocument();
     await user.click(review);
     expect(await screen.findByRole('dialog')).toBeInTheDocument();

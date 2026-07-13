@@ -85,6 +85,7 @@ export interface ProviderUpdateProjection {
   pendingPlans: UpdatePlanItem[];
   downloadablePlans: UpdatePlanItem[];
   downloadableCount: number;
+  reviewCount: number;
   actionableCount: number;
   hasPending: boolean;
 }
@@ -107,6 +108,7 @@ export function projectProviderUpdates(entries: ModAuditEntry[]): ProviderUpdate
     pendingPlans,
     downloadablePlans,
     downloadableCount: downloadablePlans.length + legacyDownloadableCount,
+    reviewCount: pendingPlans.length + legacyDownloadableCount,
     actionableCount: pendingPlans.filter(
       (plan) => plan.provider !== 'steam' &&
         (plan.capability === 'downloadable' || plan.capability === 'manual'),

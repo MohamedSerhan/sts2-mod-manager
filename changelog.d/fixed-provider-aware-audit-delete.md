@@ -1,1 +1,1 @@
-Update review now counts every actionable GitHub and Nexus update, shows clear Steam advisories alongside nested local updates, guides Steam-managed deletion only after use, and keeps full source labels readable.
+Update review now includes Steam Workshop updates alongside every attached GitHub and Nexus update, keeps source labels readable, and persistently guides safe removal of stored local copies.

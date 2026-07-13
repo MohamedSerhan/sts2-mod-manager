@@ -744,11 +744,79 @@ export function LibraryTable({
     logicalRowsByKey.get(logicalModKey(row, modInfoForRow(row))) ?? [row],
   [logicalRowsByKey, modInfoForRow]);
 
+  const versionOptionsByKey = useMemo(() => {
+    const map = new Map<string, LocalModVersionOption[]>();
+    if (!effectiveGrid) return map;
+    for (const row of effectiveGrid.mods) {
+      const options = dedupeVersionOptions(row.version_options ?? []);
+      const variantCount = new Set(options.map(versionOptionVariantIdentity)).size;
+      if (options.length > 1 && variantCount > 1) {
+        map.set(membershipRowKey(row), options);
+      }
+    }
+    const groups = new Map<string, ProfileMembershipMod[]>();
+    for (const row of effectiveGrid.mods) {
+      if (map.has(membershipRowKey(row))) continue;
+      const info = modInfoForRow(row);
+      const groupKey = logicalModKey(row, info);
+      const existing = groups.get(groupKey);
+      if (existing) existing.push(row);
+      else groups.set(groupKey, [row]);
+    }
+    for (const group of groups.values()) {
+      const variantCount = new Set(
+        group.map((row) => rowVariantIdentity(row, modInfoForRow(row))),
+      ).size;
+      const canSelectVersions = group.every((row) => !!row.mod_version_id);
+      if (group.length < 2 || variantCount < 2 || !canSelectVersions) continue;
+      const sortedGroup = [...group].sort((a, b) => {
+        const byVersion = modVersionSortValue(b.version).localeCompare(
+          modVersionSortValue(a.version),
+          undefined,
+          { sensitivity: 'base', numeric: true },
+        );
+        return byVersion || compareMembershipDisplayName(a, b);
+      });
+      const fallbackOptions = dedupeVersionOptions(sortedGroup.map((option) => ({
+        mod_version_id: membershipRowKey(option),
+        name: option.name,
+        version: option.version,
+        folder_name: option.folder_name,
+        mod_id: option.mod_id,
+        display_name: option.display_name,
+        source: option.source,
+        github_url: option.github_url,
+        nexus_url: option.nexus_url,
+        install_source: option.install_source,
+        workshop_item_id: option.workshop_item_id,
+        workshop_url: option.workshop_url,
+        installed: true,
+        installed_enabled: option.installed_enabled,
+        cached: false,
+        pinned: false,
+        used_by_profiles: option.profiles
+          .filter((profile) => profile.included)
+          .map((profile) => profile.profile_name),
+      })));
+      for (const row of group) {
+        if (map.has(membershipRowKey(row))) continue;
+        map.set(membershipRowKey(row), fallbackOptions);
+      }
+    }
+    return map;
+  }, [effectiveGrid, modInfoByKey, modInfoForRow]);
+
   const groupAuditsFor = useCallback((row: ProfileMembershipMod) => {
     const seen = new Set<ModAuditEntry>();
     const entries: ModAuditEntry[] = [];
     for (const member of groupRowsFor(row)) {
-      for (const candidate of [member, ...(member.version_options ?? [])]) {
+      const memberKey = membershipRowKey(member);
+      const loadedOptions = versionOptionsByKey.get(memberKey) ?? [];
+      for (const candidate of [
+        member,
+        ...(member.version_options ?? []),
+        ...loadedOptions,
+      ]) {
         const audit = auditByKey?.get(candidate.mod_version_id ?? '') ??
           auditByKey?.get(candidate.folder_name ?? '') ?? auditByKey?.get(candidate.name);
         if (audit && !seen.has(audit)) {
@@ -758,7 +826,7 @@ export function LibraryTable({
       }
     }
     return entries;
-  }, [auditByKey, groupRowsFor]);
+  }, [auditByKey, groupRowsFor, versionOptionsByKey]);
 
   const duplicateSourceConflictKeys = useMemo(() => {
     if (!effectiveGrid) return new Set<string>();
@@ -1016,68 +1084,6 @@ export function LibraryTable({
   ]);
 
   const visibleItems = filteredRows.slice(0, visibleLimit);
-
-  const versionOptionsByKey = useMemo(() => {
-    const map = new Map<string, LocalModVersionOption[]>();
-    if (!effectiveGrid) return map;
-    for (const row of effectiveGrid.mods) {
-      const options = dedupeVersionOptions(row.version_options ?? []);
-      const variantCount = new Set(options.map(versionOptionVariantIdentity)).size;
-      if (options.length > 1 && variantCount > 1) {
-        map.set(membershipRowKey(row), options);
-      }
-    }
-    const groups = new Map<string, ProfileMembershipMod[]>();
-    for (const row of effectiveGrid.mods) {
-      if (map.has(membershipRowKey(row))) continue;
-      const info = modInfoForRow(row);
-      const groupKey = logicalModKey(row, info);
-      const existing = groups.get(groupKey);
-      if (existing) existing.push(row);
-      else groups.set(groupKey, [row]);
-    }
-    for (const group of groups.values()) {
-      const variantCount = new Set(
-        group.map((row) => rowVariantIdentity(row, modInfoForRow(row))),
-      ).size;
-      const canSelectVersions = group.every((row) => !!row.mod_version_id);
-      if (group.length < 2 || variantCount < 2 || !canSelectVersions) continue;
-      const sortedGroup = [...group].sort((a, b) => {
-        const byVersion = modVersionSortValue(b.version).localeCompare(
-          modVersionSortValue(a.version),
-          undefined,
-          { sensitivity: 'base', numeric: true },
-        );
-        return byVersion || compareMembershipDisplayName(a, b);
-      });
-      const fallbackOptions = dedupeVersionOptions(sortedGroup.map((option) => ({
-        mod_version_id: membershipRowKey(option),
-        name: option.name,
-        version: option.version,
-        folder_name: option.folder_name,
-        mod_id: option.mod_id,
-        display_name: option.display_name,
-        source: option.source,
-        github_url: option.github_url,
-        nexus_url: option.nexus_url,
-        install_source: option.install_source,
-        workshop_item_id: option.workshop_item_id,
-        workshop_url: option.workshop_url,
-        installed: true,
-        installed_enabled: option.installed_enabled,
-        cached: false,
-        pinned: false,
-        used_by_profiles: option.profiles
-          .filter((profile) => profile.included)
-          .map((profile) => profile.profile_name),
-      })));
-      for (const row of group) {
-        if (map.has(membershipRowKey(row))) continue;
-        map.set(membershipRowKey(row), fallbackOptions);
-      }
-    }
-    return map;
-  }, [effectiveGrid, modInfoByKey, modInfoForRow]);
 
   async function handleSelectRowVersion(
     row: ProfileMembershipMod,

@@ -220,6 +220,7 @@ describe('projectProviderUpdates', () => {
 
     expect(projection.actionableCount).toBe(5);
     expect(projection.downloadableCount).toBe(2);
+    expect(projection.reviewCount).toBe(8);
     expect(projection.pendingPlans).toHaveLength(8);
     expect(projection.pendingPlans.filter((plan) => plan.provider === 'steam')).toHaveLength(3);
   });

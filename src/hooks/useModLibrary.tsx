@@ -474,13 +474,15 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleDelete(mod: ModInfo, removableLocalVersion?: StoredVersionGuidance) {
     if (isWorkshopMod(mod)) {
-      toast.info(removableLocalVersion
-        ? t('mods.toast.workshopManagedWithLocal', {
-            name: displayNameFor(mod),
-            source: removableLocalVersion.sourceLabel,
-            version: removableLocalVersion.version.replace(/^v/i, ''),
-          })
-        : t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
+      if (removableLocalVersion) {
+        toast.sticky(t('mods.toast.workshopManagedWithLocal', {
+          name: displayNameFor(mod),
+          source: removableLocalVersion.sourceLabel,
+          version: removableLocalVersion.version.replace(/^v/i, ''),
+        }), 'info');
+      } else {
+        toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
+      }
       return;
     }
     const ok = await confirm({

@@ -723,8 +723,10 @@ export function LibraryRow({
                 {updatePlans.map((plan) => (
                   <span
                     key={`${plan.target.mod_version_id ?? plan.target.folder_name ?? plan.target.name}:${plan.provider}`}
-                    className="gf-pill gf-pill-update"
-                    title={t(`mods.updatePlan.capability.${plan.capability}`)}
+                    className={`gf-pill gf-pill-update${plan.provider === 'steam' ? ' gf-pill-update-steam' : ''}`}
+                    title={plan.provider === 'steam'
+                      ? t('mods.steamUpdateTitle')
+                      : t(`mods.updatePlan.capability.${plan.capability}`)}
                   >
                     <AlertTriangle size={9} />
                     {plan.provider === 'steam'

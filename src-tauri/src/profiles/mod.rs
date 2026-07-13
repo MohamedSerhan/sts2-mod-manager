@@ -8,7 +8,7 @@ use crate::mod_versions::{
     LocalModVersionAffectedProfile, LocalModVersionOption, LocalModVersionRemovalPreview,
 };
 use crate::mods::{ModInfo, ModInstallSource};
-use crate::state::AppState;
+use crate::state::{AppState, AppStateInner};
 
 // ── Submodules ─────────────────────────────────────────────────────────────
 //
@@ -295,7 +295,7 @@ pub struct ProfileLoadOrderUpdate {
 // references. The actual work is in the submodules.
 
 fn reconcile_library_provider_exclusivity(
-    state: &AppState,
+    state: &AppStateInner,
     mods_path: &Path,
     disabled_path: &Path,
 ) -> Result<()> {

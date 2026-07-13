@@ -1927,6 +1927,8 @@ export function LibraryTable({
               {...rowActionHandlers}
               selectedVersionKey={selectedVersionKeyByRow.get(rowKey) ?? rowKey}
               versionOptions={versionRows.map((option) => {
+                const isSelectedVersion = option.mod_version_id ===
+                  (selectedVersionKeyByRow.get(rowKey) ?? rowKey);
                 const sourceLabelOption = versionOptionForSourceLabel(
                   option,
                   row,
@@ -1937,7 +1939,7 @@ export function LibraryTable({
                   version: option.version,
                   label: t('mods.versionOption', {
                     version: cleanDisplayVersion(option.version),
-                    state: option.installed_enabled
+                    state: isSelectedVersion
                       ? t('mods.versionActiveSuffix')
                       : t('mods.versionStoredSuffix'),
                   }),
@@ -1945,7 +1947,7 @@ export function LibraryTable({
                     .map((key) => t(`mods.versionSource.${key}`))
                     .join(t('mods.versionSource.joiner')),
                   installed: option.installed,
-                  installedEnabled: option.installed_enabled,
+                  installedEnabled: isSelectedVersion,
                   cached: option.cached,
                   pinned: option.pinned,
                   source: option.source ?? null,

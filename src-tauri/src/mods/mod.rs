@@ -401,10 +401,16 @@ fn profile_mod_directly_matches_disk_artifact(
             .mod_version_id
             .as_deref()
             .is_some_and(|id| !id.trim().is_empty())
-        && crate::profiles::profile_mod_artifact_id_matches(profile_mod, disk_mod, config_path)
-            .unwrap_or(false)
     {
-        return true;
+        // Two explicit artifact IDs are authoritative. If they differ and are
+        // not aliases, do not fall through to the shared runtime mod_id — that
+        // would make every provider copy look selected.
+        return crate::profiles::profile_mod_artifact_id_matches(
+            profile_mod,
+            disk_mod,
+            config_path,
+        )
+        .unwrap_or(false);
     }
     if values_match_case_insensitive(
         profile_mod.folder_name.as_deref(),
@@ -437,7 +443,7 @@ fn runtime_repair_rank(
     disk_mod: &ModInfo,
     index: usize,
     config_path: &Path,
-) -> (usize, usize, usize, usize) {
+) -> (usize, usize, usize, usize, usize) {
     let (profile_rank, profile_match_rank) = profile
         .and_then(|profile| {
             profile
@@ -451,8 +457,19 @@ fn runtime_repair_rank(
                 .min()
         })
         .unwrap_or((usize::MAX, usize::MAX));
+    let provider_rank = if disk_mod.install_source.is_workshop() {
+        0
+    } else {
+        1
+    };
     let bundle_rank = if is_bundle_container(disk_mod) { 0 } else { 1 };
-    (profile_rank, profile_match_rank, bundle_rank, index)
+    (
+        profile_rank,
+        profile_match_rank,
+        provider_rank,
+        bundle_rank,
+        index,
+    )
 }
 
 /// Repair an already-broken active `mods/` folder that contains multiple
@@ -467,13 +484,15 @@ pub(crate) fn repair_active_runtime_id_duplicates(
     active_profile: Option<&str>,
 ) -> Result<Vec<String>> {
     let mut active = scan_mods(mods_path);
+    let movable_local_count = active.len();
+    active.extend(scan_workshop_mods_for_mods_path(mods_path));
     if active.len() < 2 {
         return Ok(Vec::new());
     }
 
     crate::mod_versions::enrich_mods_with_versions(&mut active, config_path);
     let profile = active_profile_for_runtime_repair(active_profile, profiles_path);
-    let mut keepers: std::collections::HashMap<String, (usize, usize, usize, usize)> =
+    let mut keepers: std::collections::HashMap<String, (usize, usize, usize, usize, usize)> =
         std::collections::HashMap::new();
 
     for (index, disk_mod) in active.iter().enumerate() {
@@ -492,14 +511,17 @@ pub(crate) fn repair_active_runtime_id_duplicates(
     }
 
     let mut moved = Vec::new();
-    for (index, disk_mod) in active.iter().enumerate() {
+    // Workshop files are Steam-owned and cannot be moved by us. They still
+    // participate in keeper selection so a colliding local provider is moved
+    // aside when Workshop is the selected/default provider.
+    for (index, disk_mod) in active.iter().take(movable_local_count).enumerate() {
         let should_move = runtime_mod_ids(disk_mod)
             .into_iter()
             .map(|id| id.to_lowercase())
             .any(|id| {
                 keepers
                     .get(&id)
-                    .is_some_and(|(_, _, _, keep_index)| *keep_index != index)
+                    .is_some_and(|(_, _, _, _, keep_index)| *keep_index != index)
             });
         if !should_move {
             continue;

@@ -1657,6 +1657,8 @@
     "versionLabel": "Version",
     "versionSelectorLabel": "Version",
     "versionSelectorTitle": "Choose version",
+    "versionActiveTitle": "Active version",
+    "versionStoredTitle": "Stored version",
     "versionActiveSuffix": "(active)",
     "versionStoredSuffix": "(stored)",
     "manifestVersion": "manifest v{{version}}",

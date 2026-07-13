@@ -22,7 +22,9 @@
 import { useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
+  Archive,
   Check,
+  CircleCheck,
   Clock,
   Copy,
   Download,
@@ -891,6 +893,20 @@ export function LibraryRow({
                         value: option.key,
                         label: (
                           <span className="gf-version-option-label">
+                            <span
+                              className={`gf-version-option-status${option.installedEnabled ? ' is-active' : ' is-stored'}`}
+                              role="img"
+                              aria-label={option.installedEnabled
+                                ? t('mods.versionActiveTitle')
+                                : t('mods.versionStoredTitle')}
+                              title={option.installedEnabled
+                                ? t('mods.versionActiveTitle')
+                                : t('mods.versionStoredTitle')}
+                            >
+                              {option.installedEnabled
+                                ? <CircleCheck size={13} aria-hidden="true" />
+                                : <Archive size={13} aria-hidden="true" />}
+                            </span>
                             <span className="gf-version-option-main">
                               {option.label}
                             </span>

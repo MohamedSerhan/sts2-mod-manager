@@ -1649,6 +1649,8 @@
     "versionLabel": "Версия",
     "versionSelectorLabel": "Версия",
     "versionSelectorTitle": "Выбрать версию",
+    "versionActiveTitle": "Активная версия",
+    "versionStoredTitle": "Сохранённая версия",
     "versionActiveSuffix": "(активно)",
     "versionStoredSuffix": "(в хранилище)",
     "manifestVersion": "манифест v{{version}}",

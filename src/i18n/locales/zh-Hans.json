@@ -1657,6 +1657,8 @@
     "versionLabel": "版本",
     "versionSelectorLabel": "版本",
     "versionSelectorTitle": "选择版本",
+    "versionActiveTitle": "当前版本",
+    "versionStoredTitle": "已存储版本",
     "versionActiveSuffix": "（活跃）",
     "versionStoredSuffix": "（已存储）",
     "manifestVersion": "清单 v{{version}}",

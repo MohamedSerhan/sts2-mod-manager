@@ -1649,6 +1649,8 @@
     "versionLabel": "النسخة",
     "versionSelectorLabel": "الإصدار",
     "versionSelectorTitle": "اختيار الإصدار",
+    "versionActiveTitle": "الإصدار النشط",
+    "versionStoredTitle": "الإصدار المخزّن",
     "versionActiveSuffix": "(نشط)",
     "versionStoredSuffix": "(مخزّن)",
     "manifestVersion": "البيان v{{version}}",

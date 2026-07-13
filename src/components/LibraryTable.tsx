@@ -1937,12 +1937,7 @@ export function LibraryTable({
                 return {
                   key: option.mod_version_id,
                   version: option.version,
-                  label: t('mods.versionOption', {
-                    version: cleanDisplayVersion(option.version),
-                    state: isSelectedVersion
-                      ? t('mods.versionActiveSuffix')
-                      : t('mods.versionStoredSuffix'),
-                  }),
+                  label: cleanDisplayVersion(option.version),
                   sourceLabel: versionOptionSourceKeys(sourceLabelOption)
                     .map((key) => t(`mods.versionSource.${key}`))
                     .join(t('mods.versionSource.joiner')),

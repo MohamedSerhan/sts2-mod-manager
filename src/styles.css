@@ -1346,6 +1346,20 @@ body {
   min-width: 0;
   max-width: 100%;
 }
+.gf-version-option-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+}
+.gf-version-option-status.is-active {
+  color: var(--green-edge);
+}
+.gf-version-option-status.is-stored {
+  color: var(--ink-mute);
+}
 .gf-version-option-main {
   flex: 1 1 auto;
   min-width: 0;

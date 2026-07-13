@@ -36,7 +36,7 @@
 | Install the manager | Download Windows, macOS, and Linux builds from [GitHub Releases](https://github.com/MohamedSerhan/sts2-mod-manager/releases/latest). |
 | Play the same setup as friends | Paste a share code or click an `sts2mm://` link to install, switch to, or update a modpack. |
 | Keep sources clear | Track GitHub releases, Nexus pages/downloads, Steam Workshop subscriptions, and manual archives without pretending they are the same thing. |
-| Avoid broken launches | Repair chooses the newest mod release compatible with your Slay the Spire 2 game version. |
+| Avoid broken launches | Repair chooses the newest mod release compatible with your Slay the Spire 2 game version, and launch checks treat active Workshop subscriptions as dependency providers. |
 | Recover quickly | The app auto-backs up before launch and can restore a previous setup. |
 | Stay private | No telemetry. Optional accounts and support bundles are only used when you choose those flows. |
 
@@ -73,7 +73,7 @@ App downloads are hosted on **GitHub Releases only**. The source integrations be
 | --- | --- |
 | GitHub releases | Link a repo, install compatible release assets, update from releases, and include redistributable assets in shared packs. |
 | Nexus Mods | Link mod pages, audit known sources, open the Files page in your browser, then let the downloads-folder watcher install the saved archive. |
-| Steam Workshop | Show subscribed Workshop mods in the Library and reference them in modpacks by Workshop item ID. Steam remains the owner; the manager does not copy, delete, repair, or auto-update Workshop files. |
+| Steam Workshop | Show subscribed Workshop mods in the Library, prefer newer active Workshop copies when a local copy would shadow them, and reference them in modpacks by Workshop item ID. Steam remains the owner; the manager does not delete, repair, or auto-update Workshop files. |
 | Manual archives | Drag and drop or import local `.zip`, `.7z`, and `.rar` archives when a mod source is not linkable. |
 
 ## Modpack Sharing

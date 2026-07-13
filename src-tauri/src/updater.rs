@@ -193,6 +193,7 @@ pub struct UpdatePlanItem {
     pub selectable: bool,
     /// Source-authoritative pending state computed by the backend. Consumers
     /// must not infer this from capability or the presence of a known version.
+    #[serde(default)]
     pub pending: bool,
 }
 
@@ -437,7 +438,14 @@ pub async fn check_all_updates(
             continue;
         }
         if let (Some(config_path), Some(cache_path)) = (config_path, cache_path) {
-            if crate::mod_versions::has_local_version_for_mod(config_path, cache_path, m, latest) {
+            if crate::mod_versions::has_cached_provider_version_for_mod(
+                config_path,
+                cache_path,
+                m,
+                latest,
+                crate::mod_versions::ArtifactProvider::GitHub,
+                Some(&format!("github:{owner}/{repo}")),
+            ) {
                 log::info!(
                     "Skipping update for {} ({}/{}): v{} is already cached locally",
                     m.name,
@@ -574,11 +582,13 @@ pub async fn check_all_updates(
                         {
                             if let (Some(config_path), Some(cache_path)) = (config_path, cache_path)
                             {
-                                if crate::mod_versions::has_local_version_for_mod(
+                                if crate::mod_versions::has_cached_provider_version_for_mod(
                                     config_path,
                                     cache_path,
                                     m,
                                     nexus_ver,
+                                    crate::mod_versions::ArtifactProvider::Nexus,
+                                    Some(nexus_url.as_str()),
                                 ) {
                                     log::info!(
                                         "Skipping Nexus update for {}: v{} is already cached locally",
@@ -4380,6 +4390,7 @@ pub struct ModAuditEntry {
     /// snoozing is "stop nagging me about THIS specific release."
     #[serde(default)]
     pub snoozed: bool,
+    #[serde(default)]
     pub update_plans: Vec<UpdatePlanItem>,
 }
 
@@ -4745,11 +4756,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
     let mut total_scanned: u32 = 0;
     let mut github_error: Option<String> = None;
     let github_registry_version =
-        crate::mod_versions::provider_source_version_label_for_mod(
-            m,
-            ctx.config_path,
-            "github",
-        );
+        crate::mod_versions::provider_source_version_label_for_mod(m, ctx.config_path, "github");
     let github_installed_version = source_entry
         .filter(|entry| entry.installed_version_source.as_deref() == Some("github"))
         .and_then(|entry| entry.installed_version.clone())
@@ -4802,9 +4809,8 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
             // Determine if a GitHub update is needed using semver
             if let Some(ref assets_tag) = latest_release_with_assets_tag {
                 let latest_ver = assets_tag.trim_start_matches('v');
-                let provider_current_ver = github_installed_version
-                    .as_deref()
-                    .and_then(usable_version);
+                let provider_current_ver =
+                    github_installed_version.as_deref().and_then(usable_version);
                 let current_ver = provider_current_ver
                     .or_else(|| best_known_installed_version(m, &ctx.sources_db.mods));
                 let installed_ver_matches = github_installed_version
@@ -4814,15 +4820,17 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
 
                 if !installed_ver_matches && current_ver.is_some() {
                     // Use semver comparison — only flag if latest > current
-                    github_needs_update = current_ver.as_ref().is_some_and(|current| {
-                        is_newer_version(&current.to_string(), latest_ver)
-                    });
+                    github_needs_update = current_ver
+                        .as_ref()
+                        .is_some_and(|current| is_newer_version(&current.to_string(), latest_ver));
                     if github_needs_update
-                        && crate::mod_versions::has_local_version_for_mod(
+                        && crate::mod_versions::has_cached_provider_version_for_mod(
                             ctx.config_path,
                             ctx.cache_path,
                             m,
                             latest_ver,
+                            crate::mod_versions::ArtifactProvider::GitHub,
+                            Some(full_name.as_str()),
                         )
                     {
                         log::info!(
@@ -4904,11 +4912,12 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                                             .unwrap_or("");
                                         let manifest_ver = m.version.trim_start_matches('v');
                                         let walk_ver = walk.tag.trim_start_matches('v');
-                                        let already_on_walked_version = if github_installed_version.is_some() {
-                                            walk_ver == installed_tag
-                                        } else {
-                                            walk_ver == manifest_ver
-                                        };
+                                        let already_on_walked_version =
+                                            if github_installed_version.is_some() {
+                                                walk_ver == installed_tag
+                                            } else {
+                                                walk_ver == manifest_ver
+                                            };
                                         if already_on_walked_version {
                                             github_needs_update = false;
                                             latest_compatible_tag = None;
@@ -5025,11 +5034,14 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                             .and_then(|entry| entry.installed_version.as_deref())
                             .or_else(|| {
                                 source_record.as_ref().and_then(|record| {
-                                    let source_is_nexus = record.source.as_deref().is_some_and(|source| {
-                                        source.contains("nexusmods.com/") || source.starts_with("nexus:")
-                                    });
-                                    source_is_nexus
-                                        .then_some(record.source_version.as_deref().unwrap_or(&record.version))
+                                    let source_is_nexus =
+                                        record.source.as_deref().is_some_and(|source| {
+                                            source.contains("nexusmods.com/")
+                                                || source.starts_with("nexus:")
+                                        });
+                                    source_is_nexus.then_some(
+                                        record.source_version.as_deref().unwrap_or(&record.version),
+                                    )
                                 })
                             })
                             .or(nexus_registry_version.as_deref());
@@ -5042,11 +5054,13 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                         if current_ver != "unknown" && current_ver != "0.0.0" {
                             nexus_update_available = is_newer_version(current_ver, nexus_ver);
                             if nexus_update_available
-                                && crate::mod_versions::has_local_version_for_mod(
+                                && crate::mod_versions::has_cached_provider_version_for_mod(
                                     ctx.config_path,
                                     ctx.cache_path,
                                     m,
                                     nexus_ver,
+                                    crate::mod_versions::ArtifactProvider::Nexus,
+                                    nexus_url.as_deref(),
                                 )
                             {
                                 log::info!(

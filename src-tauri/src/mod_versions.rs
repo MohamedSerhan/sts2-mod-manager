@@ -98,6 +98,14 @@ pub struct LocalModVersionOption {
     pub used_by_profiles: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArtifactProvider {
+    Steam,
+    Nexus,
+    GitHub,
+    Local,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct LocalModVersionAffectedProfile {
     pub profile_id: String,
@@ -1473,6 +1481,123 @@ pub fn has_local_version_for_mod(
         })
 }
 
+fn artifact_provider_for_option(option: &LocalModVersionOption) -> ArtifactProvider {
+    if option.install_source.is_workshop() {
+        return ArtifactProvider::Steam;
+    }
+    let source = option
+        .source
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if option.nexus_url.is_some()
+        || source.starts_with("nexus:")
+        || source.contains("nexusmods.com/")
+    {
+        return ArtifactProvider::Nexus;
+    }
+    if option.github_url.is_some()
+        || source.starts_with("github:")
+        || source.contains("github.com/")
+    {
+        return ArtifactProvider::GitHub;
+    }
+    ArtifactProvider::Local
+}
+
+fn provider_source_identity(provider: ArtifactProvider, raw: Option<&str>) -> Option<String> {
+    let raw = raw?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let lower = raw.to_ascii_lowercase();
+    match provider {
+        ArtifactProvider::GitHub => {
+            let repo = lower
+                .strip_prefix("github:")
+                .or_else(|| lower.split_once("github.com/").map(|(_, path)| path))
+                .unwrap_or(lower.as_str());
+            let repo = repo.split(['?', '#']).next()?.trim_matches('/');
+            let mut parts = repo.split('/');
+            let owner = parts.next()?.trim();
+            let name = parts.next()?.trim().trim_end_matches(".git");
+            if owner.is_empty() || name.is_empty() || parts.next().is_some() {
+                return None;
+            }
+            Some(format!("{owner}/{name}"))
+        }
+        ArtifactProvider::Nexus => {
+            let path = lower
+                .strip_prefix("nexus:")
+                .or_else(|| lower.split_once("nexusmods.com/").map(|(_, path)| path))?;
+            let segments: Vec<&str> = path
+                .split(['?', '#'])
+                .next()?
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .collect();
+            let mods_index = segments.iter().position(|segment| *segment == "mods")?;
+            let game = segments.get(mods_index.checked_sub(1)?)?;
+            let mod_id = segments.get(mods_index + 1)?;
+            if game.is_empty() || mod_id.is_empty() {
+                return None;
+            }
+            Some(format!("nexusmods.com/{game}/mods/{mod_id}"))
+        }
+        ArtifactProvider::Steam => {
+            if let Some(item_id) = lower.split("id=").nth(1) {
+                return item_id
+                    .split(['&', '?', '#', '/'])
+                    .next()
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string);
+            }
+            Some(lower.trim_matches('/').to_string())
+        }
+        ArtifactProvider::Local => Some(lower.to_string()),
+    }
+}
+
+fn provider_source_for_option(
+    option: &LocalModVersionOption,
+    provider: ArtifactProvider,
+) -> Option<&str> {
+    match provider {
+        ArtifactProvider::Steam => option
+            .workshop_item_id
+            .as_deref()
+            .or(option.workshop_url.as_deref())
+            .or(option.source.as_deref()),
+        ArtifactProvider::Nexus => option.nexus_url.as_deref().or(option.source.as_deref()),
+        ArtifactProvider::GitHub => option.github_url.as_deref().or(option.source.as_deref()),
+        ArtifactProvider::Local => option.source.as_deref(),
+    }
+}
+
+pub(crate) fn has_cached_provider_version_for_mod(
+    config_path: &Path,
+    cache_path: &Path,
+    info: &ModInfo,
+    version: &str,
+    provider: ArtifactProvider,
+    provider_source: Option<&str>,
+) -> bool {
+    let requested_source = provider_source_identity(provider, provider_source);
+    local_version_options_for_cached_comparison(config_path, cache_path, info)
+        .into_iter()
+        .filter(|option| option.cached)
+        .filter(|option| normalize_part(Some(&option.version)) == normalize_part(Some(version)))
+        .filter(|option| artifact_provider_for_option(option) == provider)
+        .any(|option| {
+            let candidate_source =
+                provider_source_identity(provider, provider_source_for_option(&option, provider));
+            match (requested_source.as_deref(), candidate_source.as_deref()) {
+                (Some(requested), Some(candidate)) => requested == candidate,
+                _ => true,
+            }
+        })
+}
+
 pub(crate) fn cached_source_version_ids_for_mod_family(
     config_path: &Path,
     cache_path: &Path,
@@ -2309,6 +2434,119 @@ mod tests {
             has_local_version_for_mod(config.path(), cache.path(), &installed, "29"),
             "a cached Nexus V29 archive should suppress another update pill for latest 29"
         );
+    }
+
+    #[test]
+    fn cached_provider_version_does_not_cross_suppress_steam_and_nexus() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let nexus_url = "https://www.nexusmods.com/slaythespire2/mods/103";
+
+        write_manifest(base.path(), "3.3.5");
+        let mut workshop = workshop_mod_info("103", "3.3.5");
+        workshop.hash = Some("steam-335".into());
+        ensure_mod_info_id(&mut workshop, config.path()).unwrap();
+        cache_mod_version_by_id(&mut workshop, base.path(), cache.path(), config.path()).unwrap();
+
+        write_manifest(base.path(), "3.3.1");
+        let mut nexus = mod_info("RitsuLib", "3.3.1", Some("nexus-331"));
+        nexus.mod_id = workshop.mod_id.clone();
+        nexus.folder_name = Some("RitsuLib".into());
+        nexus.source = Some(nexus_url.into());
+        nexus.nexus_url = Some(nexus_url.into());
+        nexus.workshop_item_id = Some("103".into());
+        nexus.workshop_url = Some(crate::mods::workshop_url("103"));
+        let nexus_id = ensure_mod_info_id(&mut nexus, config.path()).unwrap();
+        cache_mod_version_by_id(&mut nexus, base.path(), cache.path(), config.path()).unwrap();
+
+        assert_eq!(
+            artifact_provider_for_option(
+                &local_version_options_for_target(
+                    &[workshop.clone()],
+                    &[],
+                    config.path(),
+                    cache.path(),
+                    &workshop.name,
+                    workshop.mod_version_id.as_deref(),
+                    workshop.mod_id.as_deref(),
+                )
+                .into_iter()
+                .find(|option| option.mod_version_id == nexus_id)
+                .expect("cached Nexus artifact should remain in the logical family"),
+            ),
+            ArtifactProvider::Nexus,
+        );
+        assert!(!has_cached_provider_version_for_mod(
+            config.path(),
+            cache.path(),
+            &workshop,
+            "3.3.5",
+            ArtifactProvider::Nexus,
+            Some(nexus_url),
+        ));
+
+        write_manifest(base.path(), "3.3.5");
+        let mut nexus_target = nexus.clone();
+        nexus_target.hash = Some("nexus-335".into());
+        nexus_target.version = "3.3.5".into();
+        cache_mod_version_by_id(&mut nexus_target, base.path(), cache.path(), config.path())
+            .unwrap();
+        assert!(has_cached_provider_version_for_mod(
+            config.path(),
+            cache.path(),
+            &workshop,
+            "3.3.5",
+            ArtifactProvider::Nexus,
+            Some(nexus_url),
+        ));
+    }
+
+    #[test]
+    fn cached_provider_version_does_not_cross_suppress_steam_and_github() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let github_source = "github:owner/ritsu-lib";
+
+        write_manifest(base.path(), "2.0.0");
+        let mut workshop = workshop_mod_info("204", "2.0.0");
+        workshop.hash = Some("steam-200".into());
+        ensure_mod_info_id(&mut workshop, config.path()).unwrap();
+        cache_mod_version_by_id(&mut workshop, base.path(), cache.path(), config.path()).unwrap();
+
+        write_manifest(base.path(), "1.0.0");
+        let mut github = mod_info("RitsuLib", "1.0.0", Some("github-100"));
+        github.mod_id = workshop.mod_id.clone();
+        github.folder_name = Some("RitsuLib".into());
+        github.source = Some(github_source.into());
+        github.github_url = Some("https://github.com/owner/ritsu-lib".into());
+        github.workshop_item_id = Some("204".into());
+        github.workshop_url = Some(crate::mods::workshop_url("204"));
+        ensure_mod_info_id(&mut github, config.path()).unwrap();
+        cache_mod_version_by_id(&mut github, base.path(), cache.path(), config.path()).unwrap();
+
+        assert!(!has_cached_provider_version_for_mod(
+            config.path(),
+            cache.path(),
+            &workshop,
+            "2.0.0",
+            ArtifactProvider::GitHub,
+            Some(github_source),
+        ));
+
+        write_manifest(base.path(), "2.0.0");
+        github.hash = Some("github-200".into());
+        github.version = "2.0.0".into();
+        cache_mod_version_by_id(&mut github, base.path(), cache.path(), config.path()).unwrap();
+        assert!(has_cached_provider_version_for_mod(
+            config.path(),
+            cache.path(),
+            &workshop,
+            "2.0.0",
+            ArtifactProvider::GitHub,
+            Some("https://github.com/owner/ritsu-lib"),
+        ));
     }
 
     #[test]

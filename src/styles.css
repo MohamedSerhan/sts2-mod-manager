@@ -1355,10 +1355,9 @@ body {
 .gf-version-option-source,
 .gf-version-manager-source {
   flex: 0 0 auto;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   padding: 2px 5px;
   border: 1px solid var(--indigo-line);
   border-radius: 999px;
@@ -1367,6 +1366,13 @@ body {
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
+}
+.gf-profile-library-meta .gf-version-option-source,
+.gf-version-manager .gf-version-manager-source {
+  max-width: 100%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 .gf-version-tools {
   display: inline-flex;
@@ -1385,6 +1391,11 @@ body {
   color: var(--ember-bright);
   border-color: var(--ember-bright);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ember-bright) 28%, transparent);
+  animation: gf-version-guidance-pulse 1.1s ease-in-out infinite alternate;
+}
+@keyframes gf-version-guidance-pulse {
+  from { box-shadow: 0 0 0 1px color-mix(in srgb, var(--ember-bright) 18%, transparent); }
+  to { box-shadow: 0 0 0 4px color-mix(in srgb, var(--ember-bright) 34%, transparent); }
 }
 .gf-version-manager {
   width: min(560px, calc(100vw - 32px));
@@ -1411,6 +1422,7 @@ body {
   flex-direction: column;
   gap: 3px;
   min-width: 0;
+  max-width: 100%;
 }
 .gf-version-manager-version {
   font-size: 13px;
@@ -2325,6 +2337,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .gf-select-panel { animation: none; }
   .gf-select-chevron { transition: color 0.15s ease; }
+  .gf-version-manage.is-guided { animation: none; }
 }
 
 /* ── Inputs ───────────────────────────────────────────────────────── */

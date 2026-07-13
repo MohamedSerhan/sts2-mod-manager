@@ -189,6 +189,40 @@ describe('projectProviderUpdates', () => {
     expect(projection.pendingPlans).toHaveLength(3);
     expect(projection.hasPending).toBe(true);
   });
+
+  it('counts every non-Steam review action while retaining all provider plans', () => {
+    const plans = [
+      ['alice', 'nexus', 'manual', false],
+      ['deckstats', 'github', 'downloadable', true],
+      ['remove-limit', 'nexus', 'manual', false],
+      ['card-advisor', 'github', 'downloadable', true],
+      ['save-path', 'nexus', 'manual', false],
+      ['baselib-steam', 'steam', 'steam-managed', false],
+      ['ritsulib-steam', 'steam', 'steam-managed', false],
+      ['mspain-steam', 'steam', 'steam-managed', false],
+    ] as const;
+    const projection = projectProviderUpdates(plans.map(([id, provider, capability, selectable]) =>
+      entry({
+        mod_version_id: id,
+        mod_name: id,
+        update_plan: {
+          target: { name: id, mod_version_id: id },
+          current_version: '1.0.0',
+          target_version: '2.0.0',
+          provider,
+          source: provider === 'steam' ? null : `https://example.com/${id}`,
+          capability,
+          reason: '',
+          selectable,
+        },
+      }),
+    ));
+
+    expect(projection.actionableCount).toBe(5);
+    expect(projection.downloadableCount).toBe(2);
+    expect(projection.pendingPlans).toHaveLength(8);
+    expect(projection.pendingPlans.filter((plan) => plan.provider === 'steam')).toHaveLength(3);
+  });
 });
 
 describe('audit identity helpers', () => {

@@ -1,1 +1,1 @@
-Grouped mod rows now show every provider's update and guide Steam-managed deletions to the exact removable stored version.
+Update review now counts every actionable GitHub and Nexus update, shows clear Steam advisories alongside nested local updates, guides Steam-managed deletion only after use, and keeps full source labels readable.

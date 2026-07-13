@@ -12,7 +12,7 @@
  */
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
-import { ClipboardCheck, Download, RefreshCw } from 'lucide-react';
+import { ClipboardCheck, ListChecks, RefreshCw } from 'lucide-react';
 
 import { Button } from './Button';
 import { AddModsMenu } from './AddModsMenu';
@@ -40,7 +40,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
       <AddModsMenu lib={lib} buttonClassName="gf-btn gf-btn-sm" />
       {(() => {
         const projection = projectProviderUpdates(auditResults ?? []);
-        const ghUpdateCount = projection.downloadableCount;
+        const reviewUpdateCount = projection.actionableCount;
         const plans = projection.pendingPlans;
         const legacyNames = (auditResults ?? []).filter((entry) => !entry.update_plan && isGithubBulkUpdate(entry)).map((entry) => entry.mod_name);
         const hasPending = projection.hasPending;
@@ -58,7 +58,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           return (
             <Button variant="primary" size="sm" disabled>
               <RefreshCw size={14} className="animate-spin" />
-              {t('mods.updatingCount', { count: ghUpdateCount })}
+              {t('mods.updatingCount', { count: projection.downloadableCount })}
             </Button>
           );
         }
@@ -72,7 +72,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           );
         }
 
-        if (!hasPending && ghUpdateCount === 0) {
+        if (!hasPending && reviewUpdateCount === 0) {
           return (
             <>
               <span className="gf-pill gf-pill-ok gf-pill-toolbar" title={t('mods.allUpToDate')}>
@@ -87,9 +87,9 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
 
         return (
           <>
-            <Button variant="primary" size="sm" onClick={() => plans.length ? setShowPlan(true) : void updateAllGithub(legacyNames)} title={t('mods.updateAllTitle')}>
-              <Download size={14} />
-              {t('mods.updateAllLabel', { count: ghUpdateCount })}
+            <Button variant="primary" size="sm" onClick={() => plans.length ? setShowPlan(true) : void updateAllGithub(legacyNames)} title={t('mods.reviewUpdatesTitle')}>
+              <ListChecks size={14} />
+              {t('mods.reviewUpdatesLabel', { count: reviewUpdateCount })}
             </Button>
             <Button variant="ghost" size="sm" onClick={handleCheckUpdates} title={t('mods.reaudit')}>
               <RefreshCw size={14} /> {t('mods.reaudit')}

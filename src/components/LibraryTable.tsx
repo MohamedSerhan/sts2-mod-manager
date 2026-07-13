@@ -193,7 +193,7 @@ export interface LibraryTableProps {
   onUnsnooze?: (mod: ModInfo) => void;
   onRepair?: (mod: ModInfo) => void;
   onRollback?: (mod: ModInfo) => void;
-  onDelete?: (mod: ModInfo, removableLocalVersion?: StoredVersionGuidance) => void;
+  onDelete?: (mod: ModInfo, removableLocalVersion?: StoredVersionGuidance) => Promise<void> | void;
   onCopyVersion?: (mod: ModInfo) => void;
   onOpenThisModFolder?: (mod: ModInfo) => void;
   onEditSources?: (mod: ModInfo) => void;
@@ -549,6 +549,17 @@ export function LibraryTable({
       (packScoped ? 'loadOrder' : modpackName ? 'inPackFirst' : 'nameAsc'),
   );
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
+  const [guidedDelete, setGuidedDelete] = useState<{ rowKey: string; versionKey: string } | null>(null);
+
+  useEffect(() => {
+    if (!guidedDelete) return;
+    const timeout = window.setTimeout(() => setGuidedDelete(null), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [guidedDelete]);
+
+  useEffect(() => {
+    setGuidedDelete(null);
+  }, [reloadToken]);
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
   const [storageSaving, setStorageSaving] = useState<string | null>(null);
   const [removingVersionKey, setRemovingVersionKey] = useState<string | null>(
@@ -737,11 +748,13 @@ export function LibraryTable({
     const seen = new Set<ModAuditEntry>();
     const entries: ModAuditEntry[] = [];
     for (const member of groupRowsFor(row)) {
-      const audit = auditByKey?.get(membershipRowKey(member)) ??
-        auditByKey?.get(member.folder_name ?? '') ?? auditByKey?.get(member.name);
-      if (audit && !seen.has(audit)) {
-        seen.add(audit);
-        entries.push(audit);
+      for (const candidate of [member, ...(member.version_options ?? [])]) {
+        const audit = auditByKey?.get(candidate.mod_version_id ?? '') ??
+          auditByKey?.get(candidate.folder_name ?? '') ?? auditByKey?.get(candidate.name);
+        if (audit && !seen.has(audit)) {
+          seen.add(audit);
+          entries.push(audit);
+        }
       }
     }
     return entries;
@@ -1780,7 +1793,12 @@ export function LibraryTable({
                 onUnsnooze: onUnsnooze ? () => onUnsnooze(modInfo) : undefined,
                 onRepair: onRepair ? () => onRepair(modInfo) : undefined,
                 onRollback: onRollback ? () => onRollback(modInfo) : undefined,
-                onDelete: onDelete ? () => onDelete(modInfo, removableLocalVersion) : undefined,
+                onDelete: onDelete ? async () => {
+                  await onDelete(modInfo, removableLocalVersion);
+                  if (representativeIsWorkshop && removableLocalVersion) {
+                    setGuidedDelete({ rowKey, versionKey: removableLocalVersion.key });
+                  }
+                } : undefined,
                 onCopyVersion: onCopyVersion
                   ? () => onCopyVersion(modInfo)
                   : undefined,
@@ -1889,7 +1907,8 @@ export function LibraryTable({
               mod={modInfo}
               audit={audit}
               updatePlans={updatePlans}
-              removableLocalVersion={removableLocalVersion}
+              removableLocalVersion={guidedDelete?.rowKey === rowKey && guidedDelete.versionKey === removableLocalVersion?.key ? removableLocalVersion : undefined}
+              onClearDeleteGuidance={() => setGuidedDelete(null)}
               gameRunning={gameRunning}
               gameVersion={gameVersion}
               isUpdating={!!modInfo && updatingKey === rowKey}
@@ -1930,9 +1949,10 @@ export function LibraryTable({
                   usedByProfiles: option.used_by_profiles ?? [],
                 };
               })}
-              onSelectVersion={(selectedKey) =>
-                handleSelectRowVersion(row, selectedKey)
-              }
+              onSelectVersion={(selectedKey) => {
+                setGuidedDelete(null);
+                return handleSelectRowVersion(row, selectedKey);
+              }}
               onRemoveVersion={(option) => {
                 const selected = versionRows.find(
                   (candidate) => candidate.mod_version_id === option.key,

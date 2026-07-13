@@ -234,6 +234,7 @@ export interface LibraryRowProps {
   audit?: ModAuditEntry | undefined;
   updatePlans?: UpdatePlanItem[];
   removableLocalVersion?: StoredVersionGuidance;
+  onClearDeleteGuidance?: () => void;
   /** Current game running state — disables destructive actions. */
   gameRunning?: boolean;
   /** Current STS2 game version, drives the min_game_version warning. */
@@ -302,6 +303,7 @@ export function LibraryRow({
   audit,
   updatePlans = [],
   removableLocalVersion,
+  onClearDeleteGuidance = noop,
   gameRunning = false,
   gameVersion,
   versionOptions = [],
@@ -725,11 +727,13 @@ export function LibraryRow({
                     title={t(`mods.updatePlan.capability.${plan.capability}`)}
                   >
                     <AlertTriangle size={9} />
-                    {t('mods.providerUpdateEvidence', {
-                      provider: providerLabel(plan.provider),
-                      current: cleanVersion(plan.current_version),
-                      target: cleanVersion(plan.target_version) || t('unknown'),
-                    })}
+                    {plan.provider === 'steam'
+                      ? t('mods.steamUpdateAvailable')
+                      : t('mods.providerUpdateEvidence', {
+                          provider: providerLabel(plan.provider),
+                          current: cleanVersion(plan.current_version),
+                          target: cleanVersion(plan.target_version) || t('unknown'),
+                        })}
                   </span>
                 ))}
                 {showBlockedPill && (
@@ -868,7 +872,10 @@ export function LibraryRow({
                     className={`gf-btn-3 gf-btn-icon gf-version-manage${removableLocalVersion ? ' is-guided' : ''}`}
                     title={removableLocalVersion ? t('mods.versionManageGuided', { source: removableLocalVersion.sourceLabel, version: cleanVersion(removableLocalVersion.version) }) : t('mods.versionManageTitle')}
                     aria-label={removableLocalVersion ? t('mods.versionManageGuided', { source: removableLocalVersion.sourceLabel, version: cleanVersion(removableLocalVersion.version) }) : t('mods.versionManageTitle')}
-                    onClick={() => setVersionManagerOpen(true)}
+                    onClick={() => {
+                      onClearDeleteGuidance();
+                      setVersionManagerOpen(true);
+                    }}
                   >
                     <SlidersHorizontal size={13} />
                   </button>

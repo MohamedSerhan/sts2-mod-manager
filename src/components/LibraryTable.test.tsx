@@ -1649,7 +1649,8 @@ describe('<LibraryTable modpackName={null}>', () => {
       const guidedManage = screen.getByRole('button', { name: /Manage stored versions.*GitHub \+ Nexus.*0\.4\.40/i });
       expect(guidedManage).toHaveClass('is-guided');
       expect(getInvokeCalls().some((call) => call.cmd === 'remove_library_mod_version')).toBe(false);
-      act(() => vi.advanceTimersByTime(5000));
+      act(() => vi.advanceTimersByTime(4000));
+      act(() => vi.advanceTimersByTime(300));
       expect(guidance).toBeInTheDocument();
       fireEvent.click(guidedManage);
       expect(guidedManage).not.toHaveClass('is-guided');

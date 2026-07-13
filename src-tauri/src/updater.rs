@@ -2548,6 +2548,11 @@ mod version_helper_tests {
                 .map(|plan| plan.provider.as_str())
                 .collect();
             assert_eq!(pending, expected);
+            if github.is_some() {
+                let github_plan = plans.iter().find(|plan| plan.provider == "github").unwrap();
+                assert_eq!(github_plan.capability, UpdateAcquisitionCapability::Manual);
+                assert!(!github_plan.selectable);
+            }
             assert_eq!(
                 plans
                     .iter()
@@ -4604,7 +4609,7 @@ fn update_plan_item(
         UpdateAcquisitionCapability::Frozen
     } else if provider == "steam" {
         UpdateAcquisitionCapability::SteamManaged
-    } else if provider == "github" {
+    } else if provider == "github" && !m.install_source.is_workshop() {
         UpdateAcquisitionCapability::Downloadable
     } else {
         UpdateAcquisitionCapability::Manual

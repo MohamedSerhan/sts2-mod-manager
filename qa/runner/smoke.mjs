@@ -957,10 +957,10 @@ async function specFreezeSuppressesPendingUpdate(driver) {
   //
   // Target the ghost ↻ re-audit button by aria-label, NOT the generic
   // "audit button" xpath. After specAuditShows1Update the toolbar is in
-  // the "Download 1 update" state, which renders TWO buttons: the primary
-  // "Download 1 update" action button AND a separate ghost re-audit icon.
+  // the "Review 1 update" state, which renders TWO buttons: the primary
+  // review action button AND a separate ghost re-audit icon.
   // Picking the first by text content used to hit the action button
-  // and open the "Download 1 update?" confirm modal — the test would then
+  // and open the update-plan sheet — the test would then
   // wait 30s for "Up to date" while the dialog blocked everything.
   const auditBtn = await waitForElement(
     driver,
@@ -974,7 +974,7 @@ async function specFreezeSuppressesPendingUpdate(driver) {
     async () => {
       const btns = await driver.findElements(
         By.xpath(
-          "//button[contains(., 'Audit mods') or contains(., 'Download ') or contains(., 'Update ') or contains(., 'Up to date')]",
+          "//button[contains(., 'Audit mods') or contains(., 'Review ') or contains(., 'Download ') or contains(., 'Update ') or contains(., 'Up to date')]",
         ),
       );
       for (const b of btns) {
@@ -1817,38 +1817,36 @@ async function specAuditAgainstCassettesShowsOnePending(driver) {
   );
   await auditBtn.click();
 
-  // After audit completes the toolbar button reads "Download 1 update".
+  // After audit completes the toolbar button reads "Review 1 update".
   // We re-query each tick because React replaces the Button when the
   // toolbar state machine flips variants (secondary → primary). Holding
   // the pre-click element ref returns a stale node after the swap and
   // .getText() throws StaleElementReference. Two variants of the
   // pre-audit copy now: "Audit mods" (initial) or "Update N mod(s)"
   // (after the v1.3.4 toolbar refactor); both are diagnostic — anything
-  // OTHER than "Download 1 update" means the cassette / fixture wiring is off.
+  // OTHER than "Review 1 update" means the provider projection or cassette
+  // fixture wiring is off.
   await driver.wait(
     async () => {
       const matches = await driver.findElements(
-        By.xpath("//*[contains(normalize-space(.), 'Download 1 update')]"),
+        By.xpath("//*[contains(normalize-space(.), 'Review 1 update')]"),
       );
       return matches.length > 0;
     },
     30_000,
-    'audit button never settled to "Download 1 update" — cassette/fixture wiring is off',
+    'audit button never settled to "Review 1 update" — provider projection or cassette/fixture wiring is off',
   );
 
-  // Also assert the green "Download update" pill rendered on the
+  // Also assert the provider-evidence review button rendered on the
   // QaTestMod row. Catches the case where the audit count comes back
-  // right but the per-row UI didn't update.
+  // right but the grouped provider plan did not reach the row.
   //
-  // Inner predicate uses `contains(.,'Download update')` rather than
-  // `contains(text(),...)`: the pill button is `<Download/> {t(...)}`,
-  // which React emits as two adjacent text nodes — XPath 1.0's
-  // node-set-to-string conversion would only see the first (whitespace)
-  // text node. See specModpackSwitchPreservesFreeze for the longer note.
+  // Match the current/target evidence as well as the provider label so this
+  // owns the source-aware row contract rather than merely finding any button.
   await waitForElement(
     driver,
-    By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//*[contains(.,'Download update')]"),
-    'Download-update pill on QaTestMod row',
+    By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//button[contains(.,'GitHub:') and contains(.,'v1.0.0') and contains(.,'v2.0.0')]"),
+    'GitHub provider-evidence review button on QaTestMod row',
     5_000,
   );
 }

@@ -429,7 +429,9 @@ export function LibraryRow({
   const showFrozenPill = !!mod?.pinned;
   const showSnoozedPill = !!audit?.snoozed;
   const workshopUpdatePending =
-    workshopRow && !!(mod?.workshop_update_pending || row.workshop_update_pending);
+    workshopRow &&
+    !updatePlans.some((plan) => plan.provider === 'steam') &&
+    !!(mod?.workshop_update_pending || row.workshop_update_pending);
   const auditError = audit?.error ?? null;
   const minGameViolated =
     !!mod?.min_game_version &&

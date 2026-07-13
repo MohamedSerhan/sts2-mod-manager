@@ -43,8 +43,8 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
       <AddModsMenu lib={lib} buttonClassName="gf-btn gf-btn-sm" />
       {(() => {
         const projection = projectProviderUpdates(auditResults ?? []);
-        const reviewCount = projection.reviewCount;
         const hasPending = projection.hasPending;
+        const hasSteamAdvisory = projection.pendingPlans.some((plan) => plan.provider === 'steam');
 
         if (auditing) {
           return (
@@ -73,7 +73,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           );
         }
 
-        if (!hasPending && reviewCount === 0) {
+        if (!hasPending) {
           return (
             <>
               <span className="gf-pill gf-pill-ok gf-pill-toolbar" title={t('mods.allUpToDate')}>
@@ -86,11 +86,29 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           );
         }
 
+        // Steam-managed plans remain available as row/review-sheet evidence,
+        // but they are not actionable downloads and must never become a
+        // misleading "Review 0 updates" toolbar action.
+        if (projection.actionableCount === 0) {
+          return (
+            <>
+              {hasSteamAdvisory && (
+                <span className="gf-pill gf-pill-update gf-pill-toolbar" title={t('mods.steamUpdateTitle')}>
+                  {t('mods.steamUpdateAvailable')}
+                </span>
+              )}
+              <Button variant="ghost" size="sm" onClick={handleCheckUpdates} title={t('mods.reaudit')}>
+                <RefreshCw size={14} /> {t('mods.reaudit')}
+              </Button>
+            </>
+          );
+        }
+
         return (
           <>
             <Button variant="primary" size="sm" onClick={() => setShowPlan(true)} title={t('mods.reviewUpdatesTitle')}>
               <ListChecks size={14} />
-              {t('mods.reviewUpdatesLabel', { count: reviewCount })}
+              {t('mods.reviewUpdatesLabel', { count: projection.actionableCount })}
             </Button>
             <Button variant="ghost" size="sm" onClick={handleCheckUpdates} title={t('mods.reaudit')}>
               <RefreshCw size={14} /> {t('mods.reaudit')}

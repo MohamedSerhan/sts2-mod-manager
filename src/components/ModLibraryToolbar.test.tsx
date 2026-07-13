@@ -26,7 +26,7 @@ function auditPlan(id: string, provider: 'github' | 'nexus' | 'steam', capabilit
 }
 
 describe('<ModLibraryToolbar>', () => {
-  it('reviews all eight provider plans, including Steam-managed updates', async () => {
+  it('counts actionable provider plans while retaining Steam evidence in the review sheet', async () => {
     const auditResults = [
       auditPlan('alice', 'nexus', 'manual', false),
       auditPlan('deckstats', 'github', 'downloadable', true),
@@ -58,9 +58,26 @@ describe('<ModLibraryToolbar>', () => {
 
     render(<AllProviders><Harness /></AllProviders>);
 
-    const review = screen.getByRole('button', { name: 'Review 8 updates' });
+    const review = screen.getByRole('button', { name: 'Review 5 updates' });
+    expect(screen.queryByRole('button', { name: 'Review 8 updates' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Download 2 updates' })).not.toBeInTheDocument();
     await user.click(review);
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('keeps Steam-only advisories out of the Review 0 toolbar action', () => {
+    const auditResults = [auditPlan('baselib', 'steam', 'steam-managed', false)];
+    const lib = {
+      auditResults, auditing: false, updatingAll: false, refreshing: false,
+      updateAllGithub: vi.fn(), handleRefresh: vi.fn(), handleCheckUpdates: vi.fn(),
+      openUpdatePlanSource: vi.fn(), unfreezeUpdatePlan: vi.fn(),
+      planSheetOpen: false, openPlanSheet: vi.fn(), closePlanSheet: vi.fn(),
+    } as unknown as ModLibrary;
+
+    render(<AllProviders><ModLibraryToolbar lib={lib} /></AllProviders>);
+
+    expect(screen.queryByRole('button', { name: 'Review 0 updates' })).not.toBeInTheDocument();
+    expect(screen.getByText('Steam Workshop Update')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Re-audit' })).toBeInTheDocument();
   });
 });

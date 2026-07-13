@@ -1376,7 +1376,7 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
     await screen.findAllByText('Watcher');
 
-    await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+    await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
 
     await waitFor(() => {
       expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
@@ -1429,7 +1429,7 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
     await screen.findAllByText('RitsuLib');
 
-    await chooseOption(user, /Choose version/i, /0\.2\.26 \(stored\)/i);
+    await chooseOption(user, /Choose version/i, /Stored version.*0\.2\.26/i);
 
     await waitFor(() => {
       expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
@@ -1481,19 +1481,19 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
 
     const picker = await screen.findByRole('combobox', { name: /Choose version/i });
-    expect(picker).toHaveTextContent(/0\.4\.41 \(active\)/i);
+    expect(picker).toHaveTextContent(/0\.4\.41/i);
     expect(picker).toHaveTextContent(/Steam Workshop/i);
     expect(within(picker).getByText('Steam Workshop')).toHaveClass('gf-version-option-source');
-    expect(picker.querySelector('.gf-version-option-main')).toHaveTextContent(/0\.4\.41 \(active\)/i);
+    expect(picker.querySelector('.gf-version-option-main')).toHaveTextContent(/0\.4\.41/i);
 
     await user.click(picker);
     const listbox = await screen.findByRole('listbox');
     expect(
       within(listbox).getByRole('option', {
-        name: /0\.4\.26 \(active\).*GitHub \+ Nexus/i,
+        name: /Stored version.*0\.4\.26.*GitHub \+ Nexus/i,
       }),
     ).toBeInTheDocument();
-    expect(within(listbox).getByRole('option', { name: /0\.4\.41 \(active\).*Steam Workshop/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Active version.*0\.4\.41.*Steam Workshop/i })).toBeInTheDocument();
     expect(within(listbox).getByText('Steam Workshop')).toHaveClass('gf-version-option-source');
     expect(within(listbox).getByText('GitHub + Nexus')).toHaveClass('gf-version-option-source');
     await user.keyboard('{Escape}');
@@ -1530,7 +1530,7 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
 
     const picker = await screen.findByRole('combobox', { name: /Choose version/i });
-    expect(picker).toHaveTextContent(/2\.0\.0 \(active\)/i);
+    expect(picker).toHaveTextContent(/2\.0\.0/i);
     expect(picker).toHaveTextContent(/Link/i);
     expect(picker).not.toHaveTextContent(/GitHub/i);
     expect(picker).not.toHaveTextContent(/Nexus/i);
@@ -1841,7 +1841,7 @@ describe('<LibraryTable modpackName={null}>', () => {
     const listbox = await screen.findByRole('listbox');
     expect(
       within(listbox).getByRole('option', {
-        name: /0\.4\.26 \(stored\).*GitHub \+ Nexus/i,
+        name: /Stored version.*0\.4\.26.*GitHub \+ Nexus/i,
       }),
     ).toBeInTheDocument();
     expect(within(listbox).getAllByText('GitHub + Nexus')[0]).toHaveClass('gf-version-option-source');
@@ -1879,10 +1879,10 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
 
     const picker = await screen.findByRole('combobox', { name: /Choose version/i });
-    expect(picker).toHaveTextContent(/1\.4\.3 \(active\)/i);
-    await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+    expect(picker).toHaveTextContent(/1\.4\.3/i);
+    await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
 
-    await waitFor(() => expect(picker).toHaveTextContent(/1\.3\.0 \(stored\)/i));
+    await waitFor(() => expect(picker).toHaveTextContent(/1\.3\.0/i));
     resolveSelect?.(mkModInfo({
       mod_version_id: 'watcher-130',
       name: 'Watcher',
@@ -1946,8 +1946,8 @@ describe('<LibraryTable modpackName={null}>', () => {
 
     const user = userEvent.setup();
     const listbox = await openSelect(user, /Choose version/i);
-    expect(within(listbox).getByRole('option', { name: /0\.3\.2 \(stored\)/i })).toBeInTheDocument();
-    expect(within(listbox).getByRole('option', { name: /0\.3\.1 \(active\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Stored version.*0\.3\.2/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Active version.*0\.3\.1/i })).toBeInTheDocument();
   });
 
   it('shows backend bundle options only on the owning bundle row', async () => {
@@ -2010,8 +2010,8 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(within(standaloneRow).queryByRole('combobox', { name: /Choose version/i })).toBeNull();
 
     const listbox = await openSelect(user, /Choose version/i);
-    expect(within(listbox).getByRole('option', { name: /2\.1\.0 \(stored\)/i })).toBeInTheDocument();
-    expect(within(listbox).getByRole('option', { name: /2\.0\.0 \(active\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Stored version.*2\.1\.0/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Active version.*2\.0\.0/i })).toBeInTheDocument();
   });
 
   it('shows cached-only GitHub update versions in the no-focus Library selector', async () => {
@@ -2059,8 +2059,8 @@ describe('<LibraryTable modpackName={null}>', () => {
 
     const user = userEvent.setup();
     const listbox = await openSelect(user, /Choose version/i);
-    expect(within(listbox).getByRole('option', { name: /1\.4\.3 \(stored\)/i })).toBeInTheDocument();
-    expect(within(listbox).getByRole('option', { name: /1\.4\.2 \(active\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Stored version.*1\.4\.3/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Active version.*1\.4\.2/i })).toBeInTheDocument();
   });
 
   it('collapses duplicate stored backend version options in the no-focus Library selector', async () => {
@@ -2131,9 +2131,9 @@ describe('<LibraryTable modpackName={null}>', () => {
 
     const user = userEvent.setup();
     const listbox = await openSelect(user, /Choose version/i);
-    expect(within(listbox).getByRole('option', { name: /3\.3\.1 \(stored\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Stored version.*3\.3\.1/i })).toBeInTheDocument();
     expect(within(listbox).getAllByRole('option', { name: /3\.2\.1/i })).toHaveLength(1);
-    expect(within(listbox).getByRole('option', { name: /3\.2\.1 \(active\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Active version.*3\.2\.1/i })).toBeInTheDocument();
   });
 
   it('renders rows without the storage chip or per-row Store button', async () => {
@@ -2668,10 +2668,10 @@ describe('<LibraryTable modpackName={null}>', () => {
       expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
       const user = userEvent.setup();
       const listbox = await openSelect(user, /Choose version/i);
-      expect(within(listbox).getByRole('option', { name: /1\.4\.3 \(active\)/i })).toBeInTheDocument();
-      expect(within(listbox).getByRole('option', { name: /1\.3\.0 \(stored\)/i })).toBeInTheDocument();
-      expect(within(listbox).getByRole('option', { name: /\? \(stored\)/i })).toBeInTheDocument();
-      await user.click(within(listbox).getByRole('option', { name: /1\.3\.0 \(stored\)/i }));
+      expect(within(listbox).getByRole('option', { name: /Active version.*1\.4\.3/i })).toBeInTheDocument();
+      expect(within(listbox).getByRole('option', { name: /Stored version.*1\.3\.0/i })).toBeInTheDocument();
+      expect(within(listbox).getByRole('option', { name: /Stored version.*\?/i })).toBeInTheDocument();
+      await user.click(within(listbox).getByRole('option', { name: /Stored version.*1\.3\.0/i }));
       await waitFor(() => {
         expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
           cmd: 'select_library_mod_version',
@@ -2737,7 +2737,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       const user = userEvent.setup();
       render(<Wrap modpackName="Stable" />);
 
-      await chooseOption(user, /Choose version/i, /1\.5\.0 \(stored\)/i);
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.5\.0/i);
 
       await waitFor(() => {
         expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
@@ -2798,9 +2798,9 @@ describe('<LibraryTable modpackName={null}>', () => {
       render(<Wrap modpackName="Stable" />);
 
       const listbox = await openSelect(user, /Choose version/i);
-      expect(within(listbox).getByRole('option', { name: /1\.2\.2 \(active\)/i })).toBeInTheDocument();
-      expect(within(listbox).getByRole('option', { name: /1\.2\.0 \(stored\)/i })).toBeInTheDocument();
-      expect(within(listbox).queryByRole('option', { name: /^0 \(stored\)$/i })).toBeNull();
+      expect(within(listbox).getByRole('option', { name: /Active version.*1\.2\.2/i })).toBeInTheDocument();
+      expect(within(listbox).getByRole('option', { name: /Stored version.*1\.2\.0/i })).toBeInTheDocument();
+      expect(within(listbox).queryByRole('option', { name: /Stored version.*^0$/i })).toBeNull();
     });
 
     it('shows modpack usage with the pinned version for each local version option', async () => {
@@ -3647,8 +3647,8 @@ describe('<LibraryTable modpackName={null}>', () => {
         />,
       );
       const picker = await screen.findByRole('combobox', { name: /Choose version/i });
-      await waitFor(() => expect(picker).toHaveTextContent(/1\.4\.3 \(active\)/i));
-      await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+      await waitFor(() => expect(picker).toHaveTextContent(/1\.4\.3/i));
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
       await waitFor(() => {
         expect(onSelectProfileVersion).toHaveBeenCalledWith(
           expect.objectContaining({ mod_version_id: 'watcher-143' }),
@@ -3695,7 +3695,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           onSelectProfileVersion={onSelectProfileVersion}
         />,
       );
-      await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
       await waitFor(() => expect(onSelectProfileVersion).toHaveBeenCalledWith(
         expect.objectContaining({ mod_version_id: 'watcher-143' }),
         expect.objectContaining({ mod_version_id: 'watcher-130' }),
@@ -3741,7 +3741,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           onSelectProfileVersion={onSelectProfileVersion}
         />,
       );
-      await chooseOption(user, /Choose version/i, /1\.4\.3 \(active\)/i);
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.4\.3/i);
       await waitFor(() => expect(onSelectProfileVersion).toHaveBeenCalledWith(
         expect.objectContaining({ mod_version_id: 'watcher-130' }),
         expect.objectContaining({ mod_version_id: 'watcher-143' }),
@@ -3780,7 +3780,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       });
       const user = userEvent.setup();
       render(<Wrap modpackName="Stable" />);
-      await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
       expect(await screen.findByText(/Could not select that version: disk switch failed/i)).toBeInTheDocument();
       expect(screen.getByText('Watcher')).toBeInTheDocument();
     });
@@ -3815,7 +3815,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       });
       const user = userEvent.setup();
       render(<Wrap modpackName="Stable" />);
-      await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
       expect(await screen.findByText(/Could not select that version: string failure/i)).toBeInTheDocument();
     });
 

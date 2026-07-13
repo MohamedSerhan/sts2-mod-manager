@@ -39,6 +39,14 @@ export function isWorkshopSource(entry: WorkshopSourceFields | null | undefined)
     || source.startsWith('steam://');
 }
 
+/** True only when Steam owns the installed artifact. A locally installed
+ * GitHub/Nexus copy can legitimately carry Workshop discovery metadata and
+ * must remain eligible for manager-owned update, repair, rollback, and delete
+ * actions. */
+export function isWorkshopOwned(entry: WorkshopSourceFields | null | undefined): boolean {
+  return entry?.install_source === 'steam_workshop';
+}
+
 function pushKey(keys: string[], value: string | null | undefined) {
   if (!value) return;
   const trimmed = value.trim();

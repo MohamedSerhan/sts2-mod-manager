@@ -1141,6 +1141,7 @@ export function ModpackDetail({
             if (q.trim()) setLibraryOpen(true);
           }}
           extraRows={missingProfileRows}
+          onReviewUpdates={() => setShowUpdatePlan(true)}
           {...lib.tableActionProps}
         />
       </section>

@@ -52,6 +52,7 @@ import { Toggle } from './Toggle';
 import { Select } from './Select';
 import { useRowMenu } from '../contexts/RowMenuContext';
 import { isUpToDate } from '../lib/auditState';
+import { isWorkshopSource } from '../lib/modIdentity';
 import {
   resolveRowMenuOrder,
   ROW_MENU_OPEN_EVENT,
@@ -86,20 +87,19 @@ export function libraryStorageKey(row: ProfileMembershipMod): string {
 }
 
 function hasWorkshopSource(row: ProfileMembershipMod, mod?: ModInfo | null): boolean {
-  const source = mod?.source ?? row.source ?? '';
-  return (
-    mod?.install_source === 'steam_workshop' ||
-    row.install_source === 'steam_workshop' ||
-    !!mod?.workshop_item_id ||
-    !!row.workshop_item_id ||
-    !!mod?.workshop_url ||
-    !!row.workshop_url ||
-    source.includes('steamcommunity.com/sharedfiles') ||
-    source.startsWith('steam://')
-  );
+  // Reuse the canonical helper so the "is this a Steam Workshop mod?"
+  // heuristic (install_source / workshop_item_id / workshop_url / source
+  // URL shape) stays in one place across the row, the useModLibrary hook,
+  // and the backend guards. Either the ModInfo or the membership row can
+  // carry the workshop-ness bits, so OR the two.
+  return isWorkshopSource(mod) || isWorkshopSource(row);
 }
 
 function isWorkshopOwned(row: ProfileMembershipMod, mod?: ModInfo | null): boolean {
+  // Stricter than hasWorkshopSource: only true when Steam actually owns
+  // the install (install_source === 'steam_workshop'). Drives delete
+  // guidance — we should not warn "Workshop-managed, use Steam" for a
+  // mod that merely carries a workshop URL in its notes.
   return mod?.install_source === 'steam_workshop' || row.install_source === 'steam_workshop';
 }
 
@@ -256,6 +256,10 @@ export interface LibraryRowProps {
   anyRecoveryInFlight?: boolean;
 
   onUpdate?: () => void;
+  /** Open the review sheet for a group of provider update plans. Wired
+   *  through from ModLibrary/ModpackDetail so the provider-evidence pills
+   *  on a row with pending plans stay clickable (never silently apply). */
+  onReviewUpdates?: () => void;
   onTogglePin?: () => void;
   onSnooze?: () => void;
   onUnsnooze?: () => void;
@@ -317,6 +321,7 @@ export function LibraryRow({
   anyUpdating = false,
   anyRecoveryInFlight = false,
   onUpdate = noop,
+  onReviewUpdates,
   onTogglePin = noop,
   onSnooze = noop,
   onUnsnooze = noop,
@@ -720,24 +725,51 @@ export function LibraryRow({
                     )}
                   </button>
                 )}
-                {updatePlans.map((plan) => (
-                  <span
-                    key={`${plan.target.mod_version_id ?? plan.target.folder_name ?? plan.target.name}:${plan.provider}`}
-                    className={`gf-pill gf-pill-update${plan.provider === 'steam' ? ' gf-pill-update-steam' : ''}`}
-                    title={plan.provider === 'steam'
-                      ? t('mods.steamUpdateTitle')
-                      : t(`mods.updatePlan.capability.${plan.capability}`)}
-                  >
-                    <AlertTriangle size={9} />
-                    {plan.provider === 'steam'
-                      ? t('mods.steamUpdateAvailable')
-                      : t('mods.providerUpdateEvidence', {
-                          provider: providerLabel(plan.provider),
-                          current: cleanVersion(plan.current_version),
-                          target: cleanVersion(plan.target_version) || t('unknown'),
-                        })}
-                  </span>
-                ))}
+                {updatePlans.map((plan) => {
+                  const pillKey = `${plan.target.mod_version_id ?? plan.target.folder_name ?? plan.target.name}:${plan.provider}`;
+                  const pillClassName = `gf-pill gf-pill-update${plan.provider === 'steam' ? ' gf-pill-update-steam' : ''}`;
+                  const pillTitle = plan.provider === 'steam'
+                    ? t('mods.steamUpdateTitle')
+                    : t(`mods.updatePlan.capability.${plan.capability}`);
+                  const pillContent = (
+                    <>
+                      <AlertTriangle size={9} />
+                      {plan.provider === 'steam'
+                        ? t('mods.steamUpdateAvailable')
+                        : t('mods.providerUpdateEvidence', {
+                            provider: providerLabel(plan.provider),
+                            current: cleanVersion(plan.current_version),
+                            target: cleanVersion(plan.target_version) || t('unknown'),
+                          })}
+                    </>
+                  );
+                  // When a review-updates callback is wired, expose the pill as
+                  // an interactive button so the row has an affordance to open
+                  // the review sheet. Without a callback we fall back to the
+                  // original inert <span> (backward compatible for callers that
+                  // only want the evidence, not the click).
+                  if (onReviewUpdates) {
+                    return (
+                      <button
+                        type="button"
+                        key={pillKey}
+                        className={pillClassName}
+                        title={pillTitle}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onReviewUpdates();
+                        }}
+                      >
+                        {pillContent}
+                      </button>
+                    );
+                  }
+                  return (
+                    <span key={pillKey} className={pillClassName} title={pillTitle}>
+                      {pillContent}
+                    </span>
+                  );
+                })}
                 {showBlockedPill && (
                   <span
                     className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"

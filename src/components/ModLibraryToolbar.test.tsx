@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -36,14 +37,26 @@ describe('<ModLibraryToolbar>', () => {
       auditPlan('ritsulib', 'steam', 'steam-managed', false),
       auditPlan('mspain', 'steam', 'steam-managed', false),
     ];
-    const lib = {
-      auditResults, auditing: false, updatingAll: false, refreshing: false,
-      updateAllGithub: vi.fn(), handleRefresh: vi.fn(), handleCheckUpdates: vi.fn(),
-      openUpdatePlanSource: vi.fn(), unfreezeUpdatePlan: vi.fn(),
-    } as unknown as ModLibrary;
     const user = userEvent.setup();
 
-    render(<AllProviders><ModLibraryToolbar lib={lib} /></AllProviders>);
+    // The plan-sheet visibility now lives on the hook (F7) so per-row
+    // provider pills can open the same sheet. The mock lib needs its
+    // own tiny useState-backed pair so the toolbar's Review click can
+    // actually toggle the sheet open in this unit-test seam.
+    function Harness() {
+      const [planSheetOpen, setPlanSheetOpen] = useState(false);
+      const lib = {
+        auditResults, auditing: false, updatingAll: false, refreshing: false,
+        updateAllGithub: vi.fn(), handleRefresh: vi.fn(), handleCheckUpdates: vi.fn(),
+        openUpdatePlanSource: vi.fn(), unfreezeUpdatePlan: vi.fn(),
+        planSheetOpen,
+        openPlanSheet: () => setPlanSheetOpen(true),
+        closePlanSheet: () => setPlanSheetOpen(false),
+      } as unknown as ModLibrary;
+      return <ModLibraryToolbar lib={lib} />;
+    }
+
+    render(<AllProviders><Harness /></AllProviders>);
 
     const review = screen.getByRole('button', { name: 'Review 8 updates' });
     expect(screen.queryByRole('button', { name: 'Download 2 updates' })).not.toBeInTheDocument();

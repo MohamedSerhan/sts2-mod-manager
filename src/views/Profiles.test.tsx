@@ -965,7 +965,14 @@ describe('<ProfilesView>', () => {
     });
   });
 
-  it('drift banner reports residual production drift without a false success toast', async () => {
+  it('drift banner reports residual production drift as a warning alongside the success summary', async () => {
+    // Partial success: the save applied SOME drift (state updated) but the
+    // live loadout still doesn't match the saved manifest. The success
+    // summary must still fire (it names what was added/removed) and a
+    // separate info-severity toast must warn about the leftover diff.
+    // The old behavior — silently swallowing the success summary or
+    // (worse) firing the red "Couldn't save changes" toast — hid the
+    // useful diagnostic from the user.
     seedProfiles([baseProfile({ name: 'DriftedPack' })]);
     registerInvokeHandler('get_active_profile', () => 'DriftedPack');
     registerInvokeHandler('get_profile_drift', () => ({
@@ -983,8 +990,11 @@ describe('<ProfilesView>', () => {
     await user.click(await screen.findByRole('button', { name: /Save changes/i }));
 
     expect(await screen.findByText(/still does not match the saved modpack/i)).toBeInTheDocument();
+    // Success toast MUST still fire — the save persisted state, and
+    // hiding the added/removed summary made the outcome confusing.
+    expect(await screen.findByText(/Saved changes to "DriftedPack"/)).toBeInTheDocument();
+    // The failure toast (which the old throw path triggered) MUST NOT fire.
     expect(screen.queryByText(/Couldn't save changes/i)).toBeNull();
-    expect(screen.queryByText(/Saved changes to "DriftedPack"/)).toBeNull();
   });
 
   it('drift banner Save changes names the mods dropped from the pack (FB-C)', async () => {

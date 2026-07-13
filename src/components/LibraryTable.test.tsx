@@ -1630,6 +1630,70 @@ describe('<LibraryTable modpackName={null}>', () => {
     }
   });
 
+  it('renders provider-evidence pills as clickable buttons that fire onReviewUpdates (F7)', async () => {
+    // Regression: when a row has pending provider plans (nexus/steam),
+    // the update-affordance pills used to render as inert <span>s, so
+    // the ROW lost any way to open the review sheet — the user had to
+    // scroll back up to the toolbar's "Review updates" button. Wiring
+    // onReviewUpdates promotes the pills to buttons; clicks fire the
+    // callback and never silently apply.
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'evidence-local',
+        name: 'EvidenceMod',
+        version: '0.9.0',
+        folder_name: 'EvidenceMod',
+        mod_id: 'evidence-mod',
+        enabled: true,
+        github_url: 'https://github.com/example/evidence-mod',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+      }),
+    ]);
+    const auditByKey = new Map<string, ModAuditEntry>([
+      ['evidence-local', entryAudit('EvidenceMod', {
+        mod_version_id: 'evidence-local',
+        folder_name: 'EvidenceMod',
+        needs_update: true,
+        update_source: 'nexus',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+        nexus_update_available: true,
+        update_plans: [
+          {
+            target: { name: 'EvidenceMod', mod_version_id: 'evidence-local' },
+            current_version: '0.9.0',
+            target_version: '1.1.0',
+            provider: 'nexus',
+            source: 'https://www.nexusmods.com/slaythespire2/mods/42',
+            capability: 'manual' as const,
+            reason: '',
+            selectable: false,
+            pending: true,
+          },
+        ],
+      })],
+    ]);
+    const onReviewUpdates = vi.fn();
+    render(
+      <Wrap
+        modpackName={null}
+        auditByKey={auditByKey}
+        onReviewUpdates={onReviewUpdates}
+      />,
+    );
+
+    const row = await screen.findByTestId('library-row');
+    // The Nexus provider-evidence pill must now be a real <button> —
+    // asserts both the DOM element type and the wired click handler.
+    const pill = within(row).getByRole('button', { name: /Nexus.*0\.9\.0.*1\.1\.0/i });
+    expect(pill).toBeInTheDocument();
+    expect(pill.tagName).toBe('BUTTON');
+    fireEvent.click(pill);
+    expect(onReviewUpdates).toHaveBeenCalledTimes(1);
+    // Silent apply guard: clicking the pill must never trigger the
+    // per-row inline update path (Bug regression: gated a click through).
+    expect(getInvokeCalls().some((call) => call.cmd === 'update_mod')).toBe(false);
+  });
+
   it('guides Steam deletion to the exact removable local sibling without deleting it', async () => {
     const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
     registerInvokeHandler('get_installed_mods', () => [

@@ -431,6 +431,28 @@ describe('useModLibrary', () => {
     expect(openUrl).not.toHaveBeenCalled();
   });
 
+  it('keeps locally owned GitHub mods actionable when they also reference Workshop', async () => {
+    const githubMod = makeMod({
+      name: 'DualPublishedMod',
+      folder_name: 'DualPublishedMod',
+      install_source: 'local',
+      github_url: 'https://github.com/example/dual-published-mod',
+      workshop_url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=1234567890',
+    });
+    registerInvokeHandler('update_mod', () => makeMod({
+      ...githubMod,
+      version: '2.0.0',
+    }));
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(githubMod);
+    });
+
+    expect(updateModCalls()).toHaveLength(1);
+    expect(screen.queryByText(/Steam Workshop manages/i)).not.toBeInTheDocument();
+  });
+
   it('handleInlineUpdate opens Nexus files as a fallback when GitHub update fails', async () => {
     const bothSourceMod = makeMod({
       name: 'Route Planner',

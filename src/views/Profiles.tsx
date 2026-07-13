@@ -785,10 +785,17 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
       await refreshAll();
       await loadProfiles();
       bumpRevision();
-      if (residualDrift?.has_drift) {
-        toastCtx.info(t('profiles.drift.residualAfterSave'));
-        return;
-      }
+      // A partial success — the save applied SOME drift but the live
+      // loadout still doesn't match the saved manifest — is still a
+      // success (the state updates above ran and are what the user
+      // came for). Surface both toasts: the normal success summary
+      // (what was added/removed) AND a warning-style info toast that
+      // tells the user to review the remaining diff. Do NOT bail out
+      // before the success toast — the previous behavior silently
+      // hid the added/removed summary in this branch, and its
+      // predecessor (a thrown Error) turned it into a red "Couldn't
+      // save changes" toast the catch block ran, which was wrong for
+      // a save that actually persisted state.
       const base = shareInfoMap[targetKey]
         ? t('profiles.toast.savedChangesWithReShare', { name: targetName })
         : t('profiles.toast.savedChanges', { name: targetName });
@@ -802,6 +809,11 @@ export function ProfilesView({ onGoToSettings, openActiveModpackSignal = 0, init
         parts.push(t('common.parts.removedWithList', { count: removed.length, list: removed.join(', ') }));
       }
       toastCtx.success(parts.length > 0 ? `${base} ${parts.join(', ')}` : base);
+      if (residualDrift?.has_drift) {
+        // ToastContext has no dedicated "warning" severity; `info` is the
+        // right non-destructive callout here (the save succeeded).
+        toastCtx.info(t('profiles.drift.residualAfterSave'));
+      }
     } catch (e) {
       toastCtx.error(t('profiles.toast.saveFailed', { error: e instanceof Error ? e.message : String(e) }));
     } finally {

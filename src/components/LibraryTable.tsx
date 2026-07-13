@@ -189,6 +189,11 @@ export interface LibraryTableProps {
   anyRecoveryInFlight?: boolean;
 
   onUpdate?: (mod: ModInfo) => void;
+  /** Fired when the user clicks a provider-evidence update pill on a row
+   *  that has pending update plans. Opens the update review sheet so the
+   *  user can pick + apply — never silently applies. Optional so the
+   *  Library view keeps the pills inert when nothing else is wired. */
+  onReviewUpdates?: () => void;
   onTogglePin?: (mod: ModInfo) => void;
   onSnooze?: (mod: ModInfo, audit: ModAuditEntry | undefined) => void;
   onUnsnooze?: (mod: ModInfo) => void;
@@ -509,6 +514,7 @@ export function LibraryTable({
   anyUpdating,
   anyRecoveryInFlight,
   onUpdate,
+  onReviewUpdates,
   onTogglePin,
   onSnooze,
   onUnsnooze,
@@ -1910,6 +1916,7 @@ export function LibraryTable({
               mod={modInfo}
               audit={audit}
               updatePlans={updatePlans}
+              onReviewUpdates={updatePlans.length > 0 ? onReviewUpdates : undefined}
               removableLocalVersion={guidedDelete?.rowKey === rowKey && guidedDelete.versionKey === removableLocalVersion?.key ? removableLocalVersion : undefined}
               onClearDeleteGuidance={() => setGuidedDelete(null)}
               gameRunning={gameRunning}

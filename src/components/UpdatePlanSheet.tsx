@@ -39,12 +39,60 @@ export function UpdatePlanSheet({ plans, applying, onApply, onClose, onOpenSourc
             {plans.map((plan) => {
               const key = planKey(plan);
               const result = results?.find((item) => planKey({ ...plan, target: item.target }) === key);
-              return <div className="gf-update-plan-row" key={key}>
-                {plan.selectable && !results ? <input type="checkbox" checked={selected.has(key)} onChange={(event) => setSelected((old) => { const next = new Set(old); event.target.checked ? next.add(key) : next.delete(key); return next; })} aria-label={t('mods.updatePlan.selectItem', { name: plan.target.name })} /> : <span className="gf-update-plan-marker" aria-hidden>{plan.capability === 'frozen' ? <Snowflake size={15} /> : null}</span>}
-                <div className="gf-update-plan-copy"><strong>{plan.target.name}</strong>{plan.capability !== 'steam-managed' && <span>{t('mods.updatePlan.versionChange', { current: plan.current_version, target: plan.target_version ?? t('unknown') })}</span>}<span>{result ? t(`mods.updatePlan.result.${result.status}`) : t(`mods.updatePlan.capability.${plan.capability}`)}</span></div>
-                {plan.capability === 'manual' && plan.source && <button className="gf-btn-3 gf-btn-sm" onClick={() => void onOpenSource(plan.source!)}><ExternalLink size={13} />{t('mods.updatePlan.openManual')}</button>}
-                {plan.capability === 'frozen' && <button className="gf-btn-3 gf-btn-sm" onClick={() => void onUnfreeze(plan)}>{t('mods.updatePlan.unfreeze')}</button>}
-              </div>;
+              const handleToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+                setSelected((old) => {
+                  const next = new Set(old);
+                  if (event.target.checked) {
+                    next.add(key);
+                  } else {
+                    next.delete(key);
+                  }
+                  return next;
+                });
+              };
+              return (
+                <div className="gf-update-plan-row" key={key}>
+                  {plan.selectable && !results ? (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(key)}
+                      onChange={handleToggle}
+                      aria-label={t('mods.updatePlan.selectItem', { name: plan.target.name })}
+                    />
+                  ) : (
+                    <span className="gf-update-plan-marker" aria-hidden>
+                      {plan.capability === 'frozen' ? <Snowflake size={15} /> : null}
+                    </span>
+                  )}
+                  <div className="gf-update-plan-copy">
+                    <strong>{plan.target.name}</strong>
+                    {plan.capability !== 'steam-managed' && (
+                      <span>
+                        {t('mods.updatePlan.versionChange', {
+                          current: plan.current_version,
+                          target: plan.target_version ?? t('unknown'),
+                        })}
+                      </span>
+                    )}
+                    <span>
+                      {result
+                        ? t(`mods.updatePlan.result.${result.status}`)
+                        : t(`mods.updatePlan.capability.${plan.capability}`)}
+                    </span>
+                  </div>
+                  {plan.capability === 'manual' && plan.source && (
+                    <button className="gf-btn-3 gf-btn-sm" onClick={() => void onOpenSource(plan.source!)}>
+                      <ExternalLink size={13} />
+                      {t('mods.updatePlan.openManual')}
+                    </button>
+                  )}
+                  {plan.capability === 'frozen' && (
+                    <button className="gf-btn-3 gf-btn-sm" onClick={() => void onUnfreeze(plan)}>
+                      {t('mods.updatePlan.unfreeze')}
+                    </button>
+                  )}
+                </div>
+              );
             })}
           </div>
         </div>

@@ -11,7 +11,6 @@
  * view can position them in its own body.
  */
 import { useTranslation } from 'react-i18next';
-import { useState } from 'react';
 import { ClipboardCheck, ListChecks, RefreshCw } from 'lucide-react';
 
 import { Button } from './Button';
@@ -22,7 +21,11 @@ import { UpdatePlanSheet } from './UpdatePlanSheet';
 
 export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
   const { t } = useTranslation();
-  const [showPlan, setShowPlan] = useState(false);
+  // Sheet visibility lives on the hook so the per-row provider-evidence
+  // pills can open the same sheet (F7). Keep the same local var names
+  // here for a minimum-diff render body.
+  const showPlan = lib.planSheetOpen;
+  const setShowPlan = (open: boolean) => (open ? lib.openPlanSheet() : lib.closePlanSheet());
   const {
     auditResults,
     auditing,

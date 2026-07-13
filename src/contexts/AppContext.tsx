@@ -344,8 +344,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updatingAll || selectedPlans.length === 0) return [];
     setUpdatingAll(true);
     try {
-      const results = await updateAllMods(selectedPlans.map((plan) => ({ target: plan.target, expected_version: plan.target_version ?? '', provider: plan.provider })), opts?.profileId ?? null);
-      const updated = results.flatMap((result) => result.updated_mod ? [result.updated_mod] : []);
+      const results = await updateAllMods(
+        selectedPlans.map((plan) => ({
+          target: plan.target,
+          expected_version: plan.target_version ?? '',
+          provider: plan.provider,
+        })),
+        opts?.profileId ?? null,
+      );
+      const updated = results.flatMap((result) => (result.updated_mod ? [result.updated_mod] : []));
       if (updated.length > 0) setLibraryVersionRevision((n) => n + 1);
       await opts?.afterUpdate?.(updated);
       if (updated.length > 0) toast.success(t('app.updated', { count: updated.length }));

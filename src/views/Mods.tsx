@@ -256,6 +256,7 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
         modpackLabel={activeProfileLabel}
         priorityTag={priorityTag}
         reloadToken={`bulk:${bulkReloadNonce}|versions:${lib.versionOptionsReloadToken}`}
+        onReviewUpdates={lib.openPlanSheet}
         {...tableActionProps}
       />
         </>

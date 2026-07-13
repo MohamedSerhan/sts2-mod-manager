@@ -22,12 +22,19 @@ describe('<UpdatePlanSheet>', () => {
       plan('Frozen Mod', 'frozen-a', 'frozen', 'github', '5.0.0'),
     ];
     const onApply = vi.fn(async () => []);
-    render(<AllProviders><UpdatePlanSheet plans={plans} applying={false} onApply={onApply} onClose={vi.fn()} onOpenSource={vi.fn()} onUnfreeze={vi.fn()} /></AllProviders>);
+    const onOpenSource = vi.fn(async () => undefined);
+    const onUnfreeze = vi.fn(async () => undefined);
+    render(<AllProviders><UpdatePlanSheet plans={plans} applying={false} onApply={onApply} onClose={vi.fn()} onOpenSource={onOpenSource} onUnfreeze={onUnfreeze} /></AllProviders>);
 
     expect(screen.getByText('Manual download')).toBeInTheDocument();
     expect(screen.getByText('Managed in Steam')).toBeInTheDocument();
     expect(screen.queryByText(/1234567890123456789/)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Unfreeze' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Open manual page' }));
+    expect(onOpenSource).toHaveBeenCalledWith('https://www.nexusmods.com/slaythespire2/mods/1');
+    await user.click(screen.getByRole('button', { name: 'Unfreeze' }));
+    expect(onUnfreeze).toHaveBeenCalledWith(expect.objectContaining({
+      target: expect.objectContaining({ mod_version_id: 'frozen-a' }),
+    }));
     const sameNameChecks = screen.getAllByRole('checkbox', { name: 'Select Same Name' });
     await user.click(sameNameChecks[1]);
     await user.click(screen.getByRole('button', { name: 'Download 1 selected GitHub update to Versions' }));

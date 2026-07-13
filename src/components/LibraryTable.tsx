@@ -43,13 +43,14 @@ import {
   libraryStorageKey,
   membershipDisplayName,
   membershipRowKey,
+  type StoredVersionGuidance,
 } from './LibraryRow';
 import { ModViewToggle, useModListDensity } from './ModViewToggle';
 import { usePinScroll } from '../hooks/usePinScroll';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
-import { isActionableUpdate } from '../lib/auditState';
+import { projectProviderUpdates } from '../lib/auditState';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
 import { profileDisplayName } from '../lib/profileDisplay';
 import { Select } from './Select';
@@ -192,7 +193,7 @@ export interface LibraryTableProps {
   onUnsnooze?: (mod: ModInfo) => void;
   onRepair?: (mod: ModInfo) => void;
   onRollback?: (mod: ModInfo) => void;
-  onDelete?: (mod: ModInfo) => void;
+  onDelete?: (mod: ModInfo, removableLocalVersion?: StoredVersionGuidance) => void;
   onCopyVersion?: (mod: ModInfo) => void;
   onOpenThisModFolder?: (mod: ModInfo) => void;
   onEditSources?: (mod: ModInfo) => void;
@@ -717,6 +718,35 @@ export function LibraryTable({
     [modInfoByKey],
   );
 
+  const logicalRowsByKey = useMemo(() => {
+    const groups = new Map<string, ProfileMembershipMod[]>();
+    for (const row of effectiveGrid?.mods ?? []) {
+      const key = logicalModKey(row, modInfoForRow(row));
+      const group = groups.get(key) ?? [];
+      group.push(row);
+      groups.set(key, group);
+    }
+    return groups;
+  }, [effectiveGrid, modInfoForRow]);
+
+  const groupRowsFor = useCallback((row: ProfileMembershipMod) =>
+    logicalRowsByKey.get(logicalModKey(row, modInfoForRow(row))) ?? [row],
+  [logicalRowsByKey, modInfoForRow]);
+
+  const groupAuditsFor = useCallback((row: ProfileMembershipMod) => {
+    const seen = new Set<ModAuditEntry>();
+    const entries: ModAuditEntry[] = [];
+    for (const member of groupRowsFor(row)) {
+      const audit = auditByKey?.get(membershipRowKey(member)) ??
+        auditByKey?.get(member.folder_name ?? '') ?? auditByKey?.get(member.name);
+      if (audit && !seen.has(audit)) {
+        seen.add(audit);
+        entries.push(audit);
+      }
+    }
+    return entries;
+  }, [auditByKey, groupRowsFor]);
+
   const duplicateSourceConflictKeys = useMemo(() => {
     if (!effectiveGrid) return new Set<string>();
     const groups = new Map<
@@ -843,10 +873,6 @@ export function LibraryTable({
     ) =>
       loadOrderIndex(a) - loadOrderIndex(b) ||
       compareMembershipDisplayName(a, b);
-    const auditForRow = (row: ProfileMembershipMod) =>
-      auditByKey?.get(membershipRowKey(row)) ??
-      auditByKey?.get(row.folder_name ?? '') ??
-      auditByKey?.get(row.name);
     const searchedRows = query
       ? preFiltered.filter((row) => {
           // Tags are part of the haystack so "anime" finds every mod the
@@ -934,8 +960,8 @@ export function LibraryTable({
         return compareMembershipDisplayName(a, b);
       }
       if (sort === 'updatesFirst') {
-        const au = isActionableUpdate(auditForRow(a));
-        const bu = isActionableUpdate(auditForRow(b));
+        const au = projectProviderUpdates(groupAuditsFor(a)).hasPending;
+        const bu = projectProviderUpdates(groupAuditsFor(b)).hasPending;
         if (au !== bu) return au ? -1 : 1;
         return compareMembershipDisplayName(a, b);
       }
@@ -971,6 +997,7 @@ export function LibraryTable({
     modInfoForRow,
     loadOrderDraft,
     auditByKey,
+    groupAuditsFor,
     packScoped,
     packVisualSortEnabled,
   ]);
@@ -1710,11 +1737,39 @@ export function LibraryTable({
           const rowKey = membershipRowKey(row);
           const modInfo = modInfoForRow(row);
           const audit = auditByKey?.get(rowKey) ?? auditByKey?.get(row.name);
+          const updatePlans = projectProviderUpdates(groupAuditsFor(row)).pendingPlans;
           const sourceEditorSlot =
             modInfo && renderSourceEditor
               ? renderSourceEditor(modInfo)
               : undefined;
           const versionRows = versionOptionsByKey.get(rowKey) ?? [];
+          const representativeIsWorkshop = modInfo?.install_source === 'steam_workshop' ||
+            !!modInfo?.workshop_item_id || !!modInfo?.workshop_url ||
+            !!modInfo?.source?.includes('steamcommunity.com/sharedfiles') ||
+            row.install_source === 'steam_workshop' || !!row.workshop_item_id ||
+            !!row.workshop_url || !!row.source?.includes('steamcommunity.com/sharedfiles');
+          const removableLocalOption = representativeIsWorkshop
+            ? versionRows.find((option) => !!option.github_url || !!option.nexus_url || option.install_source === 'local')
+            : undefined;
+          const removableLocalRow = representativeIsWorkshop && !removableLocalOption
+            ? groupRowsFor(row).find((member) => {
+                if (membershipRowKey(member) === rowKey) return false;
+                const info = modInfoForRow(member);
+                return member.install_source !== 'steam_workshop' && info?.install_source !== 'steam_workshop';
+              })
+            : undefined;
+          const removableLocalInfo = removableLocalRow ? modInfoForRow(removableLocalRow) : undefined;
+          const removableSourceKeys = [
+            removableLocalOption?.github_url || removableLocalInfo?.github_url || removableLocalRow?.github_url ? 'gitHub' : null,
+            removableLocalOption?.nexus_url || removableLocalInfo?.nexus_url || removableLocalRow?.nexus_url ? 'nexus' : null,
+          ].filter((key): key is string => !!key);
+          const removableLocalVersion = removableLocalOption || removableLocalRow ? {
+            key: removableLocalOption?.mod_version_id ?? membershipRowKey(removableLocalRow!),
+            version: removableLocalOption?.version ?? removableLocalRow!.version,
+            sourceLabel: removableSourceKeys.length
+              ? removableSourceKeys.map((key) => t(`mods.versionSource.${key}`)).join(t('mods.versionSource.joiner'))
+              : t('mods.local'),
+          } : undefined;
           const rowActionHandlers = modInfo
             ? {
                 onUpdate: onUpdate ? () => onUpdate(modInfo) : undefined,
@@ -1725,7 +1780,7 @@ export function LibraryTable({
                 onUnsnooze: onUnsnooze ? () => onUnsnooze(modInfo) : undefined,
                 onRepair: onRepair ? () => onRepair(modInfo) : undefined,
                 onRollback: onRollback ? () => onRollback(modInfo) : undefined,
-                onDelete: onDelete ? () => onDelete(modInfo) : undefined,
+                onDelete: onDelete ? () => onDelete(modInfo, removableLocalVersion) : undefined,
                 onCopyVersion: onCopyVersion
                   ? () => onCopyVersion(modInfo)
                   : undefined,
@@ -1833,6 +1888,8 @@ export function LibraryTable({
               onToggleStorage={handleToggleStorage}
               mod={modInfo}
               audit={audit}
+              updatePlans={updatePlans}
+              removableLocalVersion={removableLocalVersion}
               gameRunning={gameRunning}
               gameVersion={gameVersion}
               isUpdating={!!modInfo && updatingKey === rowKey}

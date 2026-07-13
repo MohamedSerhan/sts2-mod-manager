@@ -1381,6 +1381,11 @@ body {
   padding: 0;
   flex: 0 0 auto;
 }
+.gf-version-manage.is-guided {
+  color: var(--ember-bright);
+  border-color: var(--ember-bright);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ember-bright) 28%, transparent);
+}
 .gf-version-manager {
   width: min(560px, calc(100vw - 32px));
 }

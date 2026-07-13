@@ -30,6 +30,7 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { SourceEditor } from '../components/SourceEditor';
 import { AutoDetectModal } from '../components/AutoDetectModal';
+import type { StoredVersionGuidance } from '../components/LibraryRow';
 import { nexusFilesUrl } from '../lib/nexusUrl';
 import { loadAutoAddInstallsToModpack } from '../lib/installPolicy';
 import { auditEntryKeys, auditTargetForMod } from '../lib/auditState';
@@ -471,9 +472,15 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     }
   }
 
-  async function handleDelete(mod: ModInfo) {
+  async function handleDelete(mod: ModInfo, removableLocalVersion?: StoredVersionGuidance) {
     if (isWorkshopMod(mod)) {
-      toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
+      toast.info(removableLocalVersion
+        ? t('mods.toast.workshopManagedWithLocal', {
+            name: displayNameFor(mod),
+            source: removableLocalVersion.sourceLabel,
+            version: removableLocalVersion.version.replace(/^v/i, ''),
+          })
+        : t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
       return;
     }
     const ok = await confirm({

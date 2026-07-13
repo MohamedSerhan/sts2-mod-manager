@@ -16,7 +16,7 @@ import { ClipboardCheck, Download, RefreshCw } from 'lucide-react';
 
 import { Button } from './Button';
 import { AddModsMenu } from './AddModsMenu';
-import { countGithubUpdates, isGithubBulkUpdate } from '../lib/auditState';
+import { isGithubBulkUpdate, projectProviderUpdates } from '../lib/auditState';
 import type { ModLibrary } from '../hooks/useModLibrary';
 import { UpdatePlanSheet } from './UpdatePlanSheet';
 
@@ -39,11 +39,11 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           matches the modpack view's "+ Add mods" dropdown. */}
       <AddModsMenu lib={lib} buttonClassName="gf-btn gf-btn-sm" />
       {(() => {
-        const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
-        const plans = (auditResults ?? []).flatMap((entry) => entry.update_plan ? [entry.update_plan] : []);
+        const projection = projectProviderUpdates(auditResults ?? []);
+        const ghUpdateCount = projection.downloadableCount;
+        const plans = projection.pendingPlans;
         const legacyNames = (auditResults ?? []).filter((entry) => !entry.update_plan && isGithubBulkUpdate(entry)).map((entry) => entry.mod_name);
-        const pendingPlans = plans.filter((plan) => plan.selectable || plan.capability === 'manual' || plan.capability === 'steam-managed' || plan.capability === 'frozen');
-        const hasPending = pendingPlans.some((plan) => plan.selectable || plan.target_version);
+        const hasPending = projection.hasPending;
 
         if (auditing) {
           return (
@@ -103,7 +103,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
         <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
         {refreshing ? t('common.refreshing') : t('common.refresh')}
       </Button>
-      {showPlan && <UpdatePlanSheet plans={(auditResults ?? []).flatMap((entry) => entry.update_plan ? [entry.update_plan] : [])} applying={updatingAll} onApply={updateAllGithub} onClose={() => setShowPlan(false)} onOpenSource={lib.openUpdatePlanSource} onUnfreeze={lib.unfreezeUpdatePlan} />}
+      {showPlan && <UpdatePlanSheet plans={projectProviderUpdates(auditResults ?? []).pendingPlans} applying={updatingAll} onApply={updateAllGithub} onClose={() => setShowPlan(false)} onOpenSource={lib.openUpdatePlanSource} onUnfreeze={lib.unfreezeUpdatePlan} />}
     </div>
   );
 }

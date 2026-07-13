@@ -837,6 +837,23 @@ describe('useModLibrary', () => {
     expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
   });
 
+  it('protects Steam deletion while naming the exact removable local sibling', async () => {
+    const steamMod = makeMod({
+      name: 'RitsuLib', mod_version_id: 'ritsu-steam', version: '0.4.41',
+      install_source: 'steam_workshop', workshop_item_id: '3747602295',
+    });
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onDelete(steamMod, {
+        key: 'ritsu-local', version: '0.4.40', sourceLabel: 'GitHub + Nexus',
+      });
+    });
+
+    expect(await screen.findByText(/RitsuLib.*GitHub \+ Nexus.*v0\.4\.40.*Manage stored versions/i)).toBeInTheDocument();
+    expect(getInvokeCalls().some((call) => call.cmd === 'delete_mod_cmd' || call.cmd === 'remove_library_mod_version')).toBe(false);
+  });
+
   it('delete sync carries the version and source identity hints when the removed mod has them', async () => {
     const richMod = makeMod({
       name: 'PackMod',

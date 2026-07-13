@@ -1489,6 +1489,7 @@
     "latest": "Latest",
     "latestTitle": "On the source's latest installable release.",
     "updateAvailable": "Download update → v{{version}}",
+    "providerUpdateEvidence": "{{provider}}: v{{current}} → v{{target}}",
     "updateClickTitle": "Download v{{target}} into Versions. Your active install and modpacks stay on v{{current}} until you choose a version.",
     "updateFailureRecovery": {
       "title": "Could not install update for {{name}}",
@@ -1576,6 +1577,7 @@
       "deleted": "Deleted: {{name}}",
       "deleteFailed": "Failed to delete {{name}}: {{error}}",
       "workshopManaged": "{{name}} is managed by Steam Workshop. Open it in Steam to update, repair, or unsubscribe.",
+      "workshopManagedWithLocal": "{{name}} is managed by Steam Workshop. A removable {{source}} version (v{{version}}) is also stored locally; use Manage stored versions to remove that exact copy.",
       "versionRemoved": "Removed {{name}} v{{version}} from Versions",
       "versionManualRemoved": "Removed {{name}} v{{version}} and updated {{profiles}} modpack(s)",
       "versionRemoveFailed": "Could not remove v{{version}}: {{error}}",
@@ -1661,6 +1663,7 @@
       "joiner": " + "
     },
     "versionManageTitle": "Manage stored versions",
+    "versionManageGuided": "Manage stored versions — removable {{source}} v{{version}} available",
     "versionManageHeading": "Manage versions for {{mod}}",
     "versionManageSub": "Remove older stored versions you no longer need. Active or modpack-used versions open a guided removal.",
     "versionActiveStatus": "Active in game",

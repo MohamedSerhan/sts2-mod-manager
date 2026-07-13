@@ -1489,6 +1489,7 @@
     "latest": "الأحدث",
     "latestTitle": "على أحدث إصدار قابل للتثبيت من المصدر.",
     "updateAvailable": "تنزيل التحديث → v{{version}}",
+    "providerUpdateEvidence": "{{provider}}: من v{{current}} إلى v{{target}}",
     "updateClickTitle": "نزّل v{{target}} إلى قائمة الإصدارات. سيبقى التثبيت الحالي وحِزم المودات على v{{current}} إلى أن تختار إصدارًا.",
     "updateFailureRecovery": {
       "title": "تعذّر تثبيت تحديث {{name}}",
@@ -1575,6 +1576,7 @@
       "deleted": "تم الحذف: {{name}}",
       "deleteFailed": "فشل حذف {{name}}: {{error}}",
       "workshopManaged": "تدير ورشة Steam {{name}}. افتحه في Steam للتحديث أو الإصلاح أو إلغاء الاشتراك.",
+      "workshopManagedWithLocal": "تدير ورشة Steam {{name}}. توجد أيضًا نسخة {{source}} محلية قابلة للإزالة (v{{version}})؛ استخدم إدارة الإصدارات المخزنة لإزالة هذه النسخة تحديدًا.",
       "versionRemoved": "تمت إزالة {{name}} v{{version}} من الإصدارات",
       "versionManualRemoved": "تمت إزالة {{name}} v{{version}} وتحديث {{profiles}} حزمة",
       "versionRemoveFailed": "تعذرت إزالة v{{version}}: {{error}}",
@@ -1653,6 +1655,7 @@
       "joiner": " + "
     },
     "versionManageTitle": "إدارة الإصدارات المخزنة",
+    "versionManageGuided": "إدارة الإصدارات المخزنة — تتوفر نسخة {{source}} v{{version}} قابلة للإزالة",
     "versionManageHeading": "إدارة إصدارات {{mod}}",
     "versionManageSub": "أزِل الإصدارات المخزنة القديمة التي لم تعد تحتاجها. الإصدارات النشطة أو المستخدمة في الحزم تفتح معالج إزالة.",
     "versionActiveStatus": "نشط في اللعبة",

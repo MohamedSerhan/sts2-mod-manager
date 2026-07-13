@@ -1,4 +1,4 @@
-import type { ModAuditEntry, ModAuditTarget } from '../types';
+import type { ModAuditEntry, ModAuditTarget, UpdatePlanItem } from '../types';
 
 export type AuditRefreshTarget = string | ModAuditTarget;
 
@@ -78,5 +78,34 @@ export function isUpToDate(entry: ModAuditEntry): boolean {
 }
 
 export function countGithubUpdates(entries: ModAuditEntry[]): number {
-  return entries.filter(isGithubBulkUpdate).length;
+  return projectProviderUpdates(entries).downloadableCount;
+}
+
+export interface ProviderUpdateProjection {
+  pendingPlans: UpdatePlanItem[];
+  downloadablePlans: UpdatePlanItem[];
+  downloadableCount: number;
+  hasPending: boolean;
+}
+
+export function projectProviderUpdates(entries: ModAuditEntry[]): ProviderUpdateProjection {
+  const pendingPlans = entries.flatMap((entry) => {
+    const plan = entry.update_plan;
+    if (!plan) return [];
+    const pending = plan.selectable || plan.capability === 'manual' ||
+      plan.capability === 'steam-managed' || plan.capability === 'frozen';
+    return pending && (plan.selectable || plan.target_version) ? [plan] : [];
+  });
+  const downloadablePlans = pendingPlans.filter(
+    (plan) => plan.selectable && plan.capability === 'downloadable',
+  );
+  const legacyDownloadableCount = entries.filter(
+    (entry) => !entry.update_plan && isGithubBulkUpdate(entry),
+  ).length;
+  return {
+    pendingPlans,
+    downloadablePlans,
+    downloadableCount: downloadablePlans.length + legacyDownloadableCount,
+    hasPending: pendingPlans.length > 0 || legacyDownloadableCount > 0,
+  };
 }

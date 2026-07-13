@@ -14,7 +14,7 @@ import { LibraryTable } from './LibraryTable';
 import { AllProviders } from '../__test__/providers';
 import { chooseOption, openSelect } from '../__test__/selectHelpers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
-import type { ModInfo, Profile } from '../types';
+import type { ModAuditEntry, ModInfo, Profile } from '../types';
 
 function Wrap(props: React.ComponentProps<typeof LibraryTable>) {
   return (
@@ -85,6 +85,14 @@ const mkModInfo = (overrides: Partial<ModInfo> = {}): ModInfo =>
     display_description: null,
     ...overrides,
   } as ModInfo);
+
+const entryAudit = (name: string, overrides: Partial<ModAuditEntry> = {}): ModAuditEntry => ({
+  mod_name: name, folder_name: name, github_repo: null, installed_version: '1.0.0',
+  latest_release_tag: null, latest_release_with_assets_tag: null, latest_has_assets: false,
+  needs_update: false, asset_names: [], releases_scanned: 0, error: null, nexus_url: null,
+  nexus_version: null, nexus_update_available: false, update_source: null,
+  github_auto_detected: false, pinned: false, ...overrides,
+});
 
 describe('<LibraryTable>', () => {
   it('renders all installed mods for the modpack as rows', async () => {
@@ -1569,6 +1577,48 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(
       within(listbox).getByRole('option', { name: /GitHub \+ Nexus/i }),
     ).toBeInTheDocument();
+  });
+
+  it('surfaces a hidden local provider update on the grouped Steam representative', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({ mod_version_id: 'ritsu-steam', name: 'RitsuLib', version: '0.4.41', folder_name: '3747602295', mod_id: 'STS2-RitsuLib', enabled: true, source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl }),
+      mkModInfo({ mod_version_id: 'ritsu-local', name: 'RitsuLib', version: '0.4.40', folder_name: 'STS2-RitsuLib', mod_id: 'STS2-RitsuLib', enabled: false, source: 'github:BAKAOLC/STS2-RitsuLib', github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib', nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42', install_source: 'local' }),
+      mkModInfo({ mod_version_id: 'plain', name: 'A Plain Mod', version: '1.0.0', folder_name: 'Plain', mod_id: 'Plain', enabled: true }),
+    ]);
+    const auditByKey = new Map([
+      ['ritsu-steam', entryAudit('RitsuLib', { mod_version_id: 'ritsu-steam', folder_name: '3747602295', update_plan: { target: { name: 'RitsuLib', mod_version_id: 'ritsu-steam' }, current_version: '0.4.41', target_version: '0.4.42', provider: 'steam', source: workshopUrl, capability: 'steam-managed', reason: '', selectable: false } })],
+      ['ritsu-local', entryAudit('RitsuLib', { mod_version_id: 'ritsu-local', folder_name: 'STS2-RitsuLib', needs_update: true, update_source: 'both', github_repo: 'BAKAOLC/STS2-RitsuLib', nexus_update_available: true, latest_release_with_assets_tag: 'v0.4.42', update_plan: { target: { name: 'RitsuLib', mod_version_id: 'ritsu-local' }, current_version: '0.4.40', target_version: '0.4.42', provider: 'github+nexus', source: 'https://github.com/BAKAOLC/STS2-RitsuLib', capability: 'downloadable', reason: '', selectable: true } })],
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap modpackName={null} auditByKey={auditByKey} />);
+
+    await chooseOption(user, /Sort/i, /Updates first/i);
+    const rows = await screen.findAllByTestId('library-row');
+    expect(rows[0]).toHaveTextContent('RitsuLib');
+    expect(within(rows[0]).getByText(/GitHub \+ Nexus.*0\.4\.40.*0\.4\.42/i)).toBeInTheDocument();
+    expect(within(rows[0]).getByText(/Steam.*0\.4\.41.*0\.4\.42/i)).toBeInTheDocument();
+  });
+
+  it('guides Steam deletion to the exact removable local sibling without deleting it', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({ mod_version_id: 'ritsu-steam', name: 'RitsuLib', version: '0.4.41', folder_name: '3747602295', mod_id: 'STS2-RitsuLib', enabled: true, source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl }),
+      mkModInfo({ mod_version_id: 'ritsu-local', name: 'RitsuLib', version: '0.4.40', folder_name: 'STS2-RitsuLib', mod_id: 'STS2-RitsuLib', enabled: false, github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib', nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42', install_source: 'local' }),
+    ]);
+    const onDelete = vi.fn();
+    const modInfoByKey = new Map<string, ModInfo>([
+      ['ritsu-steam', mkModInfo({ mod_version_id: 'ritsu-steam', name: 'RitsuLib', version: '0.4.41', folder_name: '3747602295', mod_id: 'STS2-RitsuLib', enabled: true, source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl })],
+      ['ritsu-local', mkModInfo({ mod_version_id: 'ritsu-local', name: 'RitsuLib', version: '0.4.40', folder_name: 'STS2-RitsuLib', mod_id: 'STS2-RitsuLib', enabled: false, github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib', nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42', install_source: 'local' })],
+    ]);
+    const user = userEvent.setup();
+    render(<Wrap modpackName={null} modInfoByKey={modInfoByKey} onDelete={onDelete} />);
+
+    const manage = await screen.findByRole('button', { name: /Manage stored versions.*GitHub \+ Nexus.*0\.4\.40/i });
+    expect(manage).toHaveClass('is-guided');
+    await user.click(screen.getByRole('button', { name: /^Remove RitsuLib$/i }));
+    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ mod_version_id: 'ritsu-steam' }), expect.objectContaining({ key: 'ritsu-local', version: '0.4.40' }));
+    expect(getInvokeCalls().some((call) => call.cmd === 'remove_library_mod_version')).toBe(false);
   });
 
   it('dedupes exact duplicate Workshop rows without splitting the modpack view', async () => {

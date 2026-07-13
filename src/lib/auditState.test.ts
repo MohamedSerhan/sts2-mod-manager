@@ -10,6 +10,7 @@ import {
   isGithubBulkUpdate,
   isUpToDate,
   countGithubUpdates,
+  projectProviderUpdates,
 } from './auditState';
 
 function entry(over: Partial<ModAuditEntry>): ModAuditEntry {
@@ -160,6 +161,33 @@ describe('countGithubUpdates', () => {
 
     expect(isGithubBulkUpdate(row)).toBe(false);
     expect(countGithubUpdates([row])).toBe(0);
+  });
+});
+
+describe('projectProviderUpdates', () => {
+  it('counts only selectable downloads while retaining manual and Steam review evidence', () => {
+    const entries = [
+      entry({ mod_version_id: 'ritsu-local', mod_name: 'RitsuLib', update_plan: {
+        target: { name: 'RitsuLib', mod_version_id: 'ritsu-local' }, current_version: '0.4.41',
+        target_version: '0.4.42', provider: 'github+nexus', source: 'https://github.com/BAKAOLC/STS2-RitsuLib',
+        capability: 'downloadable', reason: '', selectable: true,
+      } }),
+      entry({ mod_version_id: 'ritsu-steam', mod_name: 'RitsuLib', update_plan: {
+        target: { name: 'RitsuLib', mod_version_id: 'ritsu-steam' }, current_version: '0.4.41',
+        target_version: '0.4.42', provider: 'steam', source: null,
+        capability: 'steam-managed', reason: '', selectable: false,
+      } }),
+      entry({ mod_version_id: 'manual', mod_name: 'Manual Mod', update_plan: {
+        target: { name: 'Manual Mod', mod_version_id: 'manual' }, current_version: '1.0.0',
+        target_version: '2.0.0', provider: 'nexus', source: 'https://www.nexusmods.com/slaythespire2/mods/1',
+        capability: 'manual', reason: '', selectable: false,
+      } }),
+    ];
+
+    const projection = projectProviderUpdates(entries);
+    expect(projection.downloadableCount).toBe(1);
+    expect(projection.pendingPlans).toHaveLength(3);
+    expect(projection.hasPending).toBe(true);
   });
 });
 

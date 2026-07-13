@@ -1489,6 +1489,7 @@
     "latest": "最新",
     "latestTitle": "已安装来源的最新可安装版本。",
     "updateAvailable": "下载更新 → v{{version}}",
+    "providerUpdateEvidence": "{{provider}}：v{{current}} → v{{target}}",
     "updateClickTitle": "将 v{{target}} 下载到版本列表。在你选择版本之前，当前安装和模组包仍保持 v{{current}}。",
     "updateFailureRecovery": {
       "title": "无法安装 {{name}} 的更新",
@@ -1576,6 +1577,7 @@
       "deleted": "已删除：{{name}}",
       "deleteFailed": "删除 {{name}} 失败：{{error}}",
       "workshopManaged": "{{name}} 由 Steam 创意工坊管理。请在 Steam 中打开它以更新、修复或取消订阅。",
+      "workshopManagedWithLocal": "{{name}} 由 Steam 创意工坊管理。本地还存有可移除的 {{source}} 版本（v{{version}}）；请使用“管理已存储版本”移除该副本。",
       "versionRemoved": "已从版本列表移除 {{name}} v{{version}}",
       "versionManualRemoved": "已移除 {{name}} v{{version}} 并更新 {{profiles}} 个模组包",
       "versionRemoveFailed": "无法移除 v{{version}}：{{error}}",
@@ -1661,6 +1663,7 @@
       "joiner": " + "
     },
     "versionManageTitle": "管理已存储版本",
+    "versionManageGuided": "管理已存储版本 — 可移除 {{source}} v{{version}}",
     "versionManageHeading": "管理 {{mod}} 的版本",
     "versionManageSub": "移除不再需要的旧存储版本。活跃或被模组包使用的版本会打开引导式移除。",
     "versionActiveStatus": "游戏中活跃",

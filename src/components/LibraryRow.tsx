@@ -64,7 +64,14 @@ import type {
   ModInstallSource,
   ProfileMembershipMod,
   ProfileMembershipState,
+  UpdatePlanItem,
 } from '../types';
+
+export interface StoredVersionGuidance {
+  key: string;
+  version: string;
+  sourceLabel: string;
+}
 
 export function membershipRowKey(row: ProfileMembershipMod): string {
   return row.mod_version_id ?? row.folder_name ?? row.mod_id ?? row.name;
@@ -225,6 +232,8 @@ export interface LibraryRowProps {
   /** Audit entry from getAuditByKey lookup. Undefined when audit hasn't
    *  run for this row. */
   audit?: ModAuditEntry | undefined;
+  updatePlans?: UpdatePlanItem[];
+  removableLocalVersion?: StoredVersionGuidance;
   /** Current game running state — disables destructive actions. */
   gameRunning?: boolean;
   /** Current STS2 game version, drives the min_game_version warning. */
@@ -291,6 +300,8 @@ export function LibraryRow({
   onToggleStorage,
   mod,
   audit,
+  updatePlans = [],
+  removableLocalVersion,
   gameRunning = false,
   gameVersion,
   versionOptions = [],
@@ -431,6 +442,10 @@ export function LibraryRow({
     if (option.cached) return t('mods.versionSavedStatus');
     return t('mods.versionStoredStatus');
   };
+  const providerLabel = (provider: string) => provider
+    .split('+')
+    .map((part) => part === 'github' ? t('mods.gitHub') : part === 'nexus' ? t('mods.nexus') : part === 'steam' ? t('mods.steamWorkshop') : part)
+    .join(t('mods.versionSource.joiner'));
   const versionWorkshopUrl = (option: LibraryRowVersionOption) =>
     option.workshopUrl ??
     (option.workshopItemId
@@ -670,7 +685,7 @@ export function LibraryRow({
                       <Check size={9} /> {t('mods.latest')}
                     </span>
                   )}
-                {showUpdatePill && (
+                {showUpdatePill && updatePlans.length === 0 && (
                   <button
                     type="button"
                     className="gf-pill gf-pill-update"
@@ -703,6 +718,20 @@ export function LibraryRow({
                     )}
                   </button>
                 )}
+                {updatePlans.map((plan) => (
+                  <span
+                    key={`${plan.target.mod_version_id ?? plan.target.folder_name ?? plan.target.name}:${plan.provider}`}
+                    className="gf-pill gf-pill-update"
+                    title={t(`mods.updatePlan.capability.${plan.capability}`)}
+                  >
+                    <AlertTriangle size={9} />
+                    {t('mods.providerUpdateEvidence', {
+                      provider: providerLabel(plan.provider),
+                      current: cleanVersion(plan.current_version),
+                      target: cleanVersion(plan.target_version) || t('unknown'),
+                    })}
+                  </span>
+                ))}
                 {showBlockedPill && (
                   <span
                     className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
@@ -836,9 +865,9 @@ export function LibraryRow({
                   </label>
                   <button
                     type="button"
-                    className="gf-btn-3 gf-btn-icon gf-version-manage"
-                    title={t('mods.versionManageTitle')}
-                    aria-label={t('mods.versionManageTitle')}
+                    className={`gf-btn-3 gf-btn-icon gf-version-manage${removableLocalVersion ? ' is-guided' : ''}`}
+                    title={removableLocalVersion ? t('mods.versionManageGuided', { source: removableLocalVersion.sourceLabel, version: cleanVersion(removableLocalVersion.version) }) : t('mods.versionManageTitle')}
+                    aria-label={removableLocalVersion ? t('mods.versionManageGuided', { source: removableLocalVersion.sourceLabel, version: cleanVersion(removableLocalVersion.version) }) : t('mods.versionManageTitle')}
                     onClick={() => setVersionManagerOpen(true)}
                   >
                     <SlidersHorizontal size={13} />

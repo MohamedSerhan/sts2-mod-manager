@@ -1489,6 +1489,7 @@
     "latest": "Последняя",
     "latestTitle": "На последнем устанавливаемом релизе источника.",
     "updateAvailable": "Скачать обновление → v{{version}}",
+    "providerUpdateEvidence": "{{provider}}: с v{{current}} до v{{target}}",
     "updateClickTitle": "Скачать v{{target}} в список версий. Текущая установка и модпаки останутся на v{{current}}, пока вы не выберете версию.",
     "updateFailureRecovery": {
       "title": "Не удалось установить обновление для {{name}}",
@@ -1575,6 +1576,7 @@
       "deleted": "Удалено: {{name}}",
       "deleteFailed": "Не удалось удалить {{name}}: {{error}}",
       "workshopManaged": "{{name}} управляется Мастерской Steam. Откройте его в Steam, чтобы обновить, восстановить или отменить подписку.",
+      "workshopManagedWithLocal": "{{name}} управляется Мастерской Steam. Локально также сохранена удаляемая версия {{source}} (v{{version}}); удалите именно эту копию через управление сохраненными версиями.",
       "versionRemoved": "{{name}} v{{version}} удален из списка версий",
       "versionManualRemoved": "{{name}} v{{version}} удален, обновлено сборок: {{profiles}}",
       "versionRemoveFailed": "Не удалось удалить v{{version}}: {{error}}",
@@ -1653,6 +1655,7 @@
       "joiner": " + "
     },
     "versionManageTitle": "Управлять сохраненными версиями",
+    "versionManageGuided": "Управлять сохраненными версиями — доступна удаляемая {{source}} v{{version}}",
     "versionManageHeading": "Версии {{mod}}",
     "versionManageSub": "Удаляйте старые сохраненные версии, которые больше не нужны. Активные версии и версии из сборок открывают мастер удаления.",
     "versionActiveStatus": "Активно в игре",

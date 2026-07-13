@@ -2532,6 +2532,7 @@ mod version_helper_tests {
             let plans = build_update_plans(
                 &workshop,
                 "1.0.0",
+                Some("1.0.0"),
                 github,
                 github.map(|_| "2.0.0"),
                 github.is_some(),
@@ -4645,6 +4646,7 @@ fn update_plan_item(
 fn build_update_plans(
     m: &ModInfo,
     installed_version: &str,
+    github_installed_version: Option<&str>,
     display_github: Option<&str>,
     github_target: Option<&str>,
     github_needs_update: bool,
@@ -4671,7 +4673,9 @@ fn build_update_plans(
     if let Some(github) = display_github {
         plans.push(update_plan_item(
             m,
-            installed_version.to_string(),
+            github_installed_version
+                .unwrap_or(installed_version)
+                .to_string(),
             github_target.map(str::to_string),
             "github",
             Some(github.to_string()),
@@ -4740,6 +4744,16 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
     let mut asset_names: Vec<String> = Vec::new();
     let mut total_scanned: u32 = 0;
     let mut github_error: Option<String> = None;
+    let github_registry_version =
+        crate::mod_versions::provider_source_version_label_for_mod(
+            m,
+            ctx.config_path,
+            "github",
+        );
+    let github_installed_version = source_entry
+        .filter(|entry| entry.installed_version_source.as_deref() == Some("github"))
+        .and_then(|entry| entry.installed_version.clone())
+        .or(github_registry_version);
     // Walk-back / compat fields. Populated below when we have an
     // actionable github_needs_update on a row whose latest release
     // declares a min_game_version higher than the user's STS2 build.
@@ -4788,25 +4802,21 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
             // Determine if a GitHub update is needed using semver
             if let Some(ref assets_tag) = latest_release_with_assets_tag {
                 let latest_ver = assets_tag.trim_start_matches('v');
-                let current_ver = best_known_installed_version(m, &ctx.sources_db.mods)
-                    .map(|version| version.to_string());
-
-                // Folder-first lookup so a bundle (whose source is keyed by
-                // container folder_name) isn't missed by a name-only get.
-                let installed_ver_matches = lookup_entry(
-                    &ctx.sources_db.mods,
-                    m.folder_name.as_deref(),
-                    &m.name,
-                    m.mod_id.as_deref(),
-                )
-                .and_then(|e| e.installed_version.as_deref())
-                .map(|iv| iv.trim_start_matches('v') == latest_ver)
-                .unwrap_or(false);
+                let provider_current_ver = github_installed_version
+                    .as_deref()
+                    .and_then(usable_version);
+                let current_ver = provider_current_ver
+                    .or_else(|| best_known_installed_version(m, &ctx.sources_db.mods));
+                let installed_ver_matches = github_installed_version
+                    .as_deref()
+                    .map(|version| strip_version_prefix(version) == latest_ver)
+                    .unwrap_or(false);
 
                 if !installed_ver_matches && current_ver.is_some() {
                     // Use semver comparison — only flag if latest > current
-                    github_needs_update =
-                        is_newer_version(current_ver.as_deref().unwrap_or(""), latest_ver);
+                    github_needs_update = current_ver.as_ref().is_some_and(|current| {
+                        is_newer_version(&current.to_string(), latest_ver)
+                    });
                     if github_needs_update
                         && crate::mod_versions::has_local_version_for_mod(
                             ctx.config_path,
@@ -4888,20 +4898,18 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                                         // switches the hint copy to
                                         // "you're already on the newest
                                         // compatible".
-                                        // Folder-first so a bundle keyed by
-                                        // container folder_name is found.
-                                        let installed_tag = lookup_entry(
-                                            &ctx.sources_db.mods,
-                                            m.folder_name.as_deref(),
-                                            &m.name,
-                                            m.mod_id.as_deref(),
-                                        )
-                                        .and_then(|e| e.installed_version.as_deref())
-                                        .map(|s| s.trim_start_matches('v'))
-                                        .unwrap_or("");
+                                        let installed_tag = github_installed_version
+                                            .as_deref()
+                                            .map(strip_version_prefix)
+                                            .unwrap_or("");
                                         let manifest_ver = m.version.trim_start_matches('v');
                                         let walk_ver = walk.tag.trim_start_matches('v');
-                                        if walk_ver == installed_tag || walk_ver == manifest_ver {
+                                        let already_on_walked_version = if github_installed_version.is_some() {
+                                            walk_ver == installed_tag
+                                        } else {
+                                            walk_ver == manifest_ver
+                                        };
+                                        if already_on_walked_version {
                                             github_needs_update = false;
                                             latest_compatible_tag = None;
                                         } else {
@@ -5004,6 +5012,12 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                         // update for the same logical mod (for example BaseLib).
                         // Fall back to the manifest only for legacy entries that
                         // have no persisted Nexus provenance at all.
+                        let nexus_registry_version =
+                            crate::mod_versions::provider_source_version_label_for_mod(
+                                m,
+                                ctx.config_path,
+                                "nexus",
+                            );
                         let nexus_sources_ver = source_entry
                             .filter(|entry| {
                                 entry.installed_version_source.as_deref() == Some("nexus")
@@ -5017,7 +5031,8 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                                     source_is_nexus
                                         .then_some(record.source_version.as_deref().unwrap_or(&record.version))
                                 })
-                            });
+                            })
+                            .or(nexus_registry_version.as_deref());
                         let manifest_ver = strip_version_prefix(&m.version);
                         let current_ver = nexus_sources_ver
                             .map(strip_version_prefix)
@@ -5202,6 +5217,7 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
     let update_plans = build_update_plans(
         m,
         &installed_version,
+        github_installed_version.as_deref(),
         display_github.as_deref(),
         github_target,
         github_needs_update,

@@ -694,6 +694,33 @@ fn best_source_version_label<'a>(versions: impl IntoIterator<Item = &'a str>) ->
     best_parseable.map(|(_, label)| label).or(first_usable)
 }
 
+pub(crate) fn provider_source_version_label_for_mod(
+    info: &ModInfo,
+    config_path: &Path,
+    provider: &str,
+) -> Option<String> {
+    let db = load(config_path);
+    let family = family_key_for_mod(info);
+    best_source_version_label(db.records.values().filter_map(|record| {
+        if family_key_for_record(record) != family {
+            return None;
+        }
+        let source = record.source.as_deref()?.trim().to_lowercase();
+        let provider_matches = match provider {
+            "github" => source.starts_with("github:") || source.contains("github.com/"),
+            "nexus" => source.starts_with("nexus:") || source.contains("nexusmods.com/"),
+            "steam" => record.install_source.is_workshop(),
+            _ => false,
+        };
+        provider_matches.then_some(
+            record
+                .source_version
+                .as_deref()
+                .unwrap_or(record.version.as_str()),
+        )
+    }))
+}
+
 pub(crate) fn installed_source_version_label_for_mod(
     info: &ModInfo,
     config_path: &Path,

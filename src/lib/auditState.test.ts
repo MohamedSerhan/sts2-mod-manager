@@ -288,6 +288,50 @@ describe('projectProviderUpdates', () => {
     expect(projection.pendingPlans).toHaveLength(8);
     expect(projection.pendingPlans.filter((plan) => plan.provider === 'steam')).toHaveLength(3);
   });
+
+  it('collapses the same grouped provider action without merging distinct Nexus lanes', () => {
+    const nexusPlan = (
+      artifactId: string,
+      currentVersion: string,
+      targetVersion: string,
+    ) => ({
+      target: {
+        name: 'BaseLib',
+        mod_id: 'BaseLib',
+        mod_version_id: artifactId,
+      },
+      current_version: currentVersion,
+      target_version: targetVersion,
+      provider: 'nexus',
+      source: 'https://www.nexusmods.com/slaythespire2/mods/103',
+      capability: 'manual' as const,
+      reason: '',
+      selectable: false,
+      pending: true,
+    });
+    const projection = projectProviderUpdates([
+      entry({
+        mod_name: 'BaseLib',
+        mod_version_id: 'baselib-nexus',
+        update_plans: [nexusPlan('baselib-nexus', '3.3.1', '3.3.5')],
+      }),
+      entry({
+        mod_name: 'BaseLib',
+        mod_version_id: 'baselib-steam',
+        update_plans: [
+          nexusPlan('baselib-steam', '3.3.1', '3.3.5'),
+          nexusPlan('baselib-beta', '3.2.0-beta', '3.3.0-beta'),
+        ],
+      }),
+    ]);
+
+    expect(projection.pendingPlans).toHaveLength(2);
+    expect(projection.actionableCount).toBe(2);
+    expect(projection.pendingPlans.map((plan) => plan.current_version)).toEqual([
+      '3.3.1',
+      '3.2.0-beta',
+    ]);
+  });
 });
 
 describe('audit identity helpers', () => {

@@ -1672,6 +1672,24 @@ describe('<LibraryTable modpackName={null}>', () => {
         },
       ],
     }));
+    const baseLibNexusPlan = (modVersionId: string) => ({
+      target: {
+        name: 'BaseLib',
+        mod_version_id: modVersionId,
+        folder_name: modVersionId === 'baselib-nexus'
+          ? 'BaseLib.sts2mm-conflict-1'
+          : 'BaseLib',
+        mod_id: 'BaseLib',
+      },
+      current_version: '3.3.1',
+      target_version: '3.3.5',
+      provider: 'nexus',
+      source: nexusUrl,
+      capability: 'manual' as const,
+      reason: '',
+      selectable: false,
+      pending: true,
+    });
     const auditByKey = new Map<string, ModAuditEntry>([
       ['baselib-steam', entryAudit('BaseLib', {
         mod_version_id: 'baselib-steam',
@@ -1682,22 +1700,18 @@ describe('<LibraryTable modpackName={null}>', () => {
         nexus_update_available: true,
         needs_update: true,
         update_source: 'nexus',
-        update_plans: [{
-          target: {
-            name: 'BaseLib',
-            mod_version_id: 'baselib-nexus',
-            folder_name: 'BaseLib.sts2mm-conflict-1',
-            mod_id: 'BaseLib',
-          },
-          current_version: '3.3.1',
-          target_version: '3.3.5',
-          provider: 'nexus',
-          source: nexusUrl,
-          capability: 'manual',
-          reason: '',
-          selectable: false,
-          pending: true,
-        }],
+        update_plans: [baseLibNexusPlan('baselib-steam')],
+      })],
+      ['baselib-nexus', entryAudit('BaseLib', {
+        mod_version_id: 'baselib-nexus',
+        folder_name: 'BaseLib.sts2mm-conflict-1',
+        installed_version: '3.3.1',
+        nexus_url: nexusUrl,
+        nexus_version: '3.3.5',
+        nexus_update_available: true,
+        needs_update: true,
+        update_source: 'nexus',
+        update_plans: [baseLibNexusPlan('baselib-nexus')],
       })],
     ]);
 
@@ -1715,8 +1729,8 @@ describe('<LibraryTable modpackName={null}>', () => {
     );
     expect(baseLibRow).toBeDefined();
     expect(
-      within(baseLibRow!).getByRole('button', { name: /Nexus.*3\.3\.1.*3\.3\.5/i }),
-    ).toBeInTheDocument();
+      within(baseLibRow!).getAllByRole('button', { name: /Nexus.*3\.3\.1.*3\.3\.5/i }),
+    ).toHaveLength(1);
     expect(within(baseLibRow!).queryByText('Latest')).not.toBeInTheDocument();
 
     const titles = () =>

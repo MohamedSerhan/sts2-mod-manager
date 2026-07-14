@@ -8,7 +8,7 @@ import type { ModAuditEntry } from '../types';
 import type { ModLibrary } from '../hooks/useModLibrary';
 import { ModLibraryToolbar } from './ModLibraryToolbar';
 
-function auditPlan(id: string, provider: 'github' | 'nexus' | 'steam', capability: 'downloadable' | 'manual' | 'steam-managed', selectable: boolean): ModAuditEntry {
+function auditPlan(id: string, provider: 'github' | 'nexus' | 'steam', capability: 'downloadable' | 'manual' | 'steam-managed', selectable: boolean, logicalModId = id): ModAuditEntry {
   return {
     mod_name: id, folder_name: id, mod_version_id: id, github_repo: null,
     installed_version: '1.0.0', latest_release_tag: null,
@@ -18,7 +18,7 @@ function auditPlan(id: string, provider: 'github' | 'nexus' | 'steam', capabilit
     update_source: provider === 'steam' ? null : provider,
     github_auto_detected: false, pinned: false,
     update_plans: [{
-      target: { name: id, mod_version_id: id }, current_version: '1.0.0',
+      target: { name: id, mod_id: logicalModId, mod_version_id: id }, current_version: '1.0.0',
       target_version: '2.0.0', provider, source: provider === 'steam' ? null : 'https://example.com',
       capability, reason: '', selectable, pending: true,
     }],
@@ -33,6 +33,7 @@ describe('<ModLibraryToolbar>', () => {
       auditPlan('remove-limit', 'nexus', 'manual', false),
       auditPlan('card-advisor', 'github', 'downloadable', true),
       auditPlan('save-path', 'nexus', 'manual', false),
+      auditPlan('save-path-workshop-shadow', 'nexus', 'manual', false, 'save-path'),
       auditPlan('baselib', 'steam', 'steam-managed', false),
       auditPlan('ritsulib', 'steam', 'steam-managed', false),
       auditPlan('mspain', 'steam', 'steam-managed', false),
@@ -59,6 +60,7 @@ describe('<ModLibraryToolbar>', () => {
     render(<AllProviders><Harness /></AllProviders>);
 
     const review = screen.getByRole('button', { name: 'Review 5 updates' });
+    expect(screen.queryByRole('button', { name: 'Review 6 updates' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Review 8 updates' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Download 2 updates' })).not.toBeInTheDocument();
     await user.click(review);

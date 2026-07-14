@@ -1398,7 +1398,10 @@ async function specSaveChangesConverges(driver) {
     throw new Error(`save convergence fixture did not create production drift: ${JSON.stringify(before)}`);
   }
   // Exercise the user-facing Profiles banner and Save changes button. The
-  // direct command below is only used for the second-save idempotency check.
+  // disk mutation happened while Profiles was already mounted, so leave and
+  // re-enter the view to rerun its drift effect before asserting the banner.
+  // The direct command below is only used for the second-save idempotency check.
+  await navToMods(driver);
   await navToModpacks(driver);
   await waitForElement(
     driver,

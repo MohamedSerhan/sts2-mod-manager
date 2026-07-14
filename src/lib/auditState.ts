@@ -79,11 +79,22 @@ export function projectProviderUpdates(entries: ModAuditEntry[]): ProviderUpdate
       : entry.update_plan ? [entry.update_plan] : []
   ))) {
     if (!plan.pending) continue;
-    const identity = plan.target.mod_version_id
-      ?? plan.target.folder_name
-      ?? plan.target.mod_id
-      ?? plan.target.name;
-    const key = `${identity}:${plan.provider}`;
+    // Library rows group installed artifacts by logical mod identity. The
+    // backend can therefore report the same provider action once for a local
+    // version and again for its Workshop sibling. Collapse only an identical
+    // action here; current/target versions remain in the key so genuinely
+    // distinct Nexus lanes (for example release and beta) stay separate.
+    const logicalIdentity = plan.target.mod_id?.trim()
+      ? `mod-id:${plan.target.mod_id.trim().toLocaleLowerCase()}`
+      : `name:${plan.target.name.trim().toLocaleLowerCase()}`;
+    const key = [
+      logicalIdentity,
+      plan.provider,
+      plan.current_version,
+      plan.target_version ?? '',
+      plan.source ?? '',
+      plan.capability,
+    ].join('\u0000');
     if (seen.has(key)) continue;
     seen.add(key);
     pendingPlans.push(plan);

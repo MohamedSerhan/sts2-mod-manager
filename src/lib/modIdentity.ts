@@ -20,6 +20,44 @@ interface IdentityFields {
   mod_id?: string | null;
 }
 
+interface WorkshopSourceFields {
+  install_source?: string | null;
+  workshop_item_id?: string | null;
+  workshop_url?: string | null;
+  source?: string | null;
+}
+
+/** Shared Steam Workshop ownership heuristic for installed, membership, and
+ * cached-version records. Keep destructive-action guards source-consistent. */
+export function isWorkshopSource(entry: WorkshopSourceFields | null | undefined): boolean {
+  if (!entry) return false;
+  const source = entry.source?.trim().toLocaleLowerCase() ?? '';
+  return entry.install_source === 'steam_workshop'
+    || Boolean(entry.workshop_item_id)
+    || Boolean(entry.workshop_url)
+    || source.includes('steamcommunity.com/sharedfiles')
+    || source.startsWith('steam://');
+}
+
+/** True only when Steam owns the installed artifact. A locally installed
+ * GitHub/Nexus copy can legitimately carry Workshop discovery metadata and
+ * must remain eligible for manager-owned update, repair, rollback, and delete
+ * actions. */
+export function isWorkshopOwned(entry: WorkshopSourceFields | null | undefined): boolean {
+  return entry?.install_source === 'steam_workshop';
+}
+
+export function workshopSourceUrl(
+  entry: WorkshopSourceFields | null | undefined,
+): string | null {
+  if (!entry) return null;
+  if (entry.workshop_url) return entry.workshop_url;
+  const source = entry.source?.trim() ?? '';
+  return source.includes('steamcommunity.com/sharedfiles') || source.startsWith('steam://')
+    ? source
+    : null;
+}
+
 function pushKey(keys: string[], value: string | null | undefined) {
   if (!value) return;
   const trimmed = value.trim();
@@ -60,8 +98,8 @@ function keysIntersect(a: string[], b: string[]): boolean {
  * (which includes the normalized name).
  */
 export function identitiesMatch(a: IdentityFields, b: IdentityFields): boolean {
-  if (a.mod_version_id && b.mod_version_id && a.mod_version_id === b.mod_version_id) {
-    return true;
+  if (a.mod_version_id && b.mod_version_id) {
+    return a.mod_version_id === b.mod_version_id;
   }
   const aStrong = strongIdentityKeys(a);
   const bStrong = strongIdentityKeys(b);

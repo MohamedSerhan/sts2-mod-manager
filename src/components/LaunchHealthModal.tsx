@@ -185,7 +185,7 @@ export function LaunchHealthModal({
           )}
         </div>
 
-        <div className="gf-modal-foot">
+        <div className="gf-modal-foot gf-launch-health-foot">
           <button className="gf-btn-3" onClick={onCancel} disabled={storing}>
             {t('common.cancel')}
           </button>
@@ -196,8 +196,8 @@ export function LaunchHealthModal({
             <Play size={12} /> {t('launchHealth.launchAnyway')}
           </button>
           {hardBlockers > 0 && (
-            <button className="gf-btn" onClick={onStoreAndLaunch} disabled={storing}>
-              {storing ? t('launchHealth.storing') : t('launchHealth.storeBlockedAndLaunch')}
+            <button className="gf-btn gf-launch-health-primary" onClick={onStoreAndLaunch} disabled={storing}>
+              {storing ? t('launchHealth.storing') : t('launchHealth.storeBlockedLaunchShort')}
             </button>
           )}
         </div>

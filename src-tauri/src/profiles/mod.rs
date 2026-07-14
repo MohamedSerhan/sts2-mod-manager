@@ -8,7 +8,7 @@ use crate::mod_versions::{
     LocalModVersionAffectedProfile, LocalModVersionOption, LocalModVersionRemovalPreview,
 };
 use crate::mods::{ModInfo, ModInstallSource};
-use crate::state::AppState;
+use crate::state::{AppState, AppStateInner};
 
 // ── Submodules ─────────────────────────────────────────────────────────────
 //
@@ -49,7 +49,7 @@ pub use crud::{
     export_profile, import_profile, list_profiles, load_profile, persist_profile_mod_sources,
     save_profile,
 };
-pub use drift::{ProfileDrift, RepairProfileResult, VersionMismatch};
+pub use drift::{ProfileDrift, RepairProfileResult, SaveDriftResult, VersionMismatch};
 pub use membership::SetProfileModsEnabledResult;
 
 use apply::switch_profile_from_paths;
@@ -294,6 +294,31 @@ pub struct ProfileLoadOrderUpdate {
 // `crate::profiles::*` path that `lib.rs`'s invoke-handler list
 // references. The actual work is in the submodules.
 
+fn reconcile_library_provider_exclusivity(
+    state: &AppStateInner,
+    mods_path: &Path,
+    disabled_path: &Path,
+) -> Result<()> {
+    if crate::game::is_game_running() {
+        return Ok(());
+    }
+    let moved = crate::mods::repair_active_runtime_id_duplicates(
+        mods_path,
+        disabled_path,
+        &state.config_path,
+        &state.profiles_path,
+        state.active_profile.as_deref(),
+    )?;
+    if !moved.is_empty() {
+        log::warn!(
+            "Library provider reconciliation moved {} duplicate active artifact(s) to disabled storage: {}",
+            moved.len(),
+            moved.join(", ")
+        );
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_profiles_cmd(
     state: tauri::State<'_, AppState>,
@@ -309,6 +334,8 @@ pub fn get_profile_memberships(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    reconcile_library_provider_exclusivity(&s, mods_path, disabled_path)
+        .map_err(|e| e.to_string())?;
     profile_membership_matrix(
         mods_path,
         disabled_path,
@@ -326,6 +353,8 @@ pub fn get_library_version_options(
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    reconcile_library_provider_exclusivity(&s, mods_path, disabled_path)
+        .map_err(|e| e.to_string())?;
     let mut installed_mods =
         crate::mods::scan_installed_mods_with_workshop(mods_path, disabled_path);
     crate::mod_sources::enrich_mods_with_sources(&mut installed_mods, &s.config_path);
@@ -1303,7 +1332,7 @@ pub fn get_profile_drift(
 pub fn save_profile_drift(
     name: String,
     state: tauri::State<'_, AppState>,
-) -> std::result::Result<Profile, String> {
+) -> std::result::Result<SaveDriftResult, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
     let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
@@ -1313,6 +1342,7 @@ pub fn save_profile_drift(
         disabled_path,
         &s.profiles_path,
         &s.config_path,
+        &s.cache_path,
     )
     .map_err(|e| e.to_string())
 }

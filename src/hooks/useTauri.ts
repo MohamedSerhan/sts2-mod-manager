@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption, LocalModVersionRemovalPreview, ManualModVersionRemovalMode, ManualModVersionProfileReplacement, ManualModVersionRemovalResult, LaunchDiagnostics, LaunchHealthReport, LaunchQuarantineResult } from '../types';
+import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption, LocalModVersionRemovalPreview, ManualModVersionRemovalMode, ManualModVersionProfileReplacement, ManualModVersionRemovalResult, LaunchDiagnostics, LaunchHealthReport, LaunchQuarantineResult, UpdatePlanSelection, UpdateApplyResult } from '../types';
 
 type LocalModVersionOptionWire = Partial<LocalModVersionOption> & {
   modVersionId?: string;
@@ -447,6 +447,14 @@ export interface ProfileDrift {
   has_drift: boolean;
 }
 
+/** Return value of `save_profile_drift`. Contains the reconciled profile and,
+ *  in the unlikely case that post-save drift is still detected (e.g. a
+ *  Workshop item Steam controls), the residual drift for diagnostics. */
+export interface SaveDriftResult {
+  profile: Profile;
+  residual_drift?: ProfileDrift;
+}
+
 export async function getProfileDrift(name: string): Promise<ProfileDrift> {
   return invoke('get_profile_drift', { name });
 }
@@ -455,7 +463,7 @@ export async function getProfileDrift(name: string): Promise<ProfileDrift> {
  *  only the diff (add enabled extras, drop missing mods, sync toggled/version
  *  for present mods). Unlike a full re-snapshot, this preserves the pack's
  *  curated set rather than absorbing the whole install. */
-export async function saveProfileDrift(name: string): Promise<Profile> {
+export async function saveProfileDrift(name: string): Promise<SaveDriftResult> {
   return invoke('save_profile_drift', { name });
 }
 
@@ -504,8 +512,8 @@ export async function rollbackMod(name: string, folderName: string | null = null
   return invoke('rollback_mod', { name, folderName });
 }
 
-export async function updateAllMods(profileId: string | null = null): Promise<ModInfo[]> {
-  return invoke('update_all_mods', { profileId });
+export async function updateAllMods(selected: UpdatePlanSelection[] = [], profileId: string | null = null): Promise<UpdateApplyResult[]> {
+  return invoke('update_all_mods', { profileId, selected });
 }
 
 /**

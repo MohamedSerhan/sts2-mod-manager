@@ -43,14 +43,16 @@ import {
   libraryStorageKey,
   membershipDisplayName,
   membershipRowKey,
+  type StoredVersionGuidance,
 } from './LibraryRow';
 import { ModViewToggle, useModListDensity } from './ModViewToggle';
 import { usePinScroll } from '../hooks/usePinScroll';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from './ConfirmDialog';
-import { isActionableUpdate } from '../lib/auditState';
+import { projectProviderUpdates } from '../lib/auditState';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
+import { isWorkshopOwned, isWorkshopSource } from '../lib/modIdentity';
 import { profileDisplayName } from '../lib/profileDisplay';
 import { Select } from './Select';
 import {
@@ -187,12 +189,17 @@ export interface LibraryTableProps {
   anyRecoveryInFlight?: boolean;
 
   onUpdate?: (mod: ModInfo) => void;
+  /** Fired when the user clicks a provider-evidence update pill on a row
+   *  that has pending update plans. Opens the update review sheet so the
+   *  user can pick + apply — never silently applies. Optional so the
+   *  Library view keeps the pills inert when nothing else is wired. */
+  onReviewUpdates?: () => void;
   onTogglePin?: (mod: ModInfo) => void;
   onSnooze?: (mod: ModInfo, audit: ModAuditEntry | undefined) => void;
   onUnsnooze?: (mod: ModInfo) => void;
   onRepair?: (mod: ModInfo) => void;
   onRollback?: (mod: ModInfo) => void;
-  onDelete?: (mod: ModInfo) => void;
+  onDelete?: (mod: ModInfo, removableLocalVersion?: StoredVersionGuidance) => Promise<void> | void;
   onCopyVersion?: (mod: ModInfo) => void;
   onOpenThisModFolder?: (mod: ModInfo) => void;
   onEditSources?: (mod: ModInfo) => void;
@@ -300,10 +307,7 @@ function duplicateSourceBucket(
   row: ProfileMembershipMod,
   info?: ModInfo,
 ): 'workshop' | 'local' {
-  if (
-    info?.install_source === 'steam_workshop' ||
-    row.install_source === 'steam_workshop'
-  ) {
+  if (isWorkshopOwned(info) || isWorkshopOwned(row)) {
     return 'workshop';
   }
   return 'local';
@@ -329,12 +333,23 @@ function versionOptionIdentity(option: LocalModVersionOption): string {
 }
 
 function versionOptionSourceIdentity(option: LocalModVersionOption): string {
-  if (option.install_source === 'steam_workshop') {
+  // Version records can inherit Workshop linkage from the logical mod even
+  // when this particular artifact came from Nexus/GitHub. Artifact-owned
+  // provenance must win; otherwise one Steam item appears as several
+  // selectable "Steam Workshop versions".
+  if (isWorkshopOwned(option)) {
+    return `workshop:${option.workshop_item_id ?? option.workshop_url ?? option.folder_name ?? 'unknown'}`;
+  }
+  if (option.nexus_url || sourceHasNexus(option.source)) {
+    return `nexus:${option.nexus_url ?? option.source ?? option.mod_version_id}`;
+  }
+  if (option.github_url || sourceHasGithub(option.source)) {
+    return `github:${option.github_url ?? option.source ?? option.mod_version_id}`;
+  }
+  if (isWorkshopSource(option)) {
     return `workshop:${option.workshop_item_id ?? option.workshop_url ?? option.folder_name ?? 'unknown'}`;
   }
   return [
-    option.github_url,
-    option.nexus_url,
     option.source,
     option.folder_name,
     option.mod_version_id,
@@ -376,30 +391,20 @@ function sourceHasNexus(source: string | null | undefined): boolean {
 function versionOptionSourceKeys(
   option: LocalModVersionOption,
 ): Array<'steamWorkshop' | 'gitHub' | 'nexus' | 'link' | 'manual'> {
-  if (
-    option.install_source === 'steam_workshop' ||
-    option.workshop_item_id ||
-    option.workshop_url
-  ) {
+  if (isWorkshopOwned(option)) {
     return ['steamWorkshop'];
   }
   const keys: Array<'gitHub' | 'nexus'> = [];
   if (option.github_url || sourceHasGithub(option.source)) keys.push('gitHub');
   if (option.nexus_url || sourceHasNexus(option.source)) keys.push('nexus');
   if (keys.length > 0) return keys;
+  if (isWorkshopSource(option)) return ['steamWorkshop'];
   if (option.source?.trim()) return ['link'];
   return ['manual'];
 }
 
 function rowSourceIdentity(row: ProfileMembershipMod, info?: ModInfo): string {
-  if (
-    row.install_source === 'steam_workshop' ||
-    info?.install_source === 'steam_workshop' ||
-    row.workshop_item_id ||
-    info?.workshop_item_id ||
-    row.workshop_url ||
-    info?.workshop_url
-  ) {
+  if (isWorkshopSource(row) || isWorkshopSource(info)) {
     return `workshop:${row.workshop_item_id ?? info?.workshop_item_id ?? row.workshop_url ?? info?.workshop_url ?? row.folder_name ?? 'unknown'}`;
   }
   return [
@@ -430,7 +435,7 @@ function versionOptionForSourceLabel(
   row: ProfileMembershipMod,
   info?: ModInfo | null,
 ): LocalModVersionOption {
-  if (option.install_source === 'steam_workshop') return option;
+  if (isWorkshopOwned(option)) return option;
   return {
     ...option,
     github_url: option.github_url ?? info?.github_url ?? row.github_url ?? null,
@@ -507,6 +512,7 @@ export function LibraryTable({
   anyUpdating,
   anyRecoveryInFlight,
   onUpdate,
+  onReviewUpdates,
   onTogglePin,
   onSnooze,
   onUnsnooze,
@@ -548,6 +554,17 @@ export function LibraryTable({
       (packScoped ? 'loadOrder' : modpackName ? 'inPackFirst' : 'nameAsc'),
   );
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
+  const [guidedDelete, setGuidedDelete] = useState<{ rowKey: string; versionKey: string } | null>(null);
+
+  useEffect(() => {
+    if (!guidedDelete) return;
+    const timeout = window.setTimeout(() => setGuidedDelete(null), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [guidedDelete]);
+
+  useEffect(() => {
+    setGuidedDelete(null);
+  }, [reloadToken]);
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
   const [storageSaving, setStorageSaving] = useState<string | null>(null);
   const [removingVersionKey, setRemovingVersionKey] = useState<string | null>(
@@ -717,6 +734,105 @@ export function LibraryTable({
     [modInfoByKey],
   );
 
+  const logicalRowsByKey = useMemo(() => {
+    const groups = new Map<string, ProfileMembershipMod[]>();
+    for (const row of effectiveGrid?.mods ?? []) {
+      const key = logicalModKey(row, modInfoForRow(row));
+      const group = groups.get(key) ?? [];
+      group.push(row);
+      groups.set(key, group);
+    }
+    return groups;
+  }, [effectiveGrid, modInfoForRow]);
+
+  const groupRowsFor = useCallback((row: ProfileMembershipMod) =>
+    logicalRowsByKey.get(logicalModKey(row, modInfoForRow(row))) ?? [row],
+  [logicalRowsByKey, modInfoForRow]);
+
+  const versionOptionsByKey = useMemo(() => {
+    const map = new Map<string, LocalModVersionOption[]>();
+    if (!effectiveGrid) return map;
+    for (const row of effectiveGrid.mods) {
+      const options = dedupeVersionOptions(row.version_options ?? []);
+      const variantCount = new Set(options.map(versionOptionVariantIdentity)).size;
+      if (options.length > 1 && variantCount > 1) {
+        map.set(membershipRowKey(row), options);
+      }
+    }
+    const groups = new Map<string, ProfileMembershipMod[]>();
+    for (const row of effectiveGrid.mods) {
+      if (map.has(membershipRowKey(row))) continue;
+      const info = modInfoForRow(row);
+      const groupKey = logicalModKey(row, info);
+      const existing = groups.get(groupKey);
+      if (existing) existing.push(row);
+      else groups.set(groupKey, [row]);
+    }
+    for (const group of groups.values()) {
+      const variantCount = new Set(
+        group.map((row) => rowVariantIdentity(row, modInfoForRow(row))),
+      ).size;
+      const canSelectVersions = group.every((row) => !!row.mod_version_id);
+      if (group.length < 2 || variantCount < 2 || !canSelectVersions) continue;
+      const sortedGroup = [...group].sort((a, b) => {
+        const byVersion = modVersionSortValue(b.version).localeCompare(
+          modVersionSortValue(a.version),
+          undefined,
+          { sensitivity: 'base', numeric: true },
+        );
+        return byVersion || compareMembershipDisplayName(a, b);
+      });
+      const fallbackOptions = dedupeVersionOptions(sortedGroup.map((option) => ({
+        mod_version_id: membershipRowKey(option),
+        name: option.name,
+        version: option.version,
+        folder_name: option.folder_name,
+        mod_id: option.mod_id,
+        display_name: option.display_name,
+        source: option.source,
+        github_url: option.github_url,
+        nexus_url: option.nexus_url,
+        install_source: option.install_source,
+        workshop_item_id: option.workshop_item_id,
+        workshop_url: option.workshop_url,
+        installed: true,
+        installed_enabled: option.installed_enabled,
+        cached: false,
+        pinned: false,
+        used_by_profiles: option.profiles
+          .filter((profile) => profile.included)
+          .map((profile) => profile.profile_name),
+      })));
+      for (const row of group) {
+        if (map.has(membershipRowKey(row))) continue;
+        map.set(membershipRowKey(row), fallbackOptions);
+      }
+    }
+    return map;
+  }, [effectiveGrid, modInfoByKey, modInfoForRow]);
+
+  const groupAuditsFor = useCallback((row: ProfileMembershipMod) => {
+    const seen = new Set<ModAuditEntry>();
+    const entries: ModAuditEntry[] = [];
+    for (const member of groupRowsFor(row)) {
+      const memberKey = membershipRowKey(member);
+      const loadedOptions = versionOptionsByKey.get(memberKey) ?? [];
+      for (const candidate of [
+        member,
+        ...(member.version_options ?? []),
+        ...loadedOptions,
+      ]) {
+        const audit = auditByKey?.get(candidate.mod_version_id ?? '') ??
+          auditByKey?.get(candidate.folder_name ?? '') ?? auditByKey?.get(candidate.name);
+        if (audit && !seen.has(audit)) {
+          seen.add(audit);
+          entries.push(audit);
+        }
+      }
+    }
+    return entries;
+  }, [auditByKey, groupRowsFor, versionOptionsByKey]);
+
   const duplicateSourceConflictKeys = useMemo(() => {
     if (!effectiveGrid) return new Set<string>();
     const groups = new Map<
@@ -726,6 +842,7 @@ export function LibraryTable({
     for (const row of effectiveGrid.mods) {
       const info = modInfoForRow(row);
       if (row.installed === false && !info) continue;
+      if (!row.installed_enabled) continue;
       const key = `${duplicateSourceFamilyKey(row, info)}::${modVersionSortValue(row.version)}`;
       const group =
         groups.get(key) ??
@@ -842,10 +959,6 @@ export function LibraryTable({
     ) =>
       loadOrderIndex(a) - loadOrderIndex(b) ||
       compareMembershipDisplayName(a, b);
-    const auditForRow = (row: ProfileMembershipMod) =>
-      auditByKey?.get(membershipRowKey(row)) ??
-      auditByKey?.get(row.folder_name ?? '') ??
-      auditByKey?.get(row.name);
     const searchedRows = query
       ? preFiltered.filter((row) => {
           // Tags are part of the haystack so "anime" finds every mod the
@@ -933,8 +1046,8 @@ export function LibraryTable({
         return compareMembershipDisplayName(a, b);
       }
       if (sort === 'updatesFirst') {
-        const au = isActionableUpdate(auditForRow(a));
-        const bu = isActionableUpdate(auditForRow(b));
+        const au = projectProviderUpdates(groupAuditsFor(a)).hasPending;
+        const bu = projectProviderUpdates(groupAuditsFor(b)).hasPending;
         if (au !== bu) return au ? -1 : 1;
         return compareMembershipDisplayName(a, b);
       }
@@ -970,73 +1083,12 @@ export function LibraryTable({
     modInfoForRow,
     loadOrderDraft,
     auditByKey,
+    groupAuditsFor,
     packScoped,
     packVisualSortEnabled,
   ]);
 
   const visibleItems = filteredRows.slice(0, visibleLimit);
-
-  const versionOptionsByKey = useMemo(() => {
-    const map = new Map<string, LocalModVersionOption[]>();
-    if (!effectiveGrid) return map;
-    for (const row of effectiveGrid.mods) {
-      const options = dedupeVersionOptions(row.version_options ?? []);
-      const variantCount = new Set(options.map(versionOptionVariantIdentity)).size;
-      if (options.length > 1 && variantCount > 1) {
-        map.set(membershipRowKey(row), options);
-      }
-    }
-    const groups = new Map<string, ProfileMembershipMod[]>();
-    for (const row of effectiveGrid.mods) {
-      if (map.has(membershipRowKey(row))) continue;
-      const info = modInfoForRow(row);
-      const groupKey = logicalModKey(row, info);
-      const existing = groups.get(groupKey);
-      if (existing) existing.push(row);
-      else groups.set(groupKey, [row]);
-    }
-    for (const group of groups.values()) {
-      const variantCount = new Set(
-        group.map((row) => rowVariantIdentity(row, modInfoForRow(row))),
-      ).size;
-      const canSelectVersions = group.every((row) => !!row.mod_version_id);
-      if (group.length < 2 || variantCount < 2 || !canSelectVersions) continue;
-      const sortedGroup = [...group].sort((a, b) => {
-        const byVersion = modVersionSortValue(b.version).localeCompare(
-          modVersionSortValue(a.version),
-          undefined,
-          { sensitivity: 'base', numeric: true },
-        );
-        return byVersion || compareMembershipDisplayName(a, b);
-      });
-      const fallbackOptions = dedupeVersionOptions(sortedGroup.map((option) => ({
-        mod_version_id: membershipRowKey(option),
-        name: option.name,
-        version: option.version,
-        folder_name: option.folder_name,
-        mod_id: option.mod_id,
-        display_name: option.display_name,
-        source: option.source,
-        github_url: option.github_url,
-        nexus_url: option.nexus_url,
-        install_source: option.install_source,
-        workshop_item_id: option.workshop_item_id,
-        workshop_url: option.workshop_url,
-        installed: true,
-        installed_enabled: option.installed_enabled,
-        cached: false,
-        pinned: false,
-        used_by_profiles: option.profiles
-          .filter((profile) => profile.included)
-          .map((profile) => profile.profile_name),
-      })));
-      for (const row of group) {
-        if (map.has(membershipRowKey(row))) continue;
-        map.set(membershipRowKey(row), fallbackOptions);
-      }
-    }
-    return map;
-  }, [effectiveGrid, modInfoByKey, modInfoForRow]);
 
   async function handleSelectRowVersion(
     row: ProfileMembershipMod,
@@ -1709,11 +1761,35 @@ export function LibraryTable({
           const rowKey = membershipRowKey(row);
           const modInfo = modInfoForRow(row);
           const audit = auditByKey?.get(rowKey) ?? auditByKey?.get(row.name);
+          const updatePlans = projectProviderUpdates(groupAuditsFor(row)).pendingPlans;
           const sourceEditorSlot =
             modInfo && renderSourceEditor
               ? renderSourceEditor(modInfo)
               : undefined;
           const versionRows = versionOptionsByKey.get(rowKey) ?? [];
+          const representativeIsWorkshop = isWorkshopSource(modInfo) || isWorkshopSource(row);
+          const removableLocalOption = representativeIsWorkshop
+            ? versionRows.find((option) => !!option.github_url || !!option.nexus_url || option.install_source === 'local')
+            : undefined;
+          const removableLocalRow = representativeIsWorkshop && !removableLocalOption
+            ? groupRowsFor(row).find((member) => {
+                if (membershipRowKey(member) === rowKey) return false;
+                const info = modInfoForRow(member);
+                return member.install_source !== 'steam_workshop' && info?.install_source !== 'steam_workshop';
+              })
+            : undefined;
+          const removableLocalInfo = removableLocalRow ? modInfoForRow(removableLocalRow) : undefined;
+          const removableSourceKeys = [
+            removableLocalOption?.github_url || removableLocalInfo?.github_url || removableLocalRow?.github_url ? 'gitHub' : null,
+            removableLocalOption?.nexus_url || removableLocalInfo?.nexus_url || removableLocalRow?.nexus_url ? 'nexus' : null,
+          ].filter((key): key is string => !!key);
+          const removableLocalVersion = removableLocalOption || removableLocalRow ? {
+            key: removableLocalOption?.mod_version_id ?? membershipRowKey(removableLocalRow!),
+            version: removableLocalOption?.version ?? removableLocalRow!.version,
+            sourceLabel: removableSourceKeys.length
+              ? removableSourceKeys.map((key) => t(`mods.versionSource.${key}`)).join(t('mods.versionSource.joiner'))
+              : t('mods.local'),
+          } : undefined;
           const rowActionHandlers = modInfo
             ? {
                 onUpdate: onUpdate ? () => onUpdate(modInfo) : undefined,
@@ -1724,7 +1800,12 @@ export function LibraryTable({
                 onUnsnooze: onUnsnooze ? () => onUnsnooze(modInfo) : undefined,
                 onRepair: onRepair ? () => onRepair(modInfo) : undefined,
                 onRollback: onRollback ? () => onRollback(modInfo) : undefined,
-                onDelete: onDelete ? () => onDelete(modInfo) : undefined,
+                onDelete: onDelete ? async () => {
+                  await onDelete(modInfo, removableLocalVersion);
+                  if (representativeIsWorkshop && removableLocalVersion) {
+                    setGuidedDelete({ rowKey, versionKey: removableLocalVersion.key });
+                  }
+                } : undefined,
                 onCopyVersion: onCopyVersion
                   ? () => onCopyVersion(modInfo)
                   : undefined,
@@ -1832,6 +1913,10 @@ export function LibraryTable({
               onToggleStorage={handleToggleStorage}
               mod={modInfo}
               audit={audit}
+              updatePlans={updatePlans}
+              onReviewUpdates={updatePlans.length > 0 ? onReviewUpdates : undefined}
+              removableLocalVersion={guidedDelete?.rowKey === rowKey && guidedDelete.versionKey === removableLocalVersion?.key ? removableLocalVersion : undefined}
+              onClearDeleteGuidance={() => setGuidedDelete(null)}
               gameRunning={gameRunning}
               gameVersion={gameVersion}
               isUpdating={!!modInfo && updatingKey === rowKey}
@@ -1842,6 +1927,8 @@ export function LibraryTable({
               {...rowActionHandlers}
               selectedVersionKey={selectedVersionKeyByRow.get(rowKey) ?? rowKey}
               versionOptions={versionRows.map((option) => {
+                const isSelectedVersion = option.mod_version_id ===
+                  (selectedVersionKeyByRow.get(rowKey) ?? rowKey);
                 const sourceLabelOption = versionOptionForSourceLabel(
                   option,
                   row,
@@ -1850,17 +1937,12 @@ export function LibraryTable({
                 return {
                   key: option.mod_version_id,
                   version: option.version,
-                  label: t('mods.versionOption', {
-                    version: cleanDisplayVersion(option.version),
-                    state: option.installed_enabled
-                      ? t('mods.versionActiveSuffix')
-                      : t('mods.versionStoredSuffix'),
-                  }),
+                  label: cleanDisplayVersion(option.version),
                   sourceLabel: versionOptionSourceKeys(sourceLabelOption)
                     .map((key) => t(`mods.versionSource.${key}`))
                     .join(t('mods.versionSource.joiner')),
                   installed: option.installed,
-                  installedEnabled: option.installed_enabled,
+                  installedEnabled: isSelectedVersion,
                   cached: option.cached,
                   pinned: option.pinned,
                   source: option.source ?? null,
@@ -1872,9 +1954,10 @@ export function LibraryTable({
                   usedByProfiles: option.used_by_profiles ?? [],
                 };
               })}
-              onSelectVersion={(selectedKey) =>
-                handleSelectRowVersion(row, selectedKey)
-              }
+              onSelectVersion={(selectedKey) => {
+                setGuidedDelete(null);
+                return handleSelectRowVersion(row, selectedKey);
+              }}
               onRemoveVersion={(option) => {
                 const selected = versionRows.find(
                   (candidate) => candidate.mod_version_id === option.key,

@@ -22,7 +22,9 @@
 import { useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
+  Archive,
   Check,
+  CircleCheck,
   Clock,
   Copy,
   Download,
@@ -53,6 +55,11 @@ import { Select } from './Select';
 import { useRowMenu } from '../contexts/RowMenuContext';
 import { isUpToDate } from '../lib/auditState';
 import {
+  isWorkshopOwned as isWorkshopOwnedEntry,
+  isWorkshopSource,
+  workshopSourceUrl,
+} from '../lib/modIdentity';
+import {
   resolveRowMenuOrder,
   ROW_MENU_OPEN_EVENT,
   type RowMenuItemId,
@@ -64,7 +71,14 @@ import type {
   ModInstallSource,
   ProfileMembershipMod,
   ProfileMembershipState,
+  UpdatePlanItem,
 } from '../types';
+
+export interface StoredVersionGuidance {
+  key: string;
+  version: string;
+  sourceLabel: string;
+}
 
 export function membershipRowKey(row: ProfileMembershipMod): string {
   return row.mod_version_id ?? row.folder_name ?? row.mod_id ?? row.name;
@@ -79,30 +93,24 @@ export function libraryStorageKey(row: ProfileMembershipMod): string {
 }
 
 function hasWorkshopSource(row: ProfileMembershipMod, mod?: ModInfo | null): boolean {
-  const source = mod?.source ?? row.source ?? '';
-  return (
-    mod?.install_source === 'steam_workshop' ||
-    row.install_source === 'steam_workshop' ||
-    !!mod?.workshop_item_id ||
-    !!row.workshop_item_id ||
-    !!mod?.workshop_url ||
-    !!row.workshop_url ||
-    source.includes('steamcommunity.com/sharedfiles') ||
-    source.startsWith('steam://')
-  );
+  // Reuse the canonical helper so the "is this a Steam Workshop mod?"
+  // heuristic (install_source / workshop_item_id / workshop_url / source
+  // URL shape) stays in one place across the row, the useModLibrary hook,
+  // and the backend guards. Either the ModInfo or the membership row can
+  // carry the workshop-ness bits, so OR the two.
+  return isWorkshopSource(mod) || isWorkshopSource(row);
 }
 
 function isWorkshopOwned(row: ProfileMembershipMod, mod?: ModInfo | null): boolean {
-  return mod?.install_source === 'steam_workshop' || row.install_source === 'steam_workshop';
+  // Stricter than hasWorkshopSource: only true when Steam actually owns
+  // the install (install_source === 'steam_workshop'). Drives delete
+  // guidance — we should not warn "Workshop-managed, use Steam" for a
+  // mod that merely carries a workshop URL in its notes.
+  return isWorkshopOwnedEntry(mod) || isWorkshopOwnedEntry(row);
 }
 
 function workshopUrlFor(row: ProfileMembershipMod, mod?: ModInfo | null): string | null {
-  const source = mod?.source ?? row.source ?? null;
-  return mod?.workshop_url ?? row.workshop_url ?? (
-    source?.includes('steamcommunity.com/sharedfiles') || source?.startsWith('steam://')
-      ? source
-      : null
-  );
+  return workshopSourceUrl(mod) ?? workshopSourceUrl(row);
 }
 
 /**
@@ -225,6 +233,9 @@ export interface LibraryRowProps {
   /** Audit entry from getAuditByKey lookup. Undefined when audit hasn't
    *  run for this row. */
   audit?: ModAuditEntry | undefined;
+  updatePlans?: UpdatePlanItem[];
+  removableLocalVersion?: StoredVersionGuidance;
+  onClearDeleteGuidance?: () => void;
   /** Current game running state — disables destructive actions. */
   gameRunning?: boolean;
   /** Current STS2 game version, drives the min_game_version warning. */
@@ -246,6 +257,10 @@ export interface LibraryRowProps {
   anyRecoveryInFlight?: boolean;
 
   onUpdate?: () => void;
+  /** Open the review sheet for a group of provider update plans. Wired
+   *  through from ModLibrary/ModpackDetail so the provider-evidence pills
+   *  on a row with pending plans stay clickable (never silently apply). */
+  onReviewUpdates?: () => void;
   onTogglePin?: () => void;
   onSnooze?: () => void;
   onUnsnooze?: () => void;
@@ -291,6 +306,9 @@ export function LibraryRow({
   onToggleStorage,
   mod,
   audit,
+  updatePlans = [],
+  removableLocalVersion,
+  onClearDeleteGuidance = noop,
   gameRunning = false,
   gameVersion,
   versionOptions = [],
@@ -304,6 +322,7 @@ export function LibraryRow({
   anyUpdating = false,
   anyRecoveryInFlight = false,
   onUpdate = noop,
+  onReviewUpdates,
   onTogglePin = noop,
   onSnooze = noop,
   onUnsnooze = noop,
@@ -388,12 +407,16 @@ export function LibraryRow({
   // tag (compatibleTag); Nexus-only updates fall back to nexus_version so
   // the pill shows a real version string rather than undefined.
   const updateDisplayVersion = compatibleTag ?? audit?.nexus_version ?? null;
+  const hasProviderPlanPayload = audit
+    ? audit.update_plans !== undefined || audit.update_plan !== undefined
+    : false;
   // Show the update pill for a GitHub update (when compatibleTag is known)
   // OR for a Nexus-only update (nexus_update_available is true). Bundles
   // and Nexus-only mods have no github_url, so gating on github_url alone
   // was silently hiding their "update available" state.
   const showUpdatePill =
     !!audit &&
+    !hasProviderPlanPayload &&
     audit.needs_update &&
     !workshopOwned &&
     !audit.pinned &&
@@ -406,7 +429,9 @@ export function LibraryRow({
   const showFrozenPill = !!mod?.pinned;
   const showSnoozedPill = !!audit?.snoozed;
   const workshopUpdatePending =
-    workshopRow && !!(mod?.workshop_update_pending || row.workshop_update_pending);
+    workshopRow &&
+    !updatePlans.some((plan) => plan.provider === 'steam') &&
+    !!(mod?.workshop_update_pending || row.workshop_update_pending);
   const auditError = audit?.error ?? null;
   const minGameViolated =
     !!mod?.min_game_version &&
@@ -431,6 +456,10 @@ export function LibraryRow({
     if (option.cached) return t('mods.versionSavedStatus');
     return t('mods.versionStoredStatus');
   };
+  const providerLabel = (provider: string) => provider
+    .split('+')
+    .map((part) => part === 'github' ? t('mods.gitHub') : part === 'nexus' ? t('mods.nexus') : part === 'steam' ? t('mods.steamWorkshop') : part)
+    .join(t('mods.versionSource.joiner'));
   const versionWorkshopUrl = (option: LibraryRowVersionOption) =>
     option.workshopUrl ??
     (option.workshopItemId
@@ -670,7 +699,7 @@ export function LibraryRow({
                       <Check size={9} /> {t('mods.latest')}
                     </span>
                   )}
-                {showUpdatePill && (
+                {showUpdatePill && updatePlans.length === 0 && (
                   <button
                     type="button"
                     className="gf-pill gf-pill-update"
@@ -703,6 +732,51 @@ export function LibraryRow({
                     )}
                   </button>
                 )}
+                {updatePlans.map((plan) => {
+                  const pillKey = `${plan.target.mod_version_id ?? plan.target.folder_name ?? plan.target.mod_id ?? plan.target.name}:${plan.provider}`;
+                  const pillClassName = `gf-pill gf-pill-update${plan.provider === 'steam' ? ' gf-pill-update-steam' : ''}`;
+                  const pillTitle = plan.provider === 'steam'
+                    ? t('mods.steamUpdateTitle')
+                    : t(`mods.updatePlan.capability.${plan.capability}`);
+                  const pillContent = (
+                    <>
+                      <AlertTriangle size={9} />
+                      {plan.provider === 'steam'
+                        ? t('mods.steamUpdateAvailable')
+                        : t('mods.providerUpdateEvidence', {
+                            provider: providerLabel(plan.provider),
+                            current: cleanVersion(plan.current_version),
+                            target: cleanVersion(plan.target_version) || t('unknown'),
+                          })}
+                    </>
+                  );
+                  // When a review-updates callback is wired, expose the pill as
+                  // an interactive button so the row has an affordance to open
+                  // the review sheet. Without a callback we fall back to the
+                  // original inert <span> (backward compatible for callers that
+                  // only want the evidence, not the click).
+                  if (onReviewUpdates) {
+                    return (
+                      <button
+                        type="button"
+                        key={pillKey}
+                        className={pillClassName}
+                        title={pillTitle}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onReviewUpdates();
+                        }}
+                      >
+                        {pillContent}
+                      </button>
+                    );
+                  }
+                  return (
+                    <span key={pillKey} className={pillClassName} title={pillTitle}>
+                      {pillContent}
+                    </span>
+                  );
+                })}
                 {showBlockedPill && (
                   <span
                     className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
@@ -821,6 +895,20 @@ export function LibraryRow({
                         value: option.key,
                         label: (
                           <span className="gf-version-option-label">
+                            <span
+                              className={`gf-version-option-status${option.installedEnabled ? ' is-active' : ' is-stored'}`}
+                              role="img"
+                              aria-label={option.installedEnabled
+                                ? t('mods.versionActiveTitle')
+                                : t('mods.versionStoredTitle')}
+                              title={option.installedEnabled
+                                ? t('mods.versionActiveTitle')
+                                : t('mods.versionStoredTitle')}
+                            >
+                              {option.installedEnabled
+                                ? <CircleCheck size={13} aria-hidden="true" />
+                                : <Archive size={13} aria-hidden="true" />}
+                            </span>
                             <span className="gf-version-option-main">
                               {option.label}
                             </span>
@@ -836,10 +924,13 @@ export function LibraryRow({
                   </label>
                   <button
                     type="button"
-                    className="gf-btn-3 gf-btn-icon gf-version-manage"
-                    title={t('mods.versionManageTitle')}
-                    aria-label={t('mods.versionManageTitle')}
-                    onClick={() => setVersionManagerOpen(true)}
+                    className={`gf-btn-3 gf-btn-icon gf-version-manage${removableLocalVersion ? ' is-guided' : ''}`}
+                    title={removableLocalVersion ? t('mods.versionManageGuided', { source: removableLocalVersion.sourceLabel, version: cleanVersion(removableLocalVersion.version) }) : t('mods.versionManageTitle')}
+                    aria-label={removableLocalVersion ? t('mods.versionManageGuided', { source: removableLocalVersion.sourceLabel, version: cleanVersion(removableLocalVersion.version) }) : t('mods.versionManageTitle')}
+                    onClick={() => {
+                      onClearDeleteGuidance();
+                      setVersionManagerOpen(true);
+                    }}
                   >
                     <SlidersHorizontal size={13} />
                   </button>
@@ -1238,7 +1329,7 @@ function LibraryRowKebab(props: LibraryRowKebabProps) {
   const canSnooze =
     !!audit?.snoozed || (!!audit?.needs_update && !!snoozeTargetVersion);
   const hasUserConfirmedGithub = !!mod.github_url && !mod.github_auto_detected;
-  const workshopOwned = mod.install_source === 'steam_workshop';
+  const workshopOwned = isWorkshopOwnedEntry(mod);
 
   // Rebuilt per render — cheap, and the menu only mounts/opens on demand. Don't memoize (it would force listing every closure capture as a dep).
   // One descriptor per customizable id: contextual availability + how to render.

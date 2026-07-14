@@ -11,15 +11,21 @@
  * view can position them in its own body.
  */
 import { useTranslation } from 'react-i18next';
-import { ClipboardCheck, Download, RefreshCw } from 'lucide-react';
+import { ClipboardCheck, ListChecks, RefreshCw } from 'lucide-react';
 
 import { Button } from './Button';
 import { AddModsMenu } from './AddModsMenu';
-import { countGithubUpdates, isGithubBulkUpdate } from '../lib/auditState';
+import { projectProviderUpdates } from '../lib/auditState';
 import type { ModLibrary } from '../hooks/useModLibrary';
+import { UpdatePlanSheet } from './UpdatePlanSheet';
 
 export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
   const { t } = useTranslation();
+  // Sheet visibility lives on the hook so the per-row provider-evidence
+  // pills can open the same sheet (F7). Keep the same local var names
+  // here for a minimum-diff render body.
+  const showPlan = lib.planSheetOpen;
+  const setShowPlan = (open: boolean) => (open ? lib.openPlanSheet() : lib.closePlanSheet());
   const {
     auditResults,
     auditing,
@@ -36,12 +42,9 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           matches the modpack view's "+ Add mods" dropdown. */}
       <AddModsMenu lib={lib} buttonClassName="gf-btn gf-btn-sm" />
       {(() => {
-        const ghUpdateCount = auditResults ? countGithubUpdates(auditResults) : 0;
-        const ghUpdateNames = auditResults
-          ? auditResults
-              .filter(isGithubBulkUpdate)
-              .map((r) => r.mod_name)
-          : [];
+        const projection = projectProviderUpdates(auditResults ?? []);
+        const hasPending = projection.hasPending;
+        const hasSteamAdvisory = projection.pendingPlans.some((plan) => plan.provider === 'steam');
 
         if (auditing) {
           return (
@@ -56,7 +59,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           return (
             <Button variant="primary" size="sm" disabled>
               <RefreshCw size={14} className="animate-spin" />
-              {t('mods.updatingCount', { count: ghUpdateCount })}
+              {t('mods.updatingCount', { count: projection.downloadableCount })}
             </Button>
           );
         }
@@ -70,7 +73,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           );
         }
 
-        if (ghUpdateCount === 0) {
+        if (!hasPending) {
           return (
             <>
               <span className="gf-pill gf-pill-ok gf-pill-toolbar" title={t('mods.allUpToDate')}>
@@ -83,11 +86,29 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
           );
         }
 
+        // Steam-managed plans remain available as row/review-sheet evidence,
+        // but they are not actionable downloads and must never become a
+        // misleading "Review 0 updates" toolbar action.
+        if (projection.actionableCount === 0) {
+          return (
+            <>
+              {hasSteamAdvisory && (
+                <span className="gf-pill gf-pill-update gf-pill-toolbar" title={t('mods.steamUpdateTitle')}>
+                  {t('mods.steamUpdateAvailable')}
+                </span>
+              )}
+              <Button variant="ghost" size="sm" onClick={handleCheckUpdates} title={t('mods.reaudit')}>
+                <RefreshCw size={14} /> {t('mods.reaudit')}
+              </Button>
+            </>
+          );
+        }
+
         return (
           <>
-            <Button variant="primary" size="sm" onClick={() => updateAllGithub(ghUpdateNames)} title={t('mods.updateAllTitle')}>
-              <Download size={14} />
-              {t('mods.updateAllLabel', { count: ghUpdateCount })}
+            <Button variant="primary" size="sm" onClick={() => setShowPlan(true)} title={t('mods.reviewUpdatesTitle')}>
+              <ListChecks size={14} />
+              {t('mods.reviewUpdatesLabel', { count: projection.actionableCount })}
             </Button>
             <Button variant="ghost" size="sm" onClick={handleCheckUpdates} title={t('mods.reaudit')}>
               <RefreshCw size={14} /> {t('mods.reaudit')}
@@ -101,6 +122,7 @@ export function ModLibraryToolbar({ lib }: { lib: ModLibrary }) {
         <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
         {refreshing ? t('common.refreshing') : t('common.refresh')}
       </Button>
+      {showPlan && <UpdatePlanSheet plans={projectProviderUpdates(auditResults ?? []).pendingPlans} applying={updatingAll} onApply={updateAllGithub} onClose={() => setShowPlan(false)} onOpenSource={lib.openUpdatePlanSource} onUnfreeze={lib.unfreezeUpdatePlan} />}
     </div>
   );
 }

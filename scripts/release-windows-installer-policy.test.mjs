@@ -56,8 +56,17 @@ test('Windows setup EXE offers an opt-in app-data cleanup on uninstall', () => {
   assert.match(hooks, /NSIS_HOOK_PREUNINSTALL/);
   assert.match(hooks, /Remove STS2 Mod Manager saved modpacks, settings, backups, logs, and cached downloads/);
   assert.match(hooks, /MB_YESNO\|MB_ICONQUESTION/);
+  assert.match(hooks, /\$UpdateMode\s*<>\s*1/);
+  assert.match(hooks, /\/SD\s+IDNO/);
   assert.match(hooks, /RMDir\s+\/r\s+"\$APPDATA\\sts2-mod-manager"/);
   assert.match(hooks, /RMDir\s+\/r\s+"\$LOCALAPPDATA\\sts2-mod-manager"/);
+  const guardStart = hooks.indexOf('${If} $UpdateMode <> 1');
+  const guardEnd = hooks.indexOf('${EndIf}', guardStart);
+  assert.ok(guardStart >= 0 && guardEnd > guardStart, 'cleanup must be enclosed by the update-mode guard');
+  const guardedCleanup = hooks.slice(guardStart, guardEnd);
+  assert.match(guardedCleanup, /MB_YESNO\|MB_ICONQUESTION/);
+  assert.match(guardedCleanup, /RMDir\s+\/r\s+"\$APPDATA\\sts2-mod-manager"/);
+  assert.match(guardedCleanup, /RMDir\s+\/r\s+"\$LOCALAPPDATA\\sts2-mod-manager"/);
   const removalLines = hooks.split('\n').filter((line) => /RMDir\s+\/r/.test(line)).join('\n');
   assert.doesNotMatch(removalLines, /sts2-mod-manager-dev/);
   assert.doesNotMatch(removalLines, /SlayTheSpire2|mods_disabled|steamapps|workshop/i);

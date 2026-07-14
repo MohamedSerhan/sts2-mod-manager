@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check, X, GitBranch, ExternalLink, Search, Save, StickyNote, Link as LinkIcon, Type, FileText, Tags } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ModInfo } from '../types';
+import { workshopSourceUrl } from '../lib/modIdentity';
 
 // v5 batch 2 — inline source editor drawer.
 // Two-field grid (GitHub repo + Nexus URL) with format hints, per-field
@@ -45,12 +46,7 @@ function ghRepoFromUrl(url: string | null): string {
 }
 
 function workshopUrlFromMod(mod: ModInfo): string {
-  if (mod.workshop_url) return mod.workshop_url;
-  const source = mod.source ?? '';
-  if (source.includes('steamcommunity.com/sharedfiles') || source.startsWith('steam://')) {
-    return source;
-  }
-  return '';
+  return workshopSourceUrl(mod) ?? '';
 }
 
 export function SourceEditor({

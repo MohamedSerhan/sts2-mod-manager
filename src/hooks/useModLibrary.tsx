@@ -30,11 +30,13 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { SourceEditor } from '../components/SourceEditor';
 import { AutoDetectModal } from '../components/AutoDetectModal';
+import type { StoredVersionGuidance } from '../components/LibraryRow';
 import { nexusFilesUrl } from '../lib/nexusUrl';
 import { loadAutoAddInstallsToModpack } from '../lib/installPolicy';
 import { auditEntryKeys, auditTargetForMod } from '../lib/auditState';
+import { isWorkshopOwned } from '../lib/modIdentity';
 import { profileDisplayName } from '../lib/profileDisplay';
-import type { ModAuditEntry, ModInfo } from '../types';
+import type { ModAuditEntry, ModInfo, UpdatePlanItem } from '../types';
 import {
   deleteMod,
   installModFromFile,
@@ -66,10 +68,6 @@ function displayNameFor(mod: ModInfo): string {
 
 function modInfoRowKey(mod: ModInfo): string {
   return mod.mod_version_id ?? mod.folder_name ?? mod.mod_id ?? mod.name;
-}
-
-function isWorkshopMod(mod: ModInfo): boolean {
-  return mod.install_source === 'steam_workshop';
 }
 
 function ghRepoFromUrl(url: string | null): string {
@@ -159,6 +157,11 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   const [localVersionRevision, setLocalVersionRevision] = useState(0);
   const [repairingKey, setRepairingKey] = useState<string | null>(null);
   const [rollingBackKey, setRollingBackKey] = useState<string | null>(null);
+  // Update-plan review sheet visibility. Owned here so the toolbar's
+  // "Review updates" button AND the per-row provider-evidence pills can
+  // open the same sheet — the pills, in particular, need this state to
+  // live above the row so clicking them from LibraryTable can flip it.
+  const [planSheetOpen, setPlanSheetOpen] = useState(false);
 
   // Map ROW KEY → audit row, for O(1) per-row lookup in render.
   const auditByKey = useMemo(() => {
@@ -202,7 +205,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     // pack: toggle_mod guards on the game running (and can fail the move) while
     // the membership write doesn't — toggling first keeps disk + manifest in
     // sync instead of recording a membership the live folder never received.
-    if ((activeProfileId === targetPack || (!activeProfileId && activeProfile === targetPack)) && !mod.enabled && !isWorkshopMod(mod)) {
+    if ((activeProfileId === targetPack || (!activeProfileId && activeProfile === targetPack)) && !mod.enabled && !isWorkshopOwned(mod)) {
       await toggleMod(mod.name, mod.folder_name ?? null, true);
     }
     await setProfileModMembership(
@@ -295,7 +298,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   async function handleInlineUpdate(mod: ModInfo) {
-    if (isWorkshopMod(mod)) {
+    if (isWorkshopOwned(mod)) {
       toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
       return;
     }
@@ -375,10 +378,15 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     }
   }
 
-  async function updateAllGithubForSurface(githubUpdateNames: string[]) {
-    const updated = await updateAllGithub(githubUpdateNames, targetPack ? { profileId: targetPack } : undefined);
-    if (updated.length > 0) setLocalVersionRevision((n) => n + 1);
-    return updated;
+  async function updateAllGithubForSurface(selectedPlans: UpdatePlanItem[]) {
+    const results = await updateAllGithub(selectedPlans, targetPack ? { profileId: targetPack } : undefined);
+    if (results.some((result) => result.status === 'updated')) setLocalVersionRevision((n) => n + 1);
+    return results;
+  }
+
+  async function unfreezeUpdatePlan(plan: UpdatePlanItem) {
+    await unpinMod(plan.target.name, plan.target.folder_name ?? null);
+    await refreshAuditEntries([plan.target]);
   }
 
   async function handleTogglePin(mod: ModInfo) {
@@ -399,7 +407,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleRepair(mod: ModInfo) {
     /* v8 ignore start */
-    if (isWorkshopMod(mod)) {
+    if (isWorkshopOwned(mod)) {
       toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
       return;
     }
@@ -431,7 +439,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
 
   async function handleRollback(mod: ModInfo) {
     /* v8 ignore start */
-    if (isWorkshopMod(mod)) {
+    if (isWorkshopOwned(mod)) {
       toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
       return;
     }
@@ -466,9 +474,17 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     }
   }
 
-  async function handleDelete(mod: ModInfo) {
-    if (isWorkshopMod(mod)) {
-      toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
+  async function handleDelete(mod: ModInfo, removableLocalVersion?: StoredVersionGuidance) {
+    if (isWorkshopOwned(mod)) {
+      if (removableLocalVersion) {
+        toast.sticky(t('mods.toast.workshopManagedWithLocal', {
+          name: displayNameFor(mod),
+          source: removableLocalVersion.sourceLabel,
+          version: removableLocalVersion.version.replace(/^v/i, ''),
+        }), 'info');
+      } else {
+        toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
+      }
       return;
     }
     const ok = await confirm({
@@ -631,7 +647,7 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   }
 
   function handleAutoDetectSource(mod: ModInfo) {
-    if (isWorkshopMod(mod)) {
+    if (isWorkshopOwned(mod)) {
       toast.info(t('mods.toast.workshopManaged', { name: displayNameFor(mod) }));
       return;
     }
@@ -841,12 +857,19 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     setQuickAddUrl,
     quickAdding,
     refreshing,
+    // Update-plan review sheet — lifted here so per-row provider pills
+    // and the toolbar's Review button share one sheet.
+    planSheetOpen,
+    openPlanSheet: () => setPlanSheetOpen(true),
+    closePlanSheet: () => setPlanSheetOpen(false),
     // Toolbar actions.
     handleOpenFolder,
     handleImportFile,
     handleQuickAdd,
     handleRefresh,
     handleCheckUpdates,
+    unfreezeUpdatePlan,
+    openUpdatePlanSource: (url: string) => openExternalUrl(url),
     // Toolbar render helpers (quick-add form + auto-detect modal).
     renderQuickAddForm,
     renderAutoDetectModal,

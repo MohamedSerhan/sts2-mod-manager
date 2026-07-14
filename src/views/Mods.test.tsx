@@ -371,7 +371,7 @@ describe('<ModsView>', () => {
     expect(document.querySelectorAll('.gf-modal-back').length).toBeGreaterThan(0);
   });
 
-  it('Audit mods button transitions to "Download 1 update" when audit returns one pending GitHub update', async () => {
+  it('Audit mods button transitions to "Review 1 update" when audit returns one pending GitHub update', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', github_url: 'https://github.com/foo/bar' })]);
     registerInvokeHandler('audit_mod_versions', () => [
       {
@@ -388,6 +388,7 @@ describe('<ModsView>', () => {
         nexus_update_available: false,
         github_repo: 'foo/bar',
         update_source: 'github',
+        update_plans: [{ target: { name: 'BaseLib', folder_name: 'BaseLib' }, current_version: '3.1.2', target_version: 'v3.2.0', provider: 'github', source: 'foo/bar', capability: 'downloadable', reason: '', selectable: true, pending: true }],
       },
     ]);
     const user = userEvent.setup();
@@ -397,7 +398,7 @@ describe('<ModsView>', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^Download 1 update$/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Review 1 update$/ })).toBeInTheDocument();
     });
   });
 
@@ -1657,7 +1658,7 @@ describe('<ModsView>', () => {
     });
   });
 
-  it('clicking "Download N updates" triggers update_all_mods, not a re-audit', async () => {
+  it('reviewing and applying selected updates triggers update_all_mods, not a re-audit', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', github_url: 'https://github.com/foo/bar' })]);
     registerInvokeHandler('audit_mod_versions', () => [
       {
@@ -1674,21 +1675,20 @@ describe('<ModsView>', () => {
         pinned: false,
         nexus_update_available: false,
         update_source: 'github',
+        update_plans: [{ target: { name: 'BaseLib', folder_name: 'BaseLib' }, current_version: '3.1.2', target_version: 'v3.2.0', provider: 'github', source: 'foo/bar', capability: 'downloadable', reason: '', selectable: true, pending: true }],
       },
     ]);
     registerInvokeHandler('update_all_mods', () => [
-      { name: 'BaseLib', version: '3.2.0', enabled: true, files: [] },
+      { target: { name: 'BaseLib', folder_name: 'BaseLib' }, provider: 'github', mod_name: 'BaseLib', expected_version: 'v3.2.0', actual_version: 'v3.2.0', status: 'updated', message: null, updated_mod: { name: 'BaseLib', version: '3.2.0', enabled: true, files: [] } },
     ]);
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('BaseLib')).toBeInTheDocument(); });
     await user.click(screen.getByRole('button', { name: 'Audit mods' }));
-    const updateBtn = await screen.findByRole('button', { name: /^Download 1 update$/ });
+    const updateBtn = await screen.findByRole('button', { name: /^Review 1 update$/ });
     await user.click(updateBtn);
-    // Confirm dialog appears with the title "Download 1 update?". Scope the
-    // button query to the modal so we don't race the toolbar button.
-    const modal = (await screen.findByText(/Download 1 update\?/)).closest('.gf-modal') as HTMLElement;
-    await user.click(within(modal).getByRole('button', { name: /^Download 1 update$/ }));
+    const modal = (await screen.findByText(/Review available updates/)).closest('.gf-modal') as HTMLElement;
+    await user.click(within(modal).getByRole('button', { name: /^Download 1 selected GitHub update/ }));
     await waitFor(() => {
       expect(getInvokeCalls().some(c => c.cmd === 'update_all_mods')).toBe(true);
     });

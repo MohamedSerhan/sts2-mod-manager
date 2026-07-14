@@ -58,6 +58,7 @@ import { HelpHint } from './HelpHint';
 import { KebabDivider, KebabItem, KebabMenu, KebabSection } from './KebabMenu';
 import { EditModpackModal } from './EditModpackModal';
 import { RenameModpackModal } from './RenameModpackModal';
+import { UpdatePlanSheet } from './UpdatePlanSheet';
 import { AddModsMenu } from './AddModsMenu';
 import { LibraryTable, NO_TAGS_FILTER_VALUE } from './LibraryTable';
 import { useApp } from '../contexts/AppContext';
@@ -73,9 +74,9 @@ import {
   setProfileModsEnabled,
   toggleMod,
 } from '../hooks/useTauri';
-import { identitiesMatch } from '../lib/modIdentity';
+import { identitiesMatch, isWorkshopOwned, isWorkshopSource } from '../lib/modIdentity';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
-import { auditEntryKeys, isGithubBulkUpdate } from '../lib/auditState';
+import { projectProviderUpdates } from '../lib/auditState';
 import type {
   LocalModVersionOption,
   ModInfo,
@@ -135,7 +136,7 @@ function modKey(mod: {
 }
 
 function isWorkshopMod(mod: ModInfo): boolean {
-  return mod.install_source === 'steam_workshop';
+  return isWorkshopOwned(mod);
 }
 
 function missingNameKey(name: string): string {
@@ -209,13 +210,7 @@ function collapseAvailableMods(candidates: ModInfo[]): ModInfo[] {
 function SourceBadges({ mod }: { mod: ModInfo | undefined }) {
   const { t } = useTranslation();
   if (!mod) return null;
-  const source = mod.source ?? '';
-  const hasWorkshop =
-    isWorkshopMod(mod) ||
-    !!mod.workshop_item_id ||
-    !!mod.workshop_url ||
-    source.includes('steamcommunity.com/sharedfiles') ||
-    source.startsWith('steam://');
+  const hasWorkshop = isWorkshopSource(mod);
   const hasGithub = !!mod.github_url;
   const hasNexus = !!mod.nexus_url;
   if (!hasWorkshop && !hasGithub && !hasNexus) {
@@ -294,6 +289,7 @@ export function ModpackDetail({
   const [editing, setEditing] = useState(false);
   // Rename this pack via the small inline-validation modal.
   const [renaming, setRenaming] = useState(false);
+  const [showUpdatePlan, setShowUpdatePlan] = useState(false);
 
   const hasDrift = !!drift?.has_drift;
   // Bug 5: the header count is manifest membership (profile.mods.length) while
@@ -423,27 +419,21 @@ export function ModpackDetail({
   }, [mods, profile.mods]);
   // GitHub-updatable mods in THIS pack (drives the "N updates available"
   // pill + the update-all action).
-  const packUpdateNames = useMemo(() => {
-    const packKeys = new Set(
-      profile.mods
-        .flatMap((m) => [
-          m.mod_version_id ?? '',
-          m.folder_name ?? '',
-          m.mod_id ?? '',
-          m.name,
-        ])
-        .filter(Boolean),
-    );
-    return (auditResults ?? [])
-      .filter(
-        (r) =>
-          isGithubBulkUpdate(r) &&
-          (auditEntryKeys(r).some((key) => packKeys.has(key)) ||
-            packKeys.has(r.mod_name)),
-      )
-      .map((r) => r.mod_name);
+  const packUpdatePlans = useMemo(() => {
+    const packEntries = (auditResults ?? [])
+      .filter((entry) => {
+        const plan = entry.update_plans?.[0] ?? entry.update_plan;
+        const auditIdentity = {
+          mod_version_id: entry.mod_version_id ?? plan?.target.mod_version_id,
+          folder_name: entry.folder_name ?? plan?.target.folder_name,
+          mod_id: plan?.target.mod_id,
+          name: entry.mod_name,
+        };
+        return profile.mods.some((mod) => identitiesMatch(mod, auditIdentity));
+      });
+    return projectProviderUpdates(packEntries).pendingPlans;
   }, [auditResults, profile.mods]);
-  const updatesCount = packUpdateNames.length;
+  const updatesCount = packUpdatePlans.length;
 
   // Available = installed mods NOT already in the pack. Drift-tolerant
   // (issue #174): a reinstalled mod whose folder_name changed but whose
@@ -572,10 +562,14 @@ export function ModpackDetail({
         source: m.source ?? null,
       }));
       for (const m of targets) {
-        const steamOwned =
-          !!m.source &&
-          (m.source.includes('steamcommunity.com/sharedfiles') ||
-            m.source.startsWith('steam://'));
+        // Profile manifests do not persist install_source, so resolve the
+        // live artifact before deciding whether Steam owns it. A local
+        // GitHub/Nexus copy may retain Workshop discovery metadata and must
+        // remain deletable from the manager.
+        const installed = mods.find((candidate) => identitiesMatch(m, candidate));
+        const steamOwned = installed
+          ? isWorkshopOwned(installed)
+          : isWorkshopSource(m);
         if (!steamOwned) {
           await deleteMod(m.name, m.folder_name);
         }
@@ -780,7 +774,7 @@ export function ModpackDetail({
 
   // Updates affordance shown beside the section title. Mirrors the audit
   // button's states but scoped to this pack: not-yet-checked → "Check for
-  // updates"; checked-with-updates → "N updates available" (updates all);
+  // updates"; checked-with-updates → "N updates available" (opens review);
   // checked-current → quiet "Up to date".
   const updatesControl = lib.auditing ? (
     <span className="gf-pill gf-pill-ok gf-pill-toolbar">
@@ -804,8 +798,8 @@ export function ModpackDetail({
     <button
       type="button"
       className="gf-pill gf-pill-update gf-pill-toolbar"
-      onClick={() => lib.updateAllGithub(packUpdateNames)}
-      title={t('mods.updateAllTitle')}
+      onClick={() => setShowUpdatePlan(true)}
+      title={t('mods.reviewUpdatesTitle')}
     >
       <Download size={12} />{' '}
       {t('modpack.detail.updatesAvailable', { count: updatesCount })}
@@ -1146,6 +1140,7 @@ export function ModpackDetail({
             if (q.trim()) setLibraryOpen(true);
           }}
           extraRows={missingProfileRows}
+          onReviewUpdates={() => setShowUpdatePlan(true)}
           {...lib.tableActionProps}
         />
       </section>
@@ -1253,6 +1248,17 @@ export function ModpackDetail({
 
       {/* Auto-detect sources modal (shared). */}
       {lib.renderAutoDetectModal()}
+
+      {showUpdatePlan && (
+        <UpdatePlanSheet
+          plans={packUpdatePlans}
+          applying={lib.updatingAll}
+          onApply={lib.updateAllGithub}
+          onClose={() => setShowUpdatePlan(false)}
+          onOpenSource={lib.openUpdatePlanSource}
+          onUnfreeze={lib.unfreezeUpdatePlan}
+        />
+      )}
 
       {/* Bulk membership editor (checkbox picker). */}
       {editing && (

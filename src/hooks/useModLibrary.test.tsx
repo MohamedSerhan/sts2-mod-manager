@@ -8,7 +8,7 @@ import { useModLibrary } from './useModLibrary';
 import { AllProviders } from '../__test__/providers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
 import { AUTO_ADD_INSTALLS_TO_MODPACK_KEY } from '../lib/installPolicy';
-import type { ModAuditEntry, ModInfo } from '../types';
+import type { ModAuditEntry, ModInfo, UpdatePlanItem } from '../types';
 
 /**
  * Direct unit tests for the useModLibrary hook (otherwise only covered
@@ -40,6 +40,15 @@ function makeMod(overrides: Partial<ModInfo> = {}): ModInfo {
     github_url: null,
     nexus_url: null,
     ...overrides,
+  };
+}
+
+function makeUpdatePlan(name: string): UpdatePlanItem {
+  return {
+    target: { name, folder_name: name, mod_version_id: `${name}-version` },
+    current_version: '1.0.0', target_version: '2.0.0', provider: 'github',
+    source: `https://github.com/some/${name}`, capability: 'downloadable',
+    reason: '', selectable: true, pending: true,
   };
 }
 
@@ -422,6 +431,28 @@ describe('useModLibrary', () => {
     expect(openUrl).not.toHaveBeenCalled();
   });
 
+  it('keeps locally owned GitHub mods actionable when they also reference Workshop', async () => {
+    const githubMod = makeMod({
+      name: 'DualPublishedMod',
+      folder_name: 'DualPublishedMod',
+      install_source: 'local',
+      github_url: 'https://github.com/example/dual-published-mod',
+      workshop_url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=1234567890',
+    });
+    registerInvokeHandler('update_mod', () => makeMod({
+      ...githubMod,
+      version: '2.0.0',
+    }));
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onUpdate(githubMod);
+    });
+
+    expect(updateModCalls()).toHaveLength(1);
+    expect(screen.queryByText(/Steam Workshop manages/i)).not.toBeInTheDocument();
+  });
+
   it('handleInlineUpdate opens Nexus files as a fallback when GitHub update fails', async () => {
     const bothSourceMod = makeMod({
       name: 'Route Planner',
@@ -613,20 +644,20 @@ describe('useModLibrary', () => {
 
   it('bulk GitHub updates promote Library versions, refresh version options, and leave the target pack manifest alone', async () => {
     registerInvokeHandler('update_all_mods', () => [
-      makeMod({
+      { target: makeUpdatePlan('PackMod').target, provider: 'github', mod_name: 'PackMod', expected_version: '2.0.0', actual_version: '2.0.0', status: 'updated', message: null, updated_mod: makeMod({
         name: 'PackMod',
         version: '2.0.0',
         folder_name: 'PackMod',
         mod_id: 'pack-mod',
         github_url: 'https://github.com/some/pack-mod',
-      }),
-      makeMod({
+      }) },
+      { target: makeUpdatePlan('LibraryOnly').target, provider: 'github', mod_name: 'LibraryOnly', expected_version: '2.0.0', actual_version: '2.0.0', status: 'updated', message: null, updated_mod: makeMod({
         name: 'LibraryOnly',
         version: '2.0.0',
         folder_name: 'LibraryOnly',
         mod_id: 'library-only',
         github_url: 'https://github.com/some/library-only',
-      }),
+      }) },
     ]);
     registerInvokeHandler('audit_mod_versions', () => []);
     registerInvokeHandler('set_profile_mod_membership', () => ({}));
@@ -635,15 +666,11 @@ describe('useModLibrary', () => {
       targetPack: 'profile-123',
       onTargetPackChanged,
     }), { wrapper: AllProviders });
-    const user = userEvent.setup();
     const beforeReloadToken = result.current.versionOptionsReloadToken;
 
-    let updatePromise: Promise<unknown> | null = null;
-    act(() => {
-      updatePromise = result.current.updateAllGithub(['PackMod']);
+    await act(async () => {
+      await result.current.updateAllGithub([makeUpdatePlan('PackMod')]);
     });
-    await user.click(await screen.findByRole('button', { name: /^Download 1 update$/ }));
-    await updatePromise;
 
     expect(membershipCalls()).toHaveLength(0);
     expect(onTargetPackChanged).not.toHaveBeenCalled();
@@ -835,6 +862,23 @@ describe('useModLibrary', () => {
       included: false,
     });
     expect(onTargetPackChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('protects Steam deletion while naming the exact removable local sibling', async () => {
+    const steamMod = makeMod({
+      name: 'RitsuLib', mod_version_id: 'ritsu-steam', version: '0.4.41',
+      install_source: 'steam_workshop', workshop_item_id: '3747602295',
+    });
+    const { result } = renderHook(() => useModLibrary(), { wrapper: AllProviders });
+
+    await act(async () => {
+      await result.current.tableActionProps.onDelete(steamMod, {
+        key: 'ritsu-local', version: '0.4.40', sourceLabel: 'GitHub + Nexus',
+      });
+    });
+
+    expect(await screen.findByText(/RitsuLib.*GitHub \+ Nexus.*v0\.4\.40.*Manage stored versions/i)).toBeInTheDocument();
+    expect(getInvokeCalls().some((call) => call.cmd === 'delete_mod_cmd' || call.cmd === 'remove_library_mod_version')).toBe(false);
   });
 
   it('delete sync carries the version and source identity hints when the removed mod has them', async () => {

@@ -1,4 +1,4 @@
-import type { ModAuditEntry, ModAuditTarget } from '../types';
+import type { ModAuditEntry, ModAuditTarget, UpdatePlanItem } from '../types';
 
 export type AuditRefreshTarget = string | ModAuditTarget;
 
@@ -37,34 +37,18 @@ export function auditTargetForMod(mod: {
   };
 }
 
-export function isActionableUpdate(entry: ModAuditEntry | undefined): boolean {
-  if (!entry) return false;
-  if (entry.pinned || entry.snoozed || !entry.needs_update) return false;
-  if (entry.game_version_too_old || entry.latest_release_blocked_by_game_version) return false;
-  if (entry.update_source === 'github') return Boolean(entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag);
-  if (entry.update_source === 'both') {
-    return Boolean(entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag ?? entry.nexus_update_available);
-  }
-  return Boolean(entry.nexus_update_available || entry.latest_compatible_tag || entry.latest_release_with_assets_tag);
-}
-
-export function isGithubBulkUpdate(entry: ModAuditEntry | undefined): boolean {
-  if (!entry) return false;
-  if (entry.pinned || entry.snoozed || !entry.needs_update) return false;
-  if (entry.game_version_too_old || entry.latest_release_blocked_by_game_version) return false;
-  if (entry.update_source !== 'github' && entry.update_source !== 'both') return false;
-  return Boolean(entry.github_repo && (entry.latest_compatible_tag ?? entry.latest_release_with_assets_tag));
-}
-
 export function isUpToDate(entry: ModAuditEntry): boolean {
   const hasSource = Boolean(entry.github_repo || entry.nexus_url);
   if (!hasSource) return false;
+  const hasProviderPlanPayload = entry.update_plans !== undefined || entry.update_plan !== undefined;
   // Snoozed mods don't count as "needs update" — the user has explicitly
   // chosen to wait for the next upstream release. Treat them as up-to-date
   // from the audit's perspective so the row gets the "Latest" pill instead
   // of a stale "update available" badge.
   if (entry.snoozed) return true;
-  if (entry.needs_update) return false;
+  if (hasProviderPlanPayload ? projectProviderUpdates([entry]).hasPending : entry.needs_update) {
+    return false;
+  }
   const hasRealError = Boolean(entry.error) && !entry.github_auto_detected;
   if (hasRealError) return false;
   const goneNoAssets =
@@ -77,6 +61,56 @@ export function isUpToDate(entry: ModAuditEntry): boolean {
   return true;
 }
 
-export function countGithubUpdates(entries: ModAuditEntry[]): number {
-  return entries.filter(isGithubBulkUpdate).length;
+export interface ProviderUpdateProjection {
+  pendingPlans: UpdatePlanItem[];
+  downloadablePlans: UpdatePlanItem[];
+  downloadableCount: number;
+  reviewCount: number;
+  actionableCount: number;
+  hasPending: boolean;
+}
+
+export function projectProviderUpdates(entries: ModAuditEntry[]): ProviderUpdateProjection {
+  const pendingPlans: UpdatePlanItem[] = [];
+  const seen = new Set<string>();
+  for (const plan of entries.flatMap((entry) => (
+    entry.update_plans !== undefined
+      ? entry.update_plans
+      : entry.update_plan ? [entry.update_plan] : []
+  ))) {
+    if (!plan.pending) continue;
+    // Library rows group installed artifacts by logical mod identity. The
+    // backend can therefore report the same provider action once for a local
+    // version and again for its Workshop sibling. Collapse only an identical
+    // action here; current/target versions remain in the key so genuinely
+    // distinct Nexus lanes (for example release and beta) stay separate.
+    const logicalIdentity = plan.target.mod_id?.trim()
+      ? `mod-id:${plan.target.mod_id.trim().toLocaleLowerCase()}`
+      : `name:${plan.target.name.trim().toLocaleLowerCase()}`;
+    const key = [
+      logicalIdentity,
+      plan.provider,
+      plan.current_version,
+      plan.target_version ?? '',
+      plan.source ?? '',
+      plan.capability,
+    ].join('\u0000');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pendingPlans.push(plan);
+  }
+  const downloadablePlans = pendingPlans.filter(
+    (plan) => plan.selectable && plan.capability === 'downloadable',
+  );
+  return {
+    pendingPlans,
+    downloadablePlans,
+    downloadableCount: downloadablePlans.length,
+    reviewCount: pendingPlans.length,
+    actionableCount: pendingPlans.filter(
+      (plan) => plan.provider !== 'steam' &&
+        (plan.capability === 'downloadable' || plan.capability === 'manual'),
+    ).length,
+    hasPending: pendingPlans.length > 0,
+  };
 }

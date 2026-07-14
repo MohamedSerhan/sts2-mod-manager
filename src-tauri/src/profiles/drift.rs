@@ -54,6 +54,19 @@ pub struct ProfileDrift {
     pub has_drift: bool,
 }
 
+/// Return value of `reconcile_profile_with_disk` and the `save_profile_drift`
+/// Tauri command. Contains the saved profile and any residual drift that
+/// could not be reconciled — normally empty, but non-None surfaces a
+/// diagnostic instead of a silent success toast.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveDriftResult {
+    pub profile: super::Profile,
+    /// Non-null only when recomputing production drift after save still
+    /// detected differences (e.g. a Workshop item that Steam controls).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub residual_drift: Option<ProfileDrift>,
+}
+
 fn versions_match(profile_v: &str, disk_v: &str) -> bool {
     let pv = profile_v.trim_start_matches('v');
     let dv = disk_v.trim_start_matches('v');
@@ -71,6 +84,42 @@ fn contents_match(profile_hash: Option<&str>, disk_hash: Option<&str>) -> bool {
     match (profile_hash, disk_hash) {
         (Some(p), Some(d)) => !p.is_empty() && p.eq_ignore_ascii_case(d),
         _ => false,
+    }
+}
+
+/// The fully-enriched loadout scan shared by drift detection and Save
+/// reconciliation. Both paths must use the same scan and the same
+/// identity-matching logic so the idempotency invariant holds:
+/// after a successful Save, recomputed drift is false and a second
+/// Save writes nothing.
+struct EffectiveLoadoutSnapshot {
+    all_mods: Vec<crate::mods::ModInfo>,
+    enabled_count: usize,
+    version_db: crate::mod_versions::ModVersionsDb,
+}
+
+impl EffectiveLoadoutSnapshot {
+    fn build(mods_path: &Path, disabled_path: &Path, config_path: &Path) -> Self {
+        let mut all_mods = crate::mods::scan_mods(mods_path);
+        all_mods.extend(crate::mods::scan_workshop_mods_for_mods_path(mods_path));
+        let enabled_count = all_mods.len();
+        all_mods.extend(crate::mods::scan_disabled_mods(disabled_path));
+        crate::mod_sources::enrich_mods_with_sources(&mut all_mods, config_path);
+        crate::mod_versions::enrich_mods_with_versions(&mut all_mods, config_path);
+        let version_db = crate::mod_versions::load(config_path);
+        EffectiveLoadoutSnapshot {
+            all_mods,
+            enabled_count,
+            version_db,
+        }
+    }
+
+    fn enabled_mods(&self) -> &[crate::mods::ModInfo] {
+        &self.all_mods[..self.enabled_count]
+    }
+
+    fn disabled_mods(&self) -> &[crate::mods::ModInfo] {
+        &self.all_mods[self.enabled_count..]
     }
 }
 
@@ -105,26 +154,18 @@ pub(super) fn compute_profile_drift(
 }
 
 fn compute_profile_drift_with_registry(
-    profile: &Profile,
+    profile: &super::Profile,
     mods_path: &Path,
     disabled_path: &Path,
     config_path: &Path,
     cache_path: Option<&Path>,
 ) -> ProfileDrift {
-    let mut all_mods = crate::mods::scan_mods(mods_path);
-    all_mods.extend(crate::mods::scan_workshop_mods_for_mods_path(mods_path));
-    let enabled_count = all_mods.len();
-    all_mods.extend(crate::mods::scan_disabled_mods(disabled_path));
-    crate::mod_sources::enrich_mods_with_sources(&mut all_mods, config_path);
-    crate::mod_versions::enrich_mods_with_versions(&mut all_mods, config_path);
-    let version_db = crate::mod_versions::load(config_path);
-    let (enabled_mods, disabled_mods) = all_mods.split_at(enabled_count);
-
+    let snapshot = EffectiveLoadoutSnapshot::build(mods_path, disabled_path, config_path);
     compute_profile_drift_from_mods(
         profile,
-        enabled_mods,
-        disabled_mods,
-        Some(&version_db),
+        snapshot.enabled_mods(),
+        snapshot.disabled_mods(),
+        Some(&snapshot.version_db),
         cache_path,
     )
 }
@@ -284,38 +325,26 @@ fn compute_profile_drift_from_mods(
 /// Reconcile a profile's manifest with the current active loadout by
 /// applying ONLY the drift difference — the inverse of `repair`.
 ///
-/// This is what the "Save changes" button on the drift banner calls. It
-/// deliberately does NOT re-snapshot the whole install (the old behavior,
-/// which pulled every enabled *and disabled* mod on disk into the pack,
-/// flooding a curated pack with the entire library). Instead it mirrors the
-/// drift definition exactly:
-///   - `added`   → enabled-on-disk mods not in the pack are appended.
-///   - `removed` → pack mods no longer present on disk (neither enabled nor
-///                 disabled) are dropped.
-///   - `toggled` / `version_changed` → pack mods still on disk have their
-///                 enabled flag + version synced to disk.
+/// Uses the same `EffectiveLoadoutSnapshot` and strong-identity matching
+/// (`profile_mod_matches_disk` → version DB) as `compute_profile_drift_with_registry`
+/// so the idempotency invariant is structurally guaranteed: after a
+/// successful Save, recomputed production drift is false and a second
+/// Save writes nothing.
 ///
-/// Disabled extras on disk that aren't in the pack are left alone — they're
-/// library items, not active drift. Durable per-mod metadata (source,
-/// bundle_url, hash, files) is preserved for mods already in the pack.
+/// Steam Workshop members are included in the enabled-mods scan so they
+/// are never spuriously re-added or dropped on every Save.
 ///
-/// Post-condition: `compute_profile_drift` returns `has_drift == false`
-/// immediately after this runs (same `mod_key` matching on both sides).
+/// Post-save, a fresh drift computation is run against the saved manifest.
+/// Any residual drift is returned in `SaveDriftResult.residual_drift` rather
+/// than silently claiming success; in the normal path this field is None.
 pub(super) fn reconcile_profile_with_disk(
     name: &str,
     mods_path: &Path,
     disabled_path: &Path,
     profiles_path: &Path,
     config_path: &Path,
-) -> Result<Profile> {
-    // A *followed* (subscribed but not owned) pack's manifest belongs to its
-    // author. Saving drift would overwrite their curated set with whatever
-    // happens to be on this user's disk, so refuse it — the same gate
-    // set_profile_mod_membership and set_profile_load_order enforce. A pack
-    // you published is owned (proven by its local .share) and stays editable
-    // even though installing your own code auto-subscribed you. Repair stays
-    // allowed regardless: it only restores the manifest onto disk, never the
-    // reverse.
+    cache_path: &Path,
+) -> Result<SaveDriftResult> {
     if profile_is_edit_locked(name, profiles_path, config_path) {
         return Err(AppError::Other(format!(
             "Cannot edit subscribed profile '{}'. Duplicate it first to make a local copy.",
@@ -324,60 +353,93 @@ pub(super) fn reconcile_profile_with_disk(
     }
 
     let mut profile = load_profile(name, profiles_path)?;
-
-    let enabled_mods = crate::mods::scan_mods(mods_path);
-    let disabled_mods = crate::mods::scan_disabled_mods(disabled_path);
-
-    // installed key -> (ModInfo, enabled-on-disk). Enabled scan wins on
-    // key collision (a mod can't be in both, but be defensive).
-    let mut installed_by_key: std::collections::HashMap<String, (crate::mods::ModInfo, bool)> =
-        std::collections::HashMap::new();
-    for m in &disabled_mods {
-        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_by_key
-            .entry(key)
-            .or_insert_with(|| (m.clone(), false));
-    }
-    for m in &enabled_mods {
-        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        installed_by_key.insert(key, (m.clone(), true));
-    }
-
+    let snapshot = EffectiveLoadoutSnapshot::build(mods_path, disabled_path, config_path);
+    let enabled_count = snapshot.enabled_mods().len();
+    let mut claimed = vec![false; enabled_count];
     let mut reconciled: Vec<ProfileMod> = Vec::new();
-    let mut kept_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // 1. Keep pack mods still on disk (sync enabled + version); drop the rest.
+    // Phase 1: Keep pack mods that exist on disk (sync enabled state +
+    // version); drop pack entries with no on-disk counterpart.
     for pm in &profile.mods {
-        let key = mod_key(&pm.name, pm.folder_name.as_deref(), pm.mod_id.as_deref());
-        if let Some((info, enabled)) = installed_by_key.get(&key) {
+        // Search enabled side first.
+        let enabled_match = snapshot
+            .enabled_mods()
+            .iter()
+            .enumerate()
+            .find(|(_, disk_mod)| {
+                profile_mod_matches_disk(pm, disk_mod, Some(&snapshot.version_db))
+            });
+
+        if let Some((idx, disk_mod)) = enabled_match {
+            claimed[idx] = true;
             let mut updated = pm.clone();
-            updated.enabled = *enabled;
-            if !version_is_wildcard(&info.version) {
-                updated.version = info.version.clone();
+            updated.enabled = true;
+            if !version_is_wildcard(&disk_mod.version) {
+                updated.version = disk_mod.version.clone();
             }
             reconciled.push(updated);
-            kept_keys.insert(key);
-        }
-        // else: removed (not on disk at all) → drop from the pack.
-    }
-
-    // 2. Append enabled-on-disk mods not already in the pack (the `added`
-    //    drift). Disabled extras are intentionally skipped.
-    for m in &enabled_mods {
-        let key = mod_key(&m.name, m.folder_name.as_deref(), m.mod_id.as_deref());
-        if kept_keys.contains(&key) {
             continue;
         }
-        let mut info = m.clone();
-        info.enabled = true;
-        reconciled.push(profile_mod_from_installed(&info));
-        kept_keys.insert(key);
+
+        // Fall through to disabled folder.
+        if let Some(disk_mod) = snapshot
+            .disabled_mods()
+            .iter()
+            .find(|dm| profile_mod_matches_disk(pm, dm, Some(&snapshot.version_db)))
+        {
+            let mut updated = pm.clone();
+            updated.enabled = false;
+            if !version_is_wildcard(&disk_mod.version) {
+                updated.version = disk_mod.version.clone();
+            }
+            reconciled.push(updated);
+            continue;
+        }
+        // Not found on disk at all → drop from pack (mirrors `removed` drift).
     }
 
-    profile.mods = reconciled;
-    profile.updated_at = chrono::Utc::now();
-    save_profile(&profile, profiles_path)?;
-    Ok(hide_app_created_by(profile))
+    // Phase 2: Append enabled-on-disk mods not already in the pack
+    // (mirrors the `added` drift category). Disabled extras are library
+    // items, intentionally skipped.
+    for (idx, disk_mod) in snapshot.enabled_mods().iter().enumerate() {
+        if claimed[idx] {
+            continue;
+        }
+        let mut info = disk_mod.clone();
+        info.enabled = true;
+        reconciled.push(profile_mod_from_installed(&info));
+    }
+
+    let manifest_changed =
+        serde_json::to_value(&profile.mods)? != serde_json::to_value(&reconciled)?;
+    if manifest_changed {
+        profile.mods = reconciled;
+        profile.updated_at = chrono::Utc::now();
+        save_profile(&profile, profiles_path)?;
+    }
+    let saved_profile = hide_app_created_by(profile);
+
+    // Post-save invariant check: recompute production drift on the saved
+    // manifest. In the normal path this returns has_drift=false. Any
+    // residual is returned as a diagnostic rather than silently claiming
+    // success.
+    let post_drift = compute_profile_drift_with_registry(
+        &saved_profile,
+        mods_path,
+        disabled_path,
+        config_path,
+        Some(cache_path),
+    );
+    let residual_drift = if post_drift.has_drift {
+        Some(post_drift)
+    } else {
+        None
+    };
+
+    Ok(SaveDriftResult {
+        profile: saved_profile,
+        residual_drift,
+    })
 }
 
 /// Repair a profile: re-apply the manifest and disable active orphan mods
@@ -712,6 +774,7 @@ mod reconcile_tests {
     fn reconcile_applies_only_the_diff_not_the_whole_install() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
         let mods_path = game_tmp.path().join("mods");
         let disabled_path = game_tmp.path().join("mods_disabled");
         let profiles_path = config_tmp.path().join("profiles");
@@ -738,14 +801,16 @@ mod reconcile_tests {
         );
         save_profile(&profile, &profiles_path).unwrap();
 
-        let result = reconcile_profile_with_disk(
+        let save_result = reconcile_profile_with_disk(
             "Stable",
             &mods_path,
             &disabled_path,
             &profiles_path,
             config_tmp.path(),
+            cache_tmp.path(),
         )
         .unwrap();
+        let result = save_result.profile;
 
         let folders: std::collections::HashSet<&str> = result
             .mods
@@ -780,6 +845,7 @@ mod reconcile_tests {
     fn reconcile_syncs_toggled_state_without_dropping() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
         let mods_path = game_tmp.path().join("mods");
         let disabled_path = game_tmp.path().join("mods_disabled");
         let profiles_path = config_tmp.path().join("profiles");
@@ -795,14 +861,16 @@ mod reconcile_tests {
         );
         save_profile(&profile, &profiles_path).unwrap();
 
-        let result = reconcile_profile_with_disk(
+        let save_result = reconcile_profile_with_disk(
             "Stable",
             &mods_path,
             &disabled_path,
             &profiles_path,
             config_tmp.path(),
+            cache_tmp.path(),
         )
         .unwrap();
+        let result = save_result.profile;
 
         assert_eq!(result.mods.len(), 1, "mod stays in the pack");
         assert!(
@@ -821,6 +889,7 @@ mod reconcile_tests {
     fn reconcile_refuses_subscribed_profiles() {
         let game_tmp = tempfile::tempdir().unwrap();
         let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
         let mods_path = game_tmp.path().join("mods");
         let disabled_path = game_tmp.path().join("mods_disabled");
         let profiles_path = config_tmp.path().join("profiles");
@@ -860,6 +929,7 @@ mod reconcile_tests {
             &disabled_path,
             &profiles_path,
             config_tmp.path(),
+            cache_tmp.path(),
         )
         .unwrap_err();
         assert!(
@@ -875,6 +945,151 @@ mod reconcile_tests {
                 .mods
                 .is_empty(),
             "the followed manifest must not be mutated"
+        );
+    }
+
+    /// Reconcile is idempotent: calling Save twice produces zero residual
+    /// drift on the second call. This is the core invariant from SM-N04.
+    #[test]
+    fn reconcile_is_idempotent_second_save_writes_nothing() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "Alpha", "Alpha", "1.0.0");
+        write_mod(&mods_path, "Beta", "Beta", "2.0.0");
+        write_mod(&disabled_path, "Gamma", "Gamma", "3.0.0");
+
+        let profile = base_profile("Run", vec![pack_mod("Alpha", "Alpha", "1.0.0", true)]);
+        save_profile(&profile, &profiles_path).unwrap();
+
+        // First Save: add Beta (enabled extra), keep Alpha, drop nothing.
+        let first = reconcile_profile_with_disk(
+            "Run",
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .unwrap();
+        assert!(
+            first.residual_drift.is_none(),
+            "first save must leave zero residual: {:?}",
+            first.residual_drift
+        );
+
+        let manifest_path = fs::read_dir(&profiles_path)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .expect("saved profile manifest");
+        let after_first = fs::read(&manifest_path).unwrap();
+
+        // Second Save: the manifest already reflects disk state; no write.
+        let second = reconcile_profile_with_disk(
+            "Run",
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .unwrap();
+        assert!(
+            second.residual_drift.is_none(),
+            "second save must leave zero residual: {:?}",
+            second.residual_drift
+        );
+        assert_eq!(
+            fs::read(&manifest_path).unwrap(),
+            after_first,
+            "second save must not rewrite the manifest"
+        );
+
+        // The two profiles should be identical (second write changed nothing).
+        let folders_first: std::collections::HashSet<&str> = first
+            .profile
+            .mods
+            .iter()
+            .filter_map(|m| m.folder_name.as_deref())
+            .collect();
+        let folders_second: std::collections::HashSet<&str> = second
+            .profile
+            .mods
+            .iter()
+            .filter_map(|m| m.folder_name.as_deref())
+            .collect();
+        assert_eq!(
+            folders_first, folders_second,
+            "second save must not change the manifest"
+        );
+        // Gamma (disabled extra) must never enter the pack.
+        assert!(
+            !folders_first.contains("Gamma"),
+            "disabled extras must not enter the pack"
+        );
+    }
+
+    /// Reconcile preserves a pack mod that matches by strong identity (mod_version_id)
+    /// even when its display name or folder_name drifted on disk. This mirrors
+    /// the drift detection behavior so both agree on the same set.
+    #[test]
+    fn reconcile_matches_by_strong_identity_when_display_name_drifted() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        // Disk has the mod under "NewFolder" — same content hash as the pack
+        // entry's hash.  After enrich_mods_with_versions, the disk mod gets
+        // the same mod_version_id as the one stored in the pack.
+        write_mod(&mods_path, "NewFolder", "RealMod", "1.0.0");
+        let mut disk_mods = crate::mods::scan_mods(&mods_path);
+        crate::mod_versions::enrich_mods_with_versions(&mut disk_mods, config_tmp.path());
+        let version_id = disk_mods[0]
+            .mod_version_id
+            .clone()
+            .expect("enrichment assigns a version id");
+
+        // Pack recorded the old folder name but the correct mod_version_id.
+        let mut pm = pack_mod("RealMod", "OldFolder", "1.0.0", true);
+        pm.mod_version_id = Some(version_id.clone());
+        pm.hash = disk_mods[0].hash.clone();
+        let profile = base_profile("Stable", vec![pm]);
+        save_profile(&profile, &profiles_path).unwrap();
+
+        let save_result = reconcile_profile_with_disk(
+            "Stable",
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .unwrap();
+
+        assert!(
+            save_result.residual_drift.is_none(),
+            "strong-identity match must leave zero residual: {:?}",
+            save_result.residual_drift
+        );
+        // The mod stayed in the pack.
+        assert_eq!(
+            save_result.profile.mods.len(),
+            1,
+            "mod matched by version id must be kept, not dropped"
         );
     }
 }

@@ -938,12 +938,12 @@ describe('<ProfilesView>', () => {
     }));
     // The drift-save path must use save_profile_drift (apply the diff), NOT
     // snapshot_profile (which would absorb the whole install into the pack).
-    registerInvokeHandler('save_profile_drift', (args) =>
-      baseProfile({
+    registerInvokeHandler('save_profile_drift', (args) => ({
+      profile: baseProfile({
         name: String(args?.name),
         mods: [{ name: 'NewMod', enabled: true } as any],
       }),
-    );
+    }));
 
     const user = userEvent.setup();
     render(<Wrap />);
@@ -965,6 +965,38 @@ describe('<ProfilesView>', () => {
     });
   });
 
+  it('drift banner reports residual production drift as a warning alongside the success summary', async () => {
+    // Partial success: the save applied SOME drift (state updated) but the
+    // live loadout still doesn't match the saved manifest. The success
+    // summary must still fire (it names what was added/removed) and a
+    // separate info-severity toast must warn about the leftover diff.
+    // The old behavior — silently swallowing the success summary or
+    // (worse) firing the red "Couldn't save changes" toast — hid the
+    // useful diagnostic from the user.
+    seedProfiles([baseProfile({ name: 'DriftedPack' })]);
+    registerInvokeHandler('get_active_profile', () => 'DriftedPack');
+    registerInvokeHandler('get_profile_drift', () => ({
+      added: ['WorkshopMod'], removed: [], toggled: [], version_changed: [], has_drift: true,
+    }));
+    registerInvokeHandler('save_profile_drift', (args) => ({
+      profile: baseProfile({ name: String(args?.name) }),
+      residual_drift: {
+        added: ['WorkshopMod'], removed: [], toggled: [], version_changed: [], has_drift: true,
+      },
+    }));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: /Save changes/i }));
+
+    expect(await screen.findByText(/still does not match the saved modpack/i)).toBeInTheDocument();
+    // Success toast MUST still fire — the save persisted state, and
+    // hiding the added/removed summary made the outcome confusing.
+    expect(await screen.findByText(/Saved changes to "DriftedPack"/)).toBeInTheDocument();
+    // The failure toast (which the old throw path triggered) MUST NOT fire.
+    expect(screen.queryByText(/Couldn't save changes/i)).toBeNull();
+  });
+
   it('drift banner Save changes names the mods dropped from the pack (FB-C)', async () => {
     // The user couldn't tell what Save removed. The toast now lists the mods
     // dropped from the manifest (drift.removed — missing on disk) by name.
@@ -977,7 +1009,7 @@ describe('<ProfilesView>', () => {
       version_changed: [],
       has_drift: true,
     }));
-    registerInvokeHandler('save_profile_drift', (args) => baseProfile({ name: String(args?.name) }));
+    registerInvokeHandler('save_profile_drift', (args) => ({ profile: baseProfile({ name: String(args?.name) }) }));
     const user = userEvent.setup();
     render(<Wrap />);
     await waitFor(() => { expect(screen.getByText('DriftedPack')).toBeInTheDocument(); });
@@ -999,7 +1031,7 @@ describe('<ProfilesView>', () => {
       version_changed: [],
       has_drift: true,
     }));
-    registerInvokeHandler('save_profile_drift', (args) => baseProfile({ name: String(args?.name) }));
+    registerInvokeHandler('save_profile_drift', (args) => ({ profile: baseProfile({ name: String(args?.name) }) }));
 
     const user = userEvent.setup();
     render(<Wrap />);
@@ -1537,7 +1569,7 @@ describe('<ProfilesView>', () => {
     registerInvokeHandler('set_profile_mod_membership', () => baseProfile({ name: 'SharedPack' }));
     registerInvokeHandler('save_profile_drift', () => {
       driftPresent = false;
-      return baseProfile({ name: 'SharedPack', mods: [] });
+      return { profile: baseProfile({ name: 'SharedPack', mods: [] }) };
     });
 
     const user = userEvent.setup();

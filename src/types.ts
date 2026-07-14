@@ -557,6 +557,42 @@ export interface ModAuditEntry {
    *  upstream tag advances. Distinct from `pinned`: snooze suppresses
    *  the "update available" badge but doesn't block manual updates. */
   snoozed?: boolean;
+  /** Compatibility with audit payloads produced before provider fan-out.
+   *  New payloads use update_plans; consumers must not count both. */
+  update_plan?: UpdatePlanItem;
+  update_plans?: UpdatePlanItem[];
+}
+
+export type UpdateAcquisitionCapability = 'downloadable' | 'manual' | 'steam-managed' | 'frozen';
+
+export interface UpdatePlanItem {
+  target: ModAuditTarget;
+  current_version: string;
+  target_version: string | null;
+  provider: 'github' | 'nexus' | 'steam' | string;
+  source: string | null;
+  capability: UpdateAcquisitionCapability;
+  reason: string;
+  selectable: boolean;
+  pending: boolean;
+}
+
+export interface UpdatePlanSelection {
+  target: ModAuditTarget;
+  expected_version: string;
+  provider: string;
+}
+
+export interface UpdateApplyResult {
+  target: ModAuditTarget;
+  /** Provider identity echoed from the selected update plan. */
+  provider: string;
+  mod_name: string;
+  expected_version: string;
+  actual_version: string | null;
+  status: 'updated' | 'stale' | 'skipped' | 'failed';
+  message: string | null;
+  updated_mod: ModInfo | null;
 }
 
 export interface ModAuditTarget {

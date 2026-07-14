@@ -25,6 +25,7 @@ const SAME_AS_ENGLISH_ALLOWED = new Set([
   'mods.versionOption',
   'mods.versionOptionVersion',
   'mods.versionReplacementOption',
+  'mods.updatePlan.versionChange',
   'mods.versionSource.gitHub',
   'mods.versionSource.nexus',
   'mods.versionSource.steamWorkshop',

@@ -1337,7 +1337,7 @@ body {
   flex: 1 1 auto;
 }
 .gf-version-select .gf-select-value .gf-version-option-source {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
 }
 .gf-version-option-label {
   display: inline-flex;
@@ -1345,6 +1345,20 @@ body {
   gap: 6px;
   min-width: 0;
   max-width: 100%;
+}
+.gf-version-option-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+}
+.gf-version-option-status.is-active {
+  color: var(--green-edge);
+}
+.gf-version-option-status.is-stored {
+  color: var(--ink-mute);
 }
 .gf-version-option-main {
   flex: 1 1 auto;
@@ -1354,11 +1368,13 @@ body {
 }
 .gf-version-option-source,
 .gf-version-manager-source {
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  width: max-content;
+  max-width: none;
   white-space: nowrap;
+  overflow-wrap: normal;
   padding: 2px 5px;
   border: 1px solid var(--indigo-line);
   border-radius: 999px;
@@ -1367,6 +1383,20 @@ body {
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
+}
+.gf-profile-library-meta .gf-version-option-source,
+.gf-version-manager .gf-version-manager-source {
+  width: max-content;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+.gf-version-select .gf-select-panel {
+  width: max-content;
+  min-width: 100%;
+  max-width: min(420px, calc(100vw - 32px));
+  overflow-x: hidden;
 }
 .gf-version-tools {
   display: inline-flex;
@@ -1380,6 +1410,16 @@ body {
   height: 24px;
   padding: 0;
   flex: 0 0 auto;
+}
+.gf-version-manage.is-guided {
+  color: var(--ember-bright);
+  border-color: var(--ember-bright);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ember-bright) 28%, transparent);
+  animation: gf-version-guidance-pulse 1.1s ease-in-out infinite alternate;
+}
+@keyframes gf-version-guidance-pulse {
+  from { box-shadow: 0 0 0 1px color-mix(in srgb, var(--ember-bright) 18%, transparent); }
+  to { box-shadow: 0 0 0 4px color-mix(in srgb, var(--ember-bright) 34%, transparent); }
 }
 .gf-version-manager {
   width: min(560px, calc(100vw - 32px));
@@ -1406,6 +1446,7 @@ body {
   flex-direction: column;
   gap: 3px;
   min-width: 0;
+  max-width: 100%;
 }
 .gf-version-manager-version {
   font-size: 13px;
@@ -2297,6 +2338,7 @@ body {
 .gf-select-option {
   display: flex;
   align-items: center;
+  min-width: 0;
   padding: 7px 10px;
   border-radius: 6px;
   font-size: 13px;
@@ -2307,6 +2349,7 @@ body {
 }
 .gf-select-option .gf-version-option-label {
   width: 100%;
+  min-width: 0;
   justify-content: space-between;
 }
 .gf-select-option.is-active { background: var(--indigo-nav-hover); }
@@ -2320,6 +2363,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .gf-select-panel { animation: none; }
   .gf-select-chevron { transition: color 0.15s ease; }
+  .gf-version-manage.is-guided { animation: none; }
 }
 
 /* ── Inputs ───────────────────────────────────────────────────────── */
@@ -2399,6 +2443,11 @@ body {
 .gf-pill-github { background: var(--indigo-pill); color: var(--ink-mute); }
 .gf-pill-nexus { background: color-mix(in oklch, var(--nexus-base) 18%, transparent); color: var(--nexus-ink); }
 .gf-pill-update { background: var(--gf-tint); color: var(--gf); border: 1px solid var(--gf-line); }
+.gf-pill-update-steam {
+  background: color-mix(in srgb, var(--info) 10%, var(--indigo-chip));
+  border-color: color-mix(in srgb, var(--info) 42%, var(--indigo-line));
+  color: var(--info-ink-2);
+}
 /* The update pill is a button — make it read as clickable. */
 .gf-pill-update { cursor: pointer; }
 .gf-pill-update:hover:not(:disabled) {
@@ -3066,6 +3115,17 @@ body {
 .gf-launch-health {
   width: min(560px, calc(100vw - 32px));
 }
+.gf-launch-health-foot {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.gf-launch-health-primary {
+  white-space: normal;
+  text-align: center;
+  justify-content: center;
+  max-inline-size: min(100%, 210px);
+  overflow-wrap: anywhere;
+}
 .gf-launch-health-heading {
   display: flex;
   align-items: flex-start;
@@ -3146,9 +3206,13 @@ body {
   color: var(--ink-mute);
 }
 @media (max-width: 560px) {
-  .gf-launch-health .gf-modal-foot {
-    flex-wrap: wrap;
-    justify-content: flex-end;
+  .gf-launch-health-foot > button {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .gf-launch-health-primary {
+    flex-basis: 100% !important;
+    max-inline-size: 100%;
   }
   .gf-launch-health-list li {
     grid-template-columns: minmax(0, 1fr);
@@ -3157,6 +3221,20 @@ body {
   .gf-launch-health-list li span:last-child {
     white-space: normal;
   }
+}
+.gf-update-plan { width: min(680px, calc(100vw - 32px)); }
+.gf-update-plan-body { display: flex; flex-direction: column; gap: 10px; }
+.gf-update-plan-select-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.gf-update-plan-list { display: flex; flex-direction: column; gap: 7px; }
+.gf-update-plan-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--indigo-line); border-radius: 7px; }
+.gf-update-plan-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gf-update-plan-copy span { color: var(--ink-mute); font-size: 12px; overflow-wrap: anywhere; }
+.gf-update-plan-marker { display: grid; place-items: center; color: var(--ink-mute); }
+.gf-update-plan-foot { justify-content: flex-end; flex-wrap: wrap; }
+@media (max-width: 520px) {
+  .gf-update-plan-row { grid-template-columns: 22px minmax(0, 1fr); }
+  .gf-update-plan-row > button { grid-column: 2; justify-self: start; white-space: normal; }
+  .gf-update-plan-foot .gf-btn { white-space: normal; text-align: center; }
 }
 .gf-app-blocker {
   position: fixed;

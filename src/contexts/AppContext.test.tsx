@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { listen as listenMock } from '@tauri-apps/api/event';
 
 import { AppProvider, useApp } from './AppContext';
 import { ToastProvider } from './ToastContext';
 import { ConfirmProvider } from '../components/ConfirmDialog';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
+import type { UpdatePlanItem } from '../types';
 
 /** Locate the most-recent `listen(event, cb)` registration installed by
  *  AppProvider during render and return the registered handler. Loud
@@ -40,6 +40,15 @@ function Probe(props: { onCtx: (ctx: ReturnType<typeof useApp>) => void }) {
   const ctx = useApp();
   props.onCtx(ctx);
   return null;
+}
+
+function updatePlan(name: string, version = '2.0.0'): UpdatePlanItem {
+  return {
+    target: { name, mod_version_id: `artifact-${name.toLowerCase()}`, folder_name: `${name}Folder` },
+    current_version: '1.0.0', target_version: version, provider: 'github',
+    source: `https://github.com/example/${name}`, capability: 'downloadable',
+    reason: '', selectable: true, pending: true,
+  };
 }
 
 describe('<AppProvider>', () => {
@@ -708,7 +717,7 @@ describe('<AppProvider>', () => {
     expect(lastArgs?.only).toEqual([{ mod_version_id: null, folder_name: null, mod_id: null, name: 'Same' }]);
   });
 
-  it('updateAllGithub confirms, invokes update_all_mods, toasts, and refreshes audit rows', async () => {
+  it('updateAllGithub invokes stable selections, toasts, and refreshes audit rows', async () => {
     registerInvokeHandler('get_installed_mods', () => [
       { name: 'A', version: '1.0.0', enabled: true, files: [] },
     ]);
@@ -721,7 +730,13 @@ describe('<AppProvider>', () => {
     let updateAllCalls = 0;
     registerInvokeHandler('update_all_mods', () => {
       updateAllCalls += 1;
-      return [{ mod_version_id: 'artifact-a-2', name: 'A', folder_name: 'AFolder', mod_id: 'a', version: '2.0.0', enabled: true, files: [] }];
+      return [{
+        target: { name: 'A', mod_version_id: 'artifact-a' },
+        provider: 'github',
+        mod_name: 'A', expected_version: '2.0.0', actual_version: '2.0.0',
+        status: 'updated', message: null,
+        updated_mod: { mod_version_id: 'artifact-a-2', name: 'A', folder_name: 'AFolder', mod_id: 'a', version: '2.0.0', enabled: true, files: [] },
+      }];
     });
     let auditCallsBulk = 0;
     let lastAuditArgs: Record<string, unknown> | undefined;
@@ -741,21 +756,22 @@ describe('<AppProvider>', () => {
 
     // Kick the bulk update — confirm dialog will appear, click its primary
     // button to proceed.
-    const user = userEvent.setup();
-    let bulkPromise: Promise<unknown> | null = null;
-    act(() => {
-      bulkPromise = bulkCaptured!.updateAllGithub(['A']);
-    });
-    const confirmBtn = await screen.findByRole('button', { name: /^Download 1 update$/ });
-    await user.click(confirmBtn);
-    const updated = await bulkPromise!;
+    const selected = updatePlan('A');
+    let updated: unknown[] = [];
+    await act(async () => { updated = await bulkCaptured!.updateAllGithub([selected]); });
 
     expect(updateAllCalls).toBe(1);
-    expect(updated).toEqual([{ mod_version_id: 'artifact-a-2', name: 'A', folder_name: 'AFolder', mod_id: 'a', version: '2.0.0', enabled: true, files: [] }]);
+    expect(updated).toEqual([expect.objectContaining({ status: 'updated' })]);
+    const updateCall = getInvokeCalls().find((call) => call.cmd === 'update_all_mods');
+    expect(updateCall?.args?.selected).toEqual([{
+      target: selected.target,
+      expected_version: '2.0.0',
+      provider: 'github',
+    }]);
     // Targeted re-audit happens after the bulk update completes.
     expect(auditCallsBulk).toBe(1);
     expect(lastAuditArgs?.only).toEqual([
-      'A',
+      selected.target,
       { mod_version_id: 'artifact-a-2', folder_name: 'AFolder', mod_id: 'a', name: 'A' },
     ]);
   });
@@ -858,7 +874,7 @@ describe('<AppProvider>', () => {
     expect(captured?.updatingAll).toBe(false);
   });
 
-  it('updateAllGithub aborts cleanly when the user cancels the confirm', async () => {
+  it('updateAllGithub accepts only reviewed plan objects', async () => {
     let updateAllCalls = 0;
     registerInvokeHandler('update_all_mods', () => {
       updateAllCalls += 1;
@@ -872,26 +888,24 @@ describe('<AppProvider>', () => {
     );
     await waitFor(() => { expect(captured?.loading).toBe(false); });
 
-    const user = userEvent.setup();
-    let bulkPromise: Promise<unknown> | null = null;
-    act(() => { bulkPromise = captured!.updateAllGithub(['A', 'B']); });
+    await act(async () => {
+      await captured!.updateAllGithub([updatePlan('A'), updatePlan('B')]);
+    });
     // Dismiss the confirm via Cancel — `!ok` short-circuits before any
     // backend update runs. The modal exposes two "Cancel" controls (the
     // header X icon and the footer button, both aria-labelled "Cancel");
     // grab both loudly and click the footer one.
-    const cancelBtns = await screen.findAllByRole('button', { name: /^Cancel$/ });
-    expect(cancelBtns.length).toBeGreaterThanOrEqual(1);
-    await user.click(cancelBtns[cancelBtns.length - 1]);
-    await bulkPromise!;
-
-    expect(updateAllCalls).toBe(0);
+    expect(updateAllCalls).toBe(1);
     expect(captured?.updatingAll).toBe(false);
   });
 
-  it('updateAllGithub shows the "nothing to update" toast when no mods changed', async () => {
+  it('updateAllGithub does not misreport stale results as nothing to update', async () => {
     // Confirm proceeds, but update_all_mods returns an empty list, so the
     // count === 0 arm of the success toast fires.
-    registerInvokeHandler('update_all_mods', () => []);
+    registerInvokeHandler('update_all_mods', () => [{
+      target: updatePlan('A').target, provider: 'github', mod_name: 'A', expected_version: '2.0.0',
+      actual_version: '3.0.0', status: 'stale', message: 'Preview again', updated_mod: null,
+    }]);
     let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
     render(
       <Wrap>
@@ -900,14 +914,11 @@ describe('<AppProvider>', () => {
     );
     await waitFor(() => { expect(captured?.loading).toBe(false); });
 
-    const user = userEvent.setup();
-    let bulkPromise: Promise<unknown> | null = null;
-    act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
-    const confirmBtn = await screen.findByRole('button', { name: /^Download 1 update$/ });
-    await user.click(confirmBtn);
-    await bulkPromise!;
+    let results: unknown[] = [];
+    await act(async () => { results = await captured!.updateAllGithub([updatePlan('A')]); });
 
-    expect(screen.getByText(/Nothing to update\./)).toBeInTheDocument();
+    expect(results).toEqual([expect.objectContaining({ status: 'stale' })]);
+    expect(screen.queryByText(/Nothing to update\./)).not.toBeInTheDocument();
   });
 
   it('updateAllGithub surfaces a failure toast when update_all_mods rejects with an Error', async () => {
@@ -921,12 +932,7 @@ describe('<AppProvider>', () => {
     );
     await waitFor(() => { expect(captured?.loading).toBe(false); });
 
-    const user = userEvent.setup();
-    let bulkPromise: Promise<unknown> | null = null;
-    act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
-    const confirmBtn = await screen.findByRole('button', { name: /^Download 1 update$/ });
-    await user.click(confirmBtn);
-    await bulkPromise!;
+    await act(async () => { await captured!.updateAllGithub([updatePlan('A')]); });
 
     expect(screen.getByText(/Update failed: disk full/)).toBeInTheDocument();
     // updatingAll must have reverted in the finally block.
@@ -944,12 +950,7 @@ describe('<AppProvider>', () => {
     );
     await waitFor(() => { expect(captured?.loading).toBe(false); });
 
-    const user = userEvent.setup();
-    let bulkPromise: Promise<unknown> | null = null;
-    act(() => { bulkPromise = captured!.updateAllGithub(['A']); });
-    const confirmBtn = await screen.findByRole('button', { name: /^Download 1 update$/ });
-    await user.click(confirmBtn);
-    await bulkPromise!;
+    await act(async () => { await captured!.updateAllGithub([updatePlan('A')]); });
 
     expect(screen.getByText(/Update failed: kaboom/)).toBeInTheDocument();
     expect(captured?.updatingAll).toBe(false);

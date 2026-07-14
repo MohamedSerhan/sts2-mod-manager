@@ -957,10 +957,10 @@ async function specFreezeSuppressesPendingUpdate(driver) {
   //
   // Target the ghost ↻ re-audit button by aria-label, NOT the generic
   // "audit button" xpath. After specAuditShows1Update the toolbar is in
-  // the "Download 1 update" state, which renders TWO buttons: the primary
-  // "Download 1 update" action button AND a separate ghost re-audit icon.
+  // the "Review 1 update" state, which renders TWO buttons: the primary
+  // review action button AND a separate ghost re-audit icon.
   // Picking the first by text content used to hit the action button
-  // and open the "Download 1 update?" confirm modal — the test would then
+  // and open the update-plan sheet — the test would then
   // wait 30s for "Up to date" while the dialog blocked everything.
   const auditBtn = await waitForElement(
     driver,
@@ -974,7 +974,7 @@ async function specFreezeSuppressesPendingUpdate(driver) {
     async () => {
       const btns = await driver.findElements(
         By.xpath(
-          "//button[contains(., 'Audit mods') or contains(., 'Download ') or contains(., 'Update ') or contains(., 'Up to date')]",
+          "//button[contains(., 'Audit mods') or contains(., 'Review ') or contains(., 'Download ') or contains(., 'Update ') or contains(., 'Up to date')]",
         ),
       );
       for (const b of btns) {
@@ -1375,6 +1375,59 @@ async function specDisabledLibraryExtrasArePreserved(driver) {
   }
 }
 
+async function specSaveChangesConverges(driver) {
+  const modpackName = `QA Save ${Date.now().toString(36)}`;
+  await navToMods(driver);
+  const refreshBtn = await waitForElement(driver,
+    By.xpath("//button[normalize-space(.)='Refresh' or contains(., 'Refresh')]"),
+    'Mods toolbar Refresh button');
+  await refreshBtn.click();
+  await navToModpacks(driver);
+  await createModpackNamed(driver, modpackName, { minSelected: 2 });
+  await activateModpack(driver, modpackName);
+
+  const addedDir = join(FIXTURE_DIRS.game, 'mods', 'SaveConvergenceMod');
+  mkdirSync(addedDir, { recursive: true });
+  writeFileSync(join(addedDir, 'SaveConvergenceMod.json'), JSON.stringify({
+    id: 'SaveConvergenceMod', name: 'Save Convergence Mod', version: '1.0.0', dependencies: [],
+  }));
+  writeFileSync(join(addedDir, 'SaveConvergenceMod.dll'), Buffer.from([0]));
+
+  const before = await invokeTauri(driver, 'get_profile_drift', { name: modpackName });
+  if (!before?.has_drift || !before.added?.includes('Save Convergence Mod')) {
+    throw new Error(`save convergence fixture did not create production drift: ${JSON.stringify(before)}`);
+  }
+  // Exercise the user-facing Profiles banner and Save changes button. The
+  // disk mutation happened while Profiles was already mounted, so leave and
+  // re-enter the view to rerun its drift effect before asserting the banner.
+  // The direct command below is only used for the second-save idempotency check.
+  await navToMods(driver);
+  await navToModpacks(driver);
+  await waitForElement(
+    driver,
+    By.xpath(`//*[contains(@class,'gf-banner')]//*[contains(normalize-space(.), '${modpackName} has unsaved mod changes')]`),
+    `drift banner for "${modpackName}"`,
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//button[normalize-space(.)='Save changes']"),
+    'Profiles Save changes button',
+  );
+  await waitForToastContaining(driver, ['Saved changes', modpackName], 'Save changes success toast');
+  const after = await invokeTauri(driver, 'get_profile_drift', { name: modpackName });
+  if (after?.has_drift) {
+    throw new Error(`production drift did not converge after UI Save: ${JSON.stringify(after)}`);
+  }
+  const first = await invokeTauri(driver, 'save_profile_drift', { name: modpackName });
+  if (first?.residual_drift?.has_drift) {
+    throw new Error(`first Save left residual production drift: ${JSON.stringify(first.residual_drift)}`);
+  }
+  const second = await invokeTauri(driver, 'save_profile_drift', { name: modpackName });
+  if (second?.residual_drift?.has_drift || second?.profile?.updated_at !== first?.profile?.updated_at) {
+    throw new Error(`second Save was not a no-op: ${JSON.stringify(second)}`);
+  }
+}
+
 /* ── Helpers ────────────────────────────────────────────────────── */
 
 async function navToModpacks(driver) {
@@ -1675,6 +1728,15 @@ async function invokeTauri(driver, cmd, args = {}) {
   return result.value;
 }
 
+async function specUpdatePlanHonorsEmptySelection(driver) {
+  const before = await invokeTauri(driver, 'get_installed_mods');
+  if (!Array.isArray(before)) throw new Error('Could not read Library before update-plan smoke');
+  const applied = await invokeTauri(driver, 'update_all_mods', { profileId: null, selected: [] });
+  if (!Array.isArray(applied) || applied.length !== 0) throw new Error('Empty update plan returned unexpected item results');
+  const after = await invokeTauri(driver, 'get_installed_mods');
+  if (!Array.isArray(after) || JSON.stringify(after) !== JSON.stringify(before)) throw new Error('Empty update selection changed the Library');
+}
+
 async function waitForToastContaining(driver, parts, label, timeoutMs = 10_000) {
   return driver.wait(async () => {
     const toasts = await driver.findElements(By.css('.gf-toast'));
@@ -1772,38 +1834,36 @@ async function specAuditAgainstCassettesShowsOnePending(driver) {
   );
   await auditBtn.click();
 
-  // After audit completes the toolbar button reads "Download 1 update".
+  // After audit completes the toolbar button reads "Review 1 update".
   // We re-query each tick because React replaces the Button when the
   // toolbar state machine flips variants (secondary → primary). Holding
   // the pre-click element ref returns a stale node after the swap and
   // .getText() throws StaleElementReference. Two variants of the
   // pre-audit copy now: "Audit mods" (initial) or "Update N mod(s)"
   // (after the v1.3.4 toolbar refactor); both are diagnostic — anything
-  // OTHER than "Download 1 update" means the cassette / fixture wiring is off.
+  // OTHER than "Review 1 update" means the provider projection or cassette
+  // fixture wiring is off.
   await driver.wait(
     async () => {
       const matches = await driver.findElements(
-        By.xpath("//*[contains(normalize-space(.), 'Download 1 update')]"),
+        By.xpath("//*[contains(normalize-space(.), 'Review 1 update')]"),
       );
       return matches.length > 0;
     },
     30_000,
-    'audit button never settled to "Download 1 update" — cassette/fixture wiring is off',
+    'audit button never settled to "Review 1 update" — provider projection or cassette/fixture wiring is off',
   );
 
-  // Also assert the green "Download update" pill rendered on the
+  // Also assert the provider-evidence review button rendered on the
   // QaTestMod row. Catches the case where the audit count comes back
-  // right but the per-row UI didn't update.
+  // right but the grouped provider plan did not reach the row.
   //
-  // Inner predicate uses `contains(.,'Download update')` rather than
-  // `contains(text(),...)`: the pill button is `<Download/> {t(...)}`,
-  // which React emits as two adjacent text nodes — XPath 1.0's
-  // node-set-to-string conversion would only see the first (whitespace)
-  // text node. See specModpackSwitchPreservesFreeze for the longer note.
+  // Match the current/target evidence as well as the provider label so this
+  // owns the source-aware row contract rather than merely finding any button.
   await waitForElement(
     driver,
-    By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//*[contains(.,'Download update')]"),
-    'Download-update pill on QaTestMod row',
+    By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//button[contains(.,'GitHub:') and contains(.,'v1.0.0') and contains(.,'v2.0.0')]"),
+    'GitHub provider-evidence review button on QaTestMod row',
     5_000,
   );
 }
@@ -2204,6 +2264,7 @@ const CASSETTE_SPECS = [
 // these because the cassette specs already exercise QaTestMod and
 // running both groups would double-mutate the fixture.
 const STATE_SPECS = [
+  ['update apply honors an empty stable-target selection', specUpdatePlanHonorsEmptySelection],
   ['toggle off moves QaTestMod to mods_disabled/', specToggleMovesQaTestModToDisabled],
   ['display-name override updates the Mod Library row immediately', specDisplayNameOverrideUpdatesRow],
   ['auto-detected GitHub save promotes the source for updates', specAutoDetectedGitHubSavePromotesSource],
@@ -2212,6 +2273,7 @@ const STATE_SPECS = [
   ['modpack switch preserves freeze state (v1.3.1 contract)', specModpackSwitchPreservesFreeze],
   ['#22: toggle state sticky across modpack switch', specToggleStickyAcrossModpackSwitch],
   ['#20: disabled library extras are preserved', specDisabledLibraryExtrasArePreserved],
+  ['Save changes converges and the second Save is a no-op', specSaveChangesConverges],
   ['Steam Workshop references stay Steam-owned in mixed modpacks', specWorkshopModpackReferenceStaysSteamOwned],
   ['#21: incompatible mods stay out of created modpack', specIncompatibleModAbsentFromCreatedModpack],
 ];

@@ -7,14 +7,15 @@
  * context-driven explainer banner is covered here too.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { LibraryTable } from './LibraryTable';
+import { useModLibrary } from '../hooks/useModLibrary';
 import { AllProviders } from '../__test__/providers';
 import { chooseOption, openSelect } from '../__test__/selectHelpers';
 import { getInvokeCalls, registerInvokeHandler } from '../__test__/setup';
-import type { ModInfo, Profile } from '../types';
+import type { ModAuditEntry, ModInfo, Profile } from '../types';
 
 function Wrap(props: React.ComponentProps<typeof LibraryTable>) {
   return (
@@ -22,6 +23,11 @@ function Wrap(props: React.ComponentProps<typeof LibraryTable>) {
       <LibraryTable {...props} />
     </AllProviders>
   );
+}
+
+function IntegratedLibraryTable() {
+  const lib = useModLibrary();
+  return <LibraryTable modpackName={null} reloadToken={lib.versionOptionsReloadToken} {...lib.tableActionProps} />;
 }
 
 // jsdom clipboard varies by version — install a fresh writeText each
@@ -85,6 +91,14 @@ const mkModInfo = (overrides: Partial<ModInfo> = {}): ModInfo =>
     display_description: null,
     ...overrides,
   } as ModInfo);
+
+const entryAudit = (name: string, overrides: Partial<ModAuditEntry> = {}): ModAuditEntry => ({
+  mod_name: name, folder_name: name, github_repo: null, installed_version: '1.0.0',
+  latest_release_tag: null, latest_release_with_assets_tag: null, latest_has_assets: false,
+  needs_update: false, asset_names: [], releases_scanned: 0, error: null, nexus_url: null,
+  nexus_version: null, nexus_update_available: false, update_source: null,
+  github_auto_detected: false, pinned: false, ...overrides,
+});
 
 describe('<LibraryTable>', () => {
   it('renders all installed mods for the modpack as rows', async () => {
@@ -191,6 +205,119 @@ describe('<LibraryTable>', () => {
       (await screen.findAllByText(/STS2 may prefer the local mods folder copy/i)).length,
     ).toBe(2);
   });
+
+  it('does not warn when the same version has one active and one stored copy', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('list_profiles_cmd', () => [
+      baseProfile({ name: 'Stable' }),
+    ]);
+    registerInvokeHandler('get_profile_memberships', () => ({
+      profiles: [{ name: 'Stable', editable: true }],
+      mods: [
+        {
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: 'RitsuLib',
+          mod_id: 'STS2-RitsuLib',
+          installed_enabled: true,  // active
+          profiles: [
+            { profile_name: 'Stable', included: true, enabled: true, editable: true },
+          ],
+        },
+        {
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: '3747602295',
+          mod_id: 'STS2-RitsuLib',
+          source: workshopUrl,
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+          installed_enabled: false,  // stored/inactive — must NOT warn
+          profiles: [
+            { profile_name: 'Stable', included: false, enabled: false, editable: true },
+          ],
+        },
+      ],
+    }));
+
+    const modInfoByKey = new Map<string, ModInfo>([
+      [
+        'RitsuLib',
+        mkModInfo({
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: 'RitsuLib',
+          mod_id: 'STS2-RitsuLib',
+        }),
+      ],
+      [
+        '3747602295',
+        mkModInfo({
+          name: 'RitsuLib',
+          version: '0.4.41',
+          folder_name: '3747602295',
+          mod_id: 'STS2-RitsuLib',
+          source: workshopUrl,
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+        }),
+      ],
+    ]);
+
+    render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+
+    // Wait for the rows to render, then verify no duplicate-source warning appears.
+    await screen.findAllByText('RitsuLib');
+    expect(
+      screen.queryAllByText(/STS2 may prefer the local mods folder copy/i),
+    ).toHaveLength(0);
+  });
+
+  it.each([
+    ['local active + Steam stored', true, false, 'STS2-RitsuLib', 'STS2-RitsuLib', false],
+    ['Steam active + local stored', false, true, 'STS2-RitsuLib', 'STS2-RitsuLib', false],
+    ['both stored', false, false, 'STS2-RitsuLib', 'STS2-RitsuLib', false],
+    ['same display name with different runtime IDs', true, true, 'local-runtime', 'steam-runtime', false],
+    ['both independently active', true, true, 'STS2-RitsuLib', 'STS2-RitsuLib', true],
+  ])(
+    'duplicate-provider warning matrix: %s',
+    async (_label, localActive, steamActive, localRuntimeId, steamRuntimeId, shouldWarn) => {
+      const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [
+          {
+            name: 'RitsuLib', version: '0.4.41', folder_name: 'RitsuLib',
+            mod_id: localRuntimeId, installed_enabled: localActive,
+            profiles: [{ profile_name: 'Stable', included: true, enabled: localActive, editable: true }],
+          },
+          {
+            name: 'RitsuLib', version: '0.4.41', folder_name: '3747602295',
+            mod_id: steamRuntimeId, source: workshopUrl, install_source: 'steam_workshop',
+            workshop_item_id: '3747602295', workshop_url: workshopUrl,
+            installed_enabled: steamActive,
+            profiles: [{ profile_name: 'Stable', included: false, enabled: false, editable: true }],
+          },
+        ],
+      }));
+      const modInfoByKey = new Map<string, ModInfo>([
+        ['RitsuLib', mkModInfo({ name: 'RitsuLib', folder_name: 'RitsuLib', mod_id: localRuntimeId })],
+        ['3747602295', mkModInfo({
+          name: 'RitsuLib', folder_name: '3747602295', mod_id: steamRuntimeId,
+          source: workshopUrl, install_source: 'steam_workshop',
+          workshop_item_id: '3747602295', workshop_url: workshopUrl,
+        })],
+      ]);
+
+      render(<Wrap modpackName="Stable" modInfoByKey={modInfoByKey} />);
+      await screen.findAllByText('RitsuLib');
+      expect(screen.queryAllByText(/STS2 may prefer the local mods folder copy/i).length)
+        .toBe(shouldWarn ? 2 : 0);
+    },
+  );
 
   it('appends extra rows once and ignores duplicates already in the membership grid', async () => {
     registerInvokeHandler('list_profiles_cmd', () => [
@@ -452,6 +579,7 @@ describe('<LibraryTable>', () => {
         github_auto_detected: false,
         pinned: false,
         latest_compatible_tag: 'v2.0.0',
+        update_plans: [{ target: { name: 'Beta', folder_name: 'Beta' }, current_version: '1.0.0', target_version: 'v2.0.0', provider: 'github', source: 'owner/beta', capability: 'downloadable' as const, reason: '', selectable: true, pending: true }],
       }],
     ]);
 
@@ -1248,7 +1376,7 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
     await screen.findAllByText('Watcher');
 
-    await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+    await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
 
     await waitFor(() => {
       expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
@@ -1301,7 +1429,7 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
     await screen.findAllByText('RitsuLib');
 
-    await chooseOption(user, /Choose version/i, /0\.2\.26 \(stored\)/i);
+    await chooseOption(user, /Choose version/i, /Stored version.*0\.2\.26/i);
 
     await waitFor(() => {
       expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
@@ -1353,16 +1481,26 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
 
     const picker = await screen.findByRole('combobox', { name: /Choose version/i });
-    expect(picker).toHaveTextContent(/0\.4\.41 \(active\)/i);
+    expect(picker).toHaveTextContent(/0\.4\.41/i);
     expect(picker).toHaveTextContent(/Steam Workshop/i);
+    expect(within(picker).getByText('Steam Workshop')).toHaveClass('gf-version-option-source');
+    expect(picker.querySelector('.gf-version-option-main')).toHaveTextContent(/0\.4\.41/i);
 
     await user.click(picker);
     const listbox = await screen.findByRole('listbox');
     expect(
       within(listbox).getByRole('option', {
-        name: /0\.4\.26 \(active\).*GitHub \+ Nexus/i,
+        name: /Stored version.*0\.4\.26.*GitHub \+ Nexus/i,
       }),
     ).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Active version.*0\.4\.41.*Steam Workshop/i })).toBeInTheDocument();
+    expect(within(listbox).getByText('Steam Workshop')).toHaveClass('gf-version-option-source');
+    expect(within(listbox).getByText('GitHub + Nexus')).toHaveClass('gf-version-option-source');
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: /Manage stored versions/i }));
+    const manager = await screen.findByRole('dialog', { name: /Manage versions for RitsuLib/i });
+    expect(within(manager).getByText('Steam Workshop')).toHaveClass('gf-version-manager-source');
+    expect(within(manager).getByText('GitHub + Nexus')).toHaveClass('gf-version-manager-source');
   });
 
   it('does not infer GitHub or Nexus from URL path text in version sources', async () => {
@@ -1392,7 +1530,7 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
 
     const picker = await screen.findByRole('combobox', { name: /Choose version/i });
-    expect(picker).toHaveTextContent(/2\.0\.0 \(active\)/i);
+    expect(picker).toHaveTextContent(/2\.0\.0/i);
     expect(picker).toHaveTextContent(/Link/i);
     expect(picker).not.toHaveTextContent(/GitHub/i);
     expect(picker).not.toHaveTextContent(/Nexus/i);
@@ -1456,6 +1594,249 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(
       within(listbox).getByRole('option', { name: /GitHub \+ Nexus/i }),
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    { provider: 'nexus' as const, sourceLabel: 'Nexus', githubUrl: undefined, nexusUrl: 'https://www.nexusmods.com/slaythespire2/mods/42' },
+    { provider: 'github' as const, sourceLabel: 'GitHub', githubUrl: 'https://github.com/example/provider-projection', nexusUrl: undefined },
+    { provider: 'github+nexus' as const, sourceLabel: 'GitHub + Nexus', githubUrl: 'https://github.com/example/provider-projection', nexusUrl: 'https://www.nexusmods.com/slaythespire2/mods/42' },
+  ])('surfaces simultaneous Steam + $sourceLabel updates loaded through versionOptionsByKey', async ({ provider, sourceLabel, githubUrl, nexusUrl }) => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({ mod_version_id: 'projection-steam', name: 'ProviderProjection', version: '1.0.0', folder_name: '3747602295', mod_id: 'provider-projection', enabled: true, source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl }),
+    ]);
+    registerInvokeHandler('get_library_version_options', () => ({
+      'projection-steam': [
+        { mod_version_id: 'projection-steam', name: 'ProviderProjection', version: '1.0.0', folder_name: '3747602295', mod_id: 'provider-projection', installed: true, installed_enabled: true, cached: true, pinned: false, used_by_profiles: [], source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl },
+        { mod_version_id: 'projection-local', name: 'ProviderProjection', version: '0.9.0', folder_name: 'ProviderProjection', mod_id: 'provider-projection', installed: false, installed_enabled: false, cached: true, pinned: false, used_by_profiles: [], source: githubUrl ?? nexusUrl, github_url: githubUrl, nexus_url: nexusUrl, install_source: 'local' },
+      ],
+    }));
+    const auditByKey = new Map([
+      ['projection-steam', entryAudit('ProviderProjection', { mod_version_id: 'projection-steam', folder_name: '3747602295', update_plans: [{ target: { name: 'ProviderProjection', mod_version_id: 'projection-steam' }, current_version: '1.0.0', target_version: null, provider: 'steam', source: workshopUrl, capability: 'steam-managed', reason: '', selectable: false, pending: true }] })],
+      ['projection-local', entryAudit('ProviderProjection', { mod_version_id: 'projection-local', folder_name: 'ProviderProjection', needs_update: true, update_source: provider === 'github+nexus' ? 'both' : provider, github_repo: githubUrl ? 'example/provider-projection' : null, nexus_url: nexusUrl ?? null, nexus_update_available: !!nexusUrl, latest_release_with_assets_tag: githubUrl ? 'v1.1.0' : null, update_plans: (provider === 'github+nexus' ? ['github', 'nexus'] : [provider]).map((planProvider) => ({ target: { name: 'ProviderProjection', mod_version_id: 'projection-local' }, current_version: '0.9.0', target_version: '1.1.0', provider: planProvider, source: planProvider === 'github' ? githubUrl ?? null : nexusUrl ?? null, capability: planProvider === 'nexus' ? 'manual' as const : 'downloadable' as const, reason: '', selectable: planProvider !== 'nexus', pending: true })) })],
+    ]);
+    render(<Wrap modpackName={null} auditByKey={auditByKey} />);
+
+    const row = await screen.findByTestId('library-row');
+    expect(within(row).getByText('Steam Workshop Update')).toHaveClass('gf-pill-update-steam');
+    expect(within(row).getByTitle('Steam Workshop updates this mod automatically when you launch Slay the Spire 2 from Steam.')).toBeInTheDocument();
+    const expectedLabels = provider === 'github+nexus' ? ['GitHub', 'Nexus'] : [sourceLabel];
+    for (const label of expectedLabels) {
+      expect(within(row).getByText((_, element) =>
+        element?.classList.contains('gf-pill-update') === true &&
+        element.textContent?.includes(label) === true &&
+        element.textContent.includes('0.9.0') && element.textContent.includes('1.1.0'),
+      )).toBeInTheDocument();
+    }
+  });
+
+  it('shows the BaseLib Nexus lane instead of Latest and promotes it with Updates first', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3737335127';
+    const nexusUrl = 'https://www.nexusmods.com/slaythespire2/mods/103';
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'alpha-local',
+        name: 'Alpha',
+        version: '1.0.0',
+        folder_name: 'Alpha',
+        mod_id: 'Alpha',
+      }),
+      mkModInfo({
+        mod_version_id: 'baselib-steam',
+        name: 'BaseLib',
+        version: '3.3.5',
+        folder_name: 'BaseLib',
+        mod_id: 'BaseLib',
+        source: workshopUrl,
+        install_source: 'steam_workshop',
+        workshop_item_id: '3737335127',
+        workshop_url: workshopUrl,
+        nexus_url: nexusUrl,
+      }),
+    ]);
+    registerInvokeHandler('get_library_version_options', () => ({
+      'baselib-steam': [
+        {
+          mod_version_id: 'baselib-steam', name: 'BaseLib', version: '3.3.5',
+          folder_name: 'BaseLib', mod_id: 'BaseLib', installed: true,
+          installed_enabled: true, cached: true, pinned: false, used_by_profiles: [],
+          source: workshopUrl, install_source: 'steam_workshop',
+          workshop_item_id: '3737335127', workshop_url: workshopUrl,
+        },
+        {
+          mod_version_id: 'baselib-nexus', name: 'BaseLib', version: '3.3.1',
+          folder_name: 'BaseLib.sts2mm-conflict-1', mod_id: 'BaseLib',
+          installed: true, installed_enabled: false, cached: true, pinned: false,
+          used_by_profiles: [], source: nexusUrl, nexus_url: nexusUrl,
+          install_source: 'local',
+        },
+      ],
+    }));
+    const baseLibNexusPlan = (modVersionId: string) => ({
+      target: {
+        name: 'BaseLib',
+        mod_version_id: modVersionId,
+        folder_name: modVersionId === 'baselib-nexus'
+          ? 'BaseLib.sts2mm-conflict-1'
+          : 'BaseLib',
+        mod_id: 'BaseLib',
+      },
+      current_version: '3.3.1',
+      target_version: '3.3.5',
+      provider: 'nexus',
+      source: nexusUrl,
+      capability: 'manual' as const,
+      reason: '',
+      selectable: false,
+      pending: true,
+    });
+    const auditByKey = new Map<string, ModAuditEntry>([
+      ['baselib-steam', entryAudit('BaseLib', {
+        mod_version_id: 'baselib-steam',
+        folder_name: 'BaseLib',
+        installed_version: '3.3.5',
+        nexus_url: nexusUrl,
+        nexus_version: '3.3.5',
+        nexus_update_available: true,
+        needs_update: true,
+        update_source: 'nexus',
+        update_plans: [baseLibNexusPlan('baselib-steam')],
+      })],
+      ['baselib-nexus', entryAudit('BaseLib', {
+        mod_version_id: 'baselib-nexus',
+        folder_name: 'BaseLib.sts2mm-conflict-1',
+        installed_version: '3.3.1',
+        nexus_url: nexusUrl,
+        nexus_version: '3.3.5',
+        nexus_update_available: true,
+        needs_update: true,
+        update_source: 'nexus',
+        update_plans: [baseLibNexusPlan('baselib-nexus')],
+      })],
+    ]);
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <Wrap
+        modpackName={null}
+        auditByKey={auditByKey}
+        onReviewUpdates={vi.fn()}
+      />,
+    );
+    const rows = await screen.findAllByTestId('library-row');
+    const baseLibRow = rows.find((row) =>
+      row.querySelector('.gf-profile-library-title')?.textContent === 'BaseLib'
+    );
+    expect(baseLibRow).toBeDefined();
+    expect(
+      within(baseLibRow!).getAllByRole('button', { name: /Nexus.*3\.3\.1.*3\.3\.5/i }),
+    ).toHaveLength(1);
+    expect(within(baseLibRow!).queryByText('Latest')).not.toBeInTheDocument();
+
+    const titles = () =>
+      Array.from(container.querySelectorAll('.gf-profile-library-title')).map(
+        (element) => element.textContent ?? '',
+      );
+    expect(titles()[0]).toBe('Alpha');
+    await chooseOption(user, /Sort/i, /Updates first/i);
+    expect(titles()[0]).toBe('BaseLib');
+  });
+
+  it('renders provider-evidence pills as clickable buttons that fire onReviewUpdates (F7)', async () => {
+    // Regression: when a row has pending provider plans (nexus/steam),
+    // the update-affordance pills used to render as inert <span>s, so
+    // the ROW lost any way to open the review sheet — the user had to
+    // scroll back up to the toolbar's "Review updates" button. Wiring
+    // onReviewUpdates promotes the pills to buttons; clicks fire the
+    // callback and never silently apply.
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'evidence-local',
+        name: 'EvidenceMod',
+        version: '0.9.0',
+        folder_name: 'EvidenceMod',
+        mod_id: 'evidence-mod',
+        enabled: true,
+        github_url: 'https://github.com/example/evidence-mod',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+      }),
+    ]);
+    const auditByKey = new Map<string, ModAuditEntry>([
+      ['evidence-local', entryAudit('EvidenceMod', {
+        mod_version_id: 'evidence-local',
+        folder_name: 'EvidenceMod',
+        needs_update: true,
+        update_source: 'nexus',
+        nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42',
+        nexus_update_available: true,
+        update_plans: [
+          {
+            target: { name: 'EvidenceMod', mod_version_id: 'evidence-local' },
+            current_version: '0.9.0',
+            target_version: '1.1.0',
+            provider: 'nexus',
+            source: 'https://www.nexusmods.com/slaythespire2/mods/42',
+            capability: 'manual' as const,
+            reason: '',
+            selectable: false,
+            pending: true,
+          },
+        ],
+      })],
+    ]);
+    const onReviewUpdates = vi.fn();
+    render(
+      <Wrap
+        modpackName={null}
+        auditByKey={auditByKey}
+        onReviewUpdates={onReviewUpdates}
+      />,
+    );
+
+    const row = await screen.findByTestId('library-row');
+    // The Nexus provider-evidence pill must now be a real <button> —
+    // asserts both the DOM element type and the wired click handler.
+    const pill = within(row).getByRole('button', { name: /Nexus.*0\.9\.0.*1\.1\.0/i });
+    expect(pill).toBeInTheDocument();
+    expect(pill.tagName).toBe('BUTTON');
+    fireEvent.click(pill);
+    expect(onReviewUpdates).toHaveBeenCalledTimes(1);
+    // Silent apply guard: clicking the pill must never trigger the
+    // per-row inline update path (Bug regression: gated a click through).
+    expect(getInvokeCalls().some((call) => call.cmd === 'update_mod')).toBe(false);
+  });
+
+  it('guides Steam deletion to the exact removable local sibling without deleting it', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({ mod_version_id: 'ritsu-steam', name: 'RitsuLib', version: '0.4.41', folder_name: '3747602295', mod_id: 'STS2-RitsuLib', enabled: true, source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl }),
+    ]);
+    registerInvokeHandler('get_library_version_options', () => ({ 'ritsu-steam': [
+      { mod_version_id: 'ritsu-steam', name: 'RitsuLib', version: '0.4.41', folder_name: '3747602295', mod_id: 'STS2-RitsuLib', installed: true, installed_enabled: true, cached: true, pinned: false, used_by_profiles: [], source: workshopUrl, install_source: 'steam_workshop', workshop_item_id: '3747602295', workshop_url: workshopUrl },
+      { mod_version_id: 'ritsu-local', name: 'RitsuLib', version: '0.4.40', folder_name: 'STS2-RitsuLib', mod_id: 'STS2-RitsuLib', installed: false, installed_enabled: false, cached: true, pinned: false, used_by_profiles: [], github_url: 'https://github.com/BAKAOLC/STS2-RitsuLib', nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/42', install_source: 'local' },
+    ] }));
+    render(<AllProviders><IntegratedLibraryTable /></AllProviders>);
+
+    const manage = await screen.findByRole('button', { name: /^Manage stored versions$/i });
+    expect(manage).not.toHaveClass('is-guided');
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^Remove RitsuLib$/i }));
+      });
+      const guidance = screen.getByText(/RitsuLib.*GitHub \+ Nexus.*v0\.4\.40.*Manage stored versions/i);
+      expect(guidance).toBeInTheDocument();
+      const guidedManage = screen.getByRole('button', { name: /Manage stored versions.*GitHub \+ Nexus.*0\.4\.40/i });
+      expect(guidedManage).toHaveClass('is-guided');
+      expect(getInvokeCalls().some((call) => call.cmd === 'remove_library_mod_version')).toBe(false);
+      act(() => vi.advanceTimersByTime(4000));
+      act(() => vi.advanceTimersByTime(300));
+      expect(guidance).toBeInTheDocument();
+      fireEvent.click(guidedManage);
+      expect(guidedManage).not.toHaveClass('is-guided');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('dedupes exact duplicate Workshop rows without splitting the modpack view', async () => {
@@ -1572,9 +1953,15 @@ describe('<LibraryTable modpackName={null}>', () => {
     const listbox = await screen.findByRole('listbox');
     expect(
       within(listbox).getByRole('option', {
-        name: /0\.4\.26 \(stored\).*GitHub \+ Nexus/i,
+        name: /Stored version.*0\.4\.26.*GitHub \+ Nexus/i,
       }),
     ).toBeInTheDocument();
+    expect(within(listbox).getAllByText('GitHub + Nexus')[0]).toHaveClass('gf-version-option-source');
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: /Manage stored versions/i }));
+    const manager = await screen.findByRole('dialog', { name: /Manage versions for RitsuLib/i });
+    expect(within(manager).getAllByText('GitHub + Nexus').length).toBeGreaterThan(0);
+    expect(within(manager).getAllByText('GitHub + Nexus')[0]).toHaveClass('gf-version-manager-source');
   });
 
   it('keeps the selected Library version visible while the switch refresh is pending', async () => {
@@ -1604,10 +1991,10 @@ describe('<LibraryTable modpackName={null}>', () => {
     render(<Wrap modpackName={null} />);
 
     const picker = await screen.findByRole('combobox', { name: /Choose version/i });
-    expect(picker).toHaveTextContent(/1\.4\.3 \(active\)/i);
-    await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+    expect(picker).toHaveTextContent(/1\.4\.3/i);
+    await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
 
-    await waitFor(() => expect(picker).toHaveTextContent(/1\.3\.0 \(stored\)/i));
+    await waitFor(() => expect(picker).toHaveTextContent(/1\.3\.0/i));
     resolveSelect?.(mkModInfo({
       mod_version_id: 'watcher-130',
       name: 'Watcher',
@@ -1671,8 +2058,8 @@ describe('<LibraryTable modpackName={null}>', () => {
 
     const user = userEvent.setup();
     const listbox = await openSelect(user, /Choose version/i);
-    expect(within(listbox).getByRole('option', { name: /0\.3\.2 \(stored\)/i })).toBeInTheDocument();
-    expect(within(listbox).getByRole('option', { name: /0\.3\.1 \(active\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Stored version.*0\.3\.2/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Active version.*0\.3\.1/i })).toBeInTheDocument();
   });
 
   it('shows backend bundle options only on the owning bundle row', async () => {
@@ -1735,8 +2122,8 @@ describe('<LibraryTable modpackName={null}>', () => {
     expect(within(standaloneRow).queryByRole('combobox', { name: /Choose version/i })).toBeNull();
 
     const listbox = await openSelect(user, /Choose version/i);
-    expect(within(listbox).getByRole('option', { name: /2\.1\.0 \(stored\)/i })).toBeInTheDocument();
-    expect(within(listbox).getByRole('option', { name: /2\.0\.0 \(active\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Stored version.*2\.1\.0/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Active version.*2\.0\.0/i })).toBeInTheDocument();
   });
 
   it('shows cached-only GitHub update versions in the no-focus Library selector', async () => {
@@ -1784,8 +2171,8 @@ describe('<LibraryTable modpackName={null}>', () => {
 
     const user = userEvent.setup();
     const listbox = await openSelect(user, /Choose version/i);
-    expect(within(listbox).getByRole('option', { name: /1\.4\.3 \(stored\)/i })).toBeInTheDocument();
-    expect(within(listbox).getByRole('option', { name: /1\.4\.2 \(active\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Stored version.*1\.4\.3/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Active version.*1\.4\.2/i })).toBeInTheDocument();
   });
 
   it('collapses duplicate stored backend version options in the no-focus Library selector', async () => {
@@ -1856,9 +2243,9 @@ describe('<LibraryTable modpackName={null}>', () => {
 
     const user = userEvent.setup();
     const listbox = await openSelect(user, /Choose version/i);
-    expect(within(listbox).getByRole('option', { name: /3\.3\.1 \(stored\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Stored version.*3\.3\.1/i })).toBeInTheDocument();
     expect(within(listbox).getAllByRole('option', { name: /3\.2\.1/i })).toHaveLength(1);
-    expect(within(listbox).getByRole('option', { name: /3\.2\.1 \(active\)/i })).toBeInTheDocument();
+    expect(within(listbox).getByRole('option', { name: /Active version.*3\.2\.1/i })).toBeInTheDocument();
   });
 
   it('renders rows without the storage chip or per-row Store button', async () => {
@@ -2076,6 +2463,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           github_auto_detected: false,
           pinned: false,
           latest_compatible_tag: 'v2.0.0',
+          update_plans: [{ target: { name: 'Beta', folder_name: 'Beta' }, current_version: '1.0.0', target_version: 'v2.0.0', provider: 'github', source: 'owner/beta', capability: 'downloadable' as const, reason: '', selectable: true, pending: true }],
         }],
       ]);
       const modInfoByKey = new Map([
@@ -2140,6 +2528,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           github_auto_detected: false,
           pinned: false,
           latest_compatible_tag: 'v2.0.0',
+          update_plans: [{ target: { name: 'Beta', folder_name: 'Beta' }, current_version: '1.0.0', target_version: 'v2.0.0', provider: 'github', source: 'owner/beta', capability: 'downloadable' as const, reason: '', selectable: true, pending: true }],
         }],
       ]);
       const modInfoByKey = new Map([
@@ -2391,10 +2780,10 @@ describe('<LibraryTable modpackName={null}>', () => {
       expect(container.querySelectorAll('[data-testid="library-row"]')).toHaveLength(1);
       const user = userEvent.setup();
       const listbox = await openSelect(user, /Choose version/i);
-      expect(within(listbox).getByRole('option', { name: /1\.4\.3 \(active\)/i })).toBeInTheDocument();
-      expect(within(listbox).getByRole('option', { name: /1\.3\.0 \(stored\)/i })).toBeInTheDocument();
-      expect(within(listbox).getByRole('option', { name: /\? \(stored\)/i })).toBeInTheDocument();
-      await user.click(within(listbox).getByRole('option', { name: /1\.3\.0 \(stored\)/i }));
+      expect(within(listbox).getByRole('option', { name: /Active version.*1\.4\.3/i })).toBeInTheDocument();
+      expect(within(listbox).getByRole('option', { name: /Stored version.*1\.3\.0/i })).toBeInTheDocument();
+      expect(within(listbox).getByRole('option', { name: /Stored version.*\?/i })).toBeInTheDocument();
+      await user.click(within(listbox).getByRole('option', { name: /Stored version.*1\.3\.0/i }));
       await waitFor(() => {
         expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
           cmd: 'select_library_mod_version',
@@ -2460,7 +2849,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       const user = userEvent.setup();
       render(<Wrap modpackName="Stable" />);
 
-      await chooseOption(user, /Choose version/i, /1\.5\.0 \(stored\)/i);
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.5\.0/i);
 
       await waitFor(() => {
         expect(getInvokeCalls()).toContainEqual(expect.objectContaining({
@@ -2521,9 +2910,9 @@ describe('<LibraryTable modpackName={null}>', () => {
       render(<Wrap modpackName="Stable" />);
 
       const listbox = await openSelect(user, /Choose version/i);
-      expect(within(listbox).getByRole('option', { name: /1\.2\.2 \(active\)/i })).toBeInTheDocument();
-      expect(within(listbox).getByRole('option', { name: /1\.2\.0 \(stored\)/i })).toBeInTheDocument();
-      expect(within(listbox).queryByRole('option', { name: /^0 \(stored\)$/i })).toBeNull();
+      expect(within(listbox).getByRole('option', { name: /Active version.*1\.2\.2/i })).toBeInTheDocument();
+      expect(within(listbox).getByRole('option', { name: /Stored version.*1\.2\.0/i })).toBeInTheDocument();
+      expect(within(listbox).queryByRole('option', { name: /Stored version.*^0$/i })).toBeNull();
     });
 
     it('shows modpack usage with the pinned version for each local version option', async () => {
@@ -3370,8 +3759,8 @@ describe('<LibraryTable modpackName={null}>', () => {
         />,
       );
       const picker = await screen.findByRole('combobox', { name: /Choose version/i });
-      await waitFor(() => expect(picker).toHaveTextContent(/1\.4\.3 \(active\)/i));
-      await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+      await waitFor(() => expect(picker).toHaveTextContent(/1\.4\.3/i));
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
       await waitFor(() => {
         expect(onSelectProfileVersion).toHaveBeenCalledWith(
           expect.objectContaining({ mod_version_id: 'watcher-143' }),
@@ -3418,7 +3807,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           onSelectProfileVersion={onSelectProfileVersion}
         />,
       );
-      await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
       await waitFor(() => expect(onSelectProfileVersion).toHaveBeenCalledWith(
         expect.objectContaining({ mod_version_id: 'watcher-143' }),
         expect.objectContaining({ mod_version_id: 'watcher-130' }),
@@ -3464,7 +3853,7 @@ describe('<LibraryTable modpackName={null}>', () => {
           onSelectProfileVersion={onSelectProfileVersion}
         />,
       );
-      await chooseOption(user, /Choose version/i, /1\.4\.3 \(active\)/i);
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.4\.3/i);
       await waitFor(() => expect(onSelectProfileVersion).toHaveBeenCalledWith(
         expect.objectContaining({ mod_version_id: 'watcher-130' }),
         expect.objectContaining({ mod_version_id: 'watcher-143' }),
@@ -3503,7 +3892,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       });
       const user = userEvent.setup();
       render(<Wrap modpackName="Stable" />);
-      await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
       expect(await screen.findByText(/Could not select that version: disk switch failed/i)).toBeInTheDocument();
       expect(screen.getByText('Watcher')).toBeInTheDocument();
     });
@@ -3538,7 +3927,7 @@ describe('<LibraryTable modpackName={null}>', () => {
       });
       const user = userEvent.setup();
       render(<Wrap modpackName="Stable" />);
-      await chooseOption(user, /Choose version/i, /1\.3\.0 \(stored\)/i);
+      await chooseOption(user, /Choose version/i, /Stored version.*1\.3\.0/i);
       expect(await screen.findByText(/Could not select that version: string failure/i)).toBeInTheDocument();
     });
 

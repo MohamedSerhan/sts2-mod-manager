@@ -216,6 +216,7 @@ pub enum UpdateApplyStatus {
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateApplyResult {
     pub target: ModAuditTarget,
+    pub provider: String,
     pub mod_name: String,
     pub expected_version: String,
     pub actual_version: Option<String>,
@@ -2146,6 +2147,7 @@ pub async fn update_all_mods(
         else {
             results.push(UpdateApplyResult {
                 target: selection.target.clone(),
+                provider: selection.provider.clone(),
                 mod_name: selection.target.name.clone(),
                 expected_version: selection.expected_version.clone(),
                 actual_version: None,
@@ -2158,6 +2160,7 @@ pub async fn update_all_mods(
         if selection.provider != "github" {
             results.push(UpdateApplyResult {
                 target: selection.target.clone(),
+                provider: selection.provider.clone(),
                 mod_name: old_info.name.clone(),
                 expected_version: selection.expected_version.clone(),
                 actual_version: None,
@@ -2172,6 +2175,7 @@ pub async fn update_all_mods(
         }) else {
             results.push(UpdateApplyResult {
                 target: selection.target.clone(),
+                provider: selection.provider.clone(),
                 mod_name: old_info.name.clone(),
                 expected_version: selection.expected_version.clone(),
                 actual_version: None,
@@ -2187,6 +2191,7 @@ pub async fn update_all_mods(
         if update.source_type != "github" {
             results.push(UpdateApplyResult {
                 target: selection.target.clone(),
+                provider: selection.provider.clone(),
                 mod_name: old_info.name.clone(),
                 expected_version: selection.expected_version.clone(),
                 actual_version: None,
@@ -2202,6 +2207,7 @@ pub async fn update_all_mods(
             None => {
                 results.push(UpdateApplyResult {
                     target: selection.target.clone(),
+                    provider: selection.provider.clone(),
                     mod_name: old_info.name.clone(),
                     expected_version: selection.expected_version.clone(),
                     actual_version: None,
@@ -2255,6 +2261,7 @@ pub async fn update_all_mods(
                         );
                         results.push(UpdateApplyResult {
                             target: selection.target.clone(),
+                            provider: selection.provider.clone(),
                             mod_name: old_info.name.clone(),
                             expected_version: selection.expected_version.clone(),
                             actual_version: Some(c.tag),
@@ -2279,6 +2286,7 @@ pub async fn update_all_mods(
                     );
                     results.push(UpdateApplyResult {
                         target: selection.target.clone(),
+                        provider: selection.provider.clone(),
                         mod_name: old_info.name.clone(),
                         expected_version: selection.expected_version.clone(),
                         actual_version: None,
@@ -2316,6 +2324,7 @@ pub async fn update_all_mods(
                     );
                     results.push(UpdateApplyResult {
                         target: selection.target.clone(),
+                        provider: selection.provider.clone(),
                         mod_name: old_info.name.clone(),
                         expected_version: selection.expected_version.clone(),
                         actual_version: None,
@@ -2335,6 +2344,7 @@ pub async fn update_all_mods(
         {
             results.push(UpdateApplyResult {
                 target: selection.target.clone(),
+                provider: selection.provider.clone(),
                 mod_name: old_info.name.clone(),
                 expected_version: selection.expected_version.clone(),
                 actual_version: Some(chosen_tag),
@@ -2373,6 +2383,7 @@ pub async fn update_all_mods(
                 );
                 results.push(UpdateApplyResult {
                     target: selection.target.clone(),
+                    provider: selection.provider.clone(),
                     mod_name: old_info.name.clone(),
                     expected_version: selection.expected_version.clone(),
                     actual_version: Some(chosen_tag.clone()),
@@ -2391,6 +2402,7 @@ pub async fn update_all_mods(
                 );
                 results.push(UpdateApplyResult {
                     target: selection.target.clone(),
+                    provider: selection.provider.clone(),
                     mod_name: old_info.name.clone(),
                     expected_version: selection.expected_version.clone(),
                     actual_version: Some(chosen_tag.clone()),

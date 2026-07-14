@@ -135,12 +135,13 @@ function setupPack(opts: {
   return baseProfile({
     name: packName,
     mods: inPack.map((m) =>
-      profileMod({
-        name: m.name,
-        folder_name: m.folder_name,
-        mod_id: m.mod_id,
-        version: m.version,
-      }),
+        profileMod({
+          name: m.name,
+          folder_name: m.folder_name,
+          mod_id: m.mod_id,
+          version: m.version,
+          source: m.source ?? null,
+        }),
     ),
   });
 }
@@ -1475,6 +1476,35 @@ describe('<ModpackDetail>', () => {
     });
   });
 
+  it('Add on an active local copy with Workshop discovery metadata still toggles local files', async () => {
+    registerInvokeHandler('get_active_profile', () => 'Sample');
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    const profile = setupPack({
+      available: [modInfo({
+        name: 'LocalRitsuLib',
+        folder_name: 'LocalRitsuLib',
+        mod_id: 'LocalRitsuLib',
+        source: workshopUrl,
+        install_source: 'local',
+        workshop_url: workshopUrl,
+      })],
+    });
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    const available = await expandLibrary(user);
+    await user.click(within(available).getByRole('button', { name: /^Add$/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().some((c) => c.cmd === 'toggle_mod')).toBe(true);
+    });
+    expect(getInvokeCalls().find((c) => c.cmd === 'toggle_mod')?.args).toMatchObject({
+      name: 'LocalRitsuLib',
+      folderName: 'LocalRitsuLib',
+      enable: true,
+    });
+  });
+
   it('Add does NOT call toggle_mod when the pack is not active', async () => {
     const profile = setupPack({
       available: [modInfo({ name: 'LibMod', folder_name: 'LibMod' })],
@@ -1663,9 +1693,10 @@ describe('<ModpackDetail>', () => {
 
   // ── Pack-scoped Delete all ────────────────────────────────────────
   it("Delete all (in pack) deletes ONLY this pack's mods from disk", async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
     const profile = setupPack({
       inPack: [
-        modInfo({ name: 'PackOne', folder_name: 'PackOne' }),
+        modInfo({ name: 'PackOne', folder_name: 'PackOne', source: workshopUrl }),
         modInfo({ name: 'PackTwo', folder_name: 'PackTwo' }),
       ],
       available: [modInfo({ name: 'OutsiderMod', folder_name: 'OutsiderMod' })],
@@ -1723,6 +1754,47 @@ describe('<ModpackDetail>', () => {
     await screen.findByRole('heading', { level: 2, name: 'Sample' });
     await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
     expect(screen.queryByRole('menuitem', { name: /Delete all/i })).toBeNull();
+  });
+
+  it('Delete all preserves Steam-owned pack members while deleting local copies', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295';
+    const profile = setupPack({
+      inPack: [
+        modInfo({
+          name: 'SteamMod',
+          folder_name: '3747602295',
+          source: workshopUrl,
+          install_source: 'steam_workshop',
+          workshop_item_id: '3747602295',
+          workshop_url: workshopUrl,
+        }),
+        modInfo({
+          name: 'LocalMod',
+          folder_name: 'LocalMod',
+          source: workshopUrl,
+          install_source: 'local',
+          workshop_url: workshopUrl,
+        }),
+      ],
+    });
+    registerInvokeHandler('delete_mod_cmd', () => true);
+    registerInvokeHandler('set_profile_mod_membership', () => baseProfile());
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await screen.findByRole('heading', { level: 2, name: 'Sample' });
+    await user.click(screen.getByRole('button', { name: /Advanced actions/i }));
+    await user.click(screen.getByRole('menuitem', { name: /Delete all/i }));
+    const phraseInput = await screen.findByPlaceholderText('delete all');
+    await user.type(phraseInput, 'delete all');
+    const confirmBtn = screen
+      .getAllByRole('button')
+      .find((button) => /Delete these mods/i.test(button.textContent ?? ''));
+    await user.click(confirmBtn!);
+
+    await waitFor(() => {
+      const deletes = getInvokeCalls().filter((call) => call.cmd === 'delete_mod_cmd');
+      expect(deletes.map((call) => call.args?.name)).toEqual(['LocalMod']);
+    });
   });
 
   // ── Load order ────────────────────────────────────────────────────
@@ -1946,7 +2018,7 @@ describe('<ModpackDetail>', () => {
       update_source: 'github', pinned: false, snoozed: false, update_plans: [plan],
     }]);
     registerInvokeHandler('update_all_mods', () => [{
-      target: plan.target, mod_name: 'PackMod', expected_version: '2.0',
+      target: plan.target, provider: 'github', mod_name: 'PackMod', expected_version: '2.0',
       actual_version: '3.0', status: 'stale', message: 'Preview again', updated_mod: null,
     }]);
 

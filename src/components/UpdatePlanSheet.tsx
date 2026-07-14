@@ -4,9 +4,16 @@ import { useTranslation } from 'react-i18next';
 
 import type { UpdateApplyResult, UpdatePlanItem } from '../types';
 
+function targetIdentity(target: UpdatePlanItem['target']): string {
+  return target.mod_version_id ?? target.folder_name ?? target.mod_id ?? target.name;
+}
+
+function updateKey(target: UpdatePlanItem['target'], provider: string): string {
+  return `${targetIdentity(target)}:${provider}`;
+}
+
 function planKey(plan: UpdatePlanItem): string {
-  const identity = plan.target.mod_version_id ?? plan.target.folder_name ?? plan.target.mod_id ?? plan.target.name;
-  return `${identity}:${plan.provider}`;
+  return updateKey(plan.target, plan.provider);
 }
 
 export function UpdatePlanSheet({
@@ -25,6 +32,12 @@ export function UpdatePlanSheet({
   onUnfreeze: (plan: UpdatePlanItem) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const providerLabel = (provider: string) => {
+    if (provider === 'github') return t('mods.versionSource.gitHub');
+    if (provider === 'nexus') return t('mods.versionSource.nexus');
+    if (provider === 'steam') return t('mods.versionSource.steamWorkshop');
+    return provider;
+  };
   const selectable = useMemo(() => plans.filter((plan) => plan.selectable && plan.capability === 'downloadable'), [plans]);
   const [selected, setSelected] = useState(() => new Set(selectable.map(planKey)));
   const [results, setResults] = useState<UpdateApplyResult[] | null>(null);
@@ -69,7 +82,10 @@ export function UpdatePlanSheet({
           <div className="gf-update-plan-list">
             {plans.map((plan) => {
               const key = planKey(plan);
-              const result = results?.find((item) => planKey({ ...plan, target: item.target }) === key);
+              const result = results?.find((item) =>
+                updateKey(item.target, item.provider) === key
+              );
+              const sourceLabel = providerLabel(plan.provider);
               const handleToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
                 setSelected((old) => {
                   const next = new Set(old);
@@ -89,11 +105,11 @@ export function UpdatePlanSheet({
                       checked={selected.has(key)}
                       onChange={handleToggle}
                       aria-label={t('mods.updatePlan.selectItem', {
-                        name: [
-                          plan.target.name,
-                          plan.target.folder_name,
-                          t('mods.gitHub'),
-                          plan.target_version,
+                          name: [
+                            plan.target.name,
+                            plan.target.folder_name,
+                            sourceLabel,
+                            plan.target_version,
                         ].filter(Boolean).join(' — '),
                       })}
                     />
@@ -104,6 +120,7 @@ export function UpdatePlanSheet({
                   )}
                   <div className="gf-update-plan-copy">
                     <strong>{plan.target.name}</strong>
+                    <span>{sourceLabel}</span>
                     {plan.capability !== 'steam-managed' && (
                       <span>
                         {t('mods.updatePlan.versionChange', {

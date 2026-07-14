@@ -1679,7 +1679,7 @@ describe('<ModsView>', () => {
       },
     ]);
     registerInvokeHandler('update_all_mods', () => [
-      { target: { name: 'BaseLib', folder_name: 'BaseLib' }, mod_name: 'BaseLib', expected_version: 'v3.2.0', actual_version: 'v3.2.0', status: 'updated', message: null, updated_mod: { name: 'BaseLib', version: '3.2.0', enabled: true, files: [] } },
+      { target: { name: 'BaseLib', folder_name: 'BaseLib' }, provider: 'github', mod_name: 'BaseLib', expected_version: 'v3.2.0', actual_version: 'v3.2.0', status: 'updated', message: null, updated_mod: { name: 'BaseLib', version: '3.2.0', enabled: true, files: [] } },
     ]);
     const user = userEvent.setup();
     render(<Wrap />);

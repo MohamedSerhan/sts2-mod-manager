@@ -1384,6 +1384,7 @@ async function specSaveChangesConverges(driver) {
   await refreshBtn.click();
   await navToModpacks(driver);
   await createModpackNamed(driver, modpackName, { minSelected: 2 });
+  await activateModpack(driver, modpackName);
 
   const addedDir = join(FIXTURE_DIRS.game, 'mods', 'SaveConvergenceMod');
   mkdirSync(addedDir, { recursive: true });
@@ -1396,13 +1397,27 @@ async function specSaveChangesConverges(driver) {
   if (!before?.has_drift || !before.added?.includes('Save Convergence Mod')) {
     throw new Error(`save convergence fixture did not create production drift: ${JSON.stringify(before)}`);
   }
+  // Exercise the user-facing Profiles banner and Save changes button. The
+  // direct command below is only used for the second-save idempotency check.
+  await navToModpacks(driver);
+  await waitForElement(
+    driver,
+    By.xpath(`//*[contains(@class,'gf-banner')]//*[contains(normalize-space(.), '${modpackName} has unsaved mod changes')]`),
+    `drift banner for "${modpackName}"`,
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//button[normalize-space(.)='Save changes']"),
+    'Profiles Save changes button',
+  );
+  await waitForToastContaining(driver, ['Saved changes', modpackName], 'Save changes success toast');
+  const after = await invokeTauri(driver, 'get_profile_drift', { name: modpackName });
+  if (after?.has_drift) {
+    throw new Error(`production drift did not converge after UI Save: ${JSON.stringify(after)}`);
+  }
   const first = await invokeTauri(driver, 'save_profile_drift', { name: modpackName });
   if (first?.residual_drift?.has_drift) {
     throw new Error(`first Save left residual production drift: ${JSON.stringify(first.residual_drift)}`);
-  }
-  const after = await invokeTauri(driver, 'get_profile_drift', { name: modpackName });
-  if (after?.has_drift) {
-    throw new Error(`production drift did not converge after Save: ${JSON.stringify(after)}`);
   }
   const second = await invokeTauri(driver, 'save_profile_drift', { name: modpackName });
   if (second?.residual_drift?.has_drift || second?.profile?.updated_at !== first?.profile?.updated_at) {
@@ -1712,12 +1727,11 @@ async function invokeTauri(driver, cmd, args = {}) {
 
 async function specUpdatePlanHonorsEmptySelection(driver) {
   const before = await invokeTauri(driver, 'get_installed_mods');
-  if (!before.ok) throw new Error(`Could not read Library before update-plan smoke: ${before.error}`);
+  if (!Array.isArray(before)) throw new Error('Could not read Library before update-plan smoke');
   const applied = await invokeTauri(driver, 'update_all_mods', { profileId: null, selected: [] });
-  if (!applied.ok) throw new Error(`Empty update plan failed: ${applied.error}`);
-  if (!Array.isArray(applied.value) || applied.value.length !== 0) throw new Error('Empty update plan returned unexpected item results');
+  if (!Array.isArray(applied) || applied.length !== 0) throw new Error('Empty update plan returned unexpected item results');
   const after = await invokeTauri(driver, 'get_installed_mods');
-  if (!after.ok || JSON.stringify(after.value) !== JSON.stringify(before.value)) throw new Error('Empty update selection changed the Library');
+  if (!Array.isArray(after) || JSON.stringify(after) !== JSON.stringify(before)) throw new Error('Empty update selection changed the Library');
 }
 
 async function waitForToastContaining(driver, parts, label, timeoutMs = 10_000) {

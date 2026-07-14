@@ -1582,7 +1582,12 @@ pub(crate) fn has_cached_provider_version_for_mod(
     provider: ArtifactProvider,
     provider_source: Option<&str>,
 ) -> bool {
+    let requested_source_was_supplied =
+        provider_source.is_some_and(|source| !source.trim().is_empty());
     let requested_source = provider_source_identity(provider, provider_source);
+    if requested_source_was_supplied && requested_source.is_none() {
+        return false;
+    }
     local_version_options_for_cached_comparison(config_path, cache_path, info)
         .into_iter()
         .filter(|option| option.cached)
@@ -1593,7 +1598,8 @@ pub(crate) fn has_cached_provider_version_for_mod(
                 provider_source_identity(provider, provider_source_for_option(&option, provider));
             match (requested_source.as_deref(), candidate_source.as_deref()) {
                 (Some(requested), Some(candidate)) => requested == candidate,
-                _ => true,
+                (Some(_), None) => false,
+                (None, _) => true,
             }
         })
 }

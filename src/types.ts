@@ -585,6 +585,8 @@ export interface UpdatePlanSelection {
 
 export interface UpdateApplyResult {
   target: ModAuditTarget;
+  /** Provider identity echoed from the selected update plan. */
+  provider: string;
   mod_name: string;
   expected_version: string;
   actual_version: string | null;

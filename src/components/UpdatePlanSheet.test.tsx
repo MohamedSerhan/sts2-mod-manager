@@ -50,4 +50,29 @@ describe('<UpdatePlanSheet>', () => {
     await user.click(screen.getByRole('button', { name: 'Select all' }));
     expect(screen.getByRole('button', { name: 'Download 2 selected GitHub updates to Versions' })).toBeEnabled();
   });
+
+  it('maps apply results by provider when target identities are shared', async () => {
+    const user = userEvent.setup();
+    const plans = [
+      plan('Shared Mod', 'shared', 'downloadable', 'github', '2.0.0'),
+      plan('Shared Mod', 'shared', 'manual', 'nexus', '3.0.0'),
+    ];
+    const onApply = vi.fn(async () => [{
+      target: plans[0].target,
+      provider: 'github',
+      mod_name: 'Shared Mod',
+      expected_version: '2.0.0',
+      actual_version: '2.0.0',
+      status: 'updated' as const,
+      message: null,
+      updated_mod: null,
+    }]);
+    render(<AllProviders><UpdatePlanSheet plans={plans} applying={false} onApply={onApply} onClose={vi.fn()} onOpenSource={vi.fn()} onUnfreeze={vi.fn()} /></AllProviders>);
+
+    expect(screen.getAllByText('GitHub')).toHaveLength(1);
+    expect(screen.getAllByText('Nexus')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: /Download 1 selected GitHub update/ }));
+    expect(screen.getByText('Downloaded to Versions')).toBeInTheDocument();
+    expect(screen.getByText('Manual download')).toBeInTheDocument();
+  });
 });

@@ -644,14 +644,14 @@ describe('useModLibrary', () => {
 
   it('bulk GitHub updates promote Library versions, refresh version options, and leave the target pack manifest alone', async () => {
     registerInvokeHandler('update_all_mods', () => [
-      { target: makeUpdatePlan('PackMod').target, mod_name: 'PackMod', expected_version: '2.0.0', actual_version: '2.0.0', status: 'updated', message: null, updated_mod: makeMod({
+      { target: makeUpdatePlan('PackMod').target, provider: 'github', mod_name: 'PackMod', expected_version: '2.0.0', actual_version: '2.0.0', status: 'updated', message: null, updated_mod: makeMod({
         name: 'PackMod',
         version: '2.0.0',
         folder_name: 'PackMod',
         mod_id: 'pack-mod',
         github_url: 'https://github.com/some/pack-mod',
       }) },
-      { target: makeUpdatePlan('LibraryOnly').target, mod_name: 'LibraryOnly', expected_version: '2.0.0', actual_version: '2.0.0', status: 'updated', message: null, updated_mod: makeMod({
+      { target: makeUpdatePlan('LibraryOnly').target, provider: 'github', mod_name: 'LibraryOnly', expected_version: '2.0.0', actual_version: '2.0.0', status: 'updated', message: null, updated_mod: makeMod({
         name: 'LibraryOnly',
         version: '2.0.0',
         folder_name: 'LibraryOnly',

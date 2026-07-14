@@ -74,7 +74,7 @@ import {
   setProfileModsEnabled,
   toggleMod,
 } from '../hooks/useTauri';
-import { identitiesMatch, isWorkshopSource } from '../lib/modIdentity';
+import { identitiesMatch, isWorkshopOwned, isWorkshopSource } from '../lib/modIdentity';
 import { logicalModKey, modVersionSortValue } from '../lib/modGrouping';
 import { projectProviderUpdates } from '../lib/auditState';
 import type {
@@ -136,7 +136,7 @@ function modKey(mod: {
 }
 
 function isWorkshopMod(mod: ModInfo): boolean {
-  return isWorkshopSource(mod);
+  return isWorkshopOwned(mod);
 }
 
 function missingNameKey(name: string): string {
@@ -562,7 +562,14 @@ export function ModpackDetail({
         source: m.source ?? null,
       }));
       for (const m of targets) {
-        const steamOwned = isWorkshopSource(m);
+        // Profile manifests do not persist install_source, so resolve the
+        // live artifact before deciding whether Steam owns it. A local
+        // GitHub/Nexus copy may retain Workshop discovery metadata and must
+        // remain deletable from the manager.
+        const installed = mods.find((candidate) => identitiesMatch(m, candidate));
+        const steamOwned = installed
+          ? isWorkshopOwned(installed)
+          : isWorkshopSource(m);
         if (!steamOwned) {
           await deleteMod(m.name, m.folder_name);
         }

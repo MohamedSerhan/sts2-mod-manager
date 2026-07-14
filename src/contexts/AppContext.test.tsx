@@ -732,6 +732,7 @@ describe('<AppProvider>', () => {
       updateAllCalls += 1;
       return [{
         target: { name: 'A', mod_version_id: 'artifact-a' },
+        provider: 'github',
         mod_name: 'A', expected_version: '2.0.0', actual_version: '2.0.0',
         status: 'updated', message: null,
         updated_mod: { mod_version_id: 'artifact-a-2', name: 'A', folder_name: 'AFolder', mod_id: 'a', version: '2.0.0', enabled: true, files: [] },
@@ -902,7 +903,7 @@ describe('<AppProvider>', () => {
     // Confirm proceeds, but update_all_mods returns an empty list, so the
     // count === 0 arm of the success toast fires.
     registerInvokeHandler('update_all_mods', () => [{
-      target: updatePlan('A').target, mod_name: 'A', expected_version: '2.0.0',
+      target: updatePlan('A').target, provider: 'github', mod_name: 'A', expected_version: '2.0.0',
       actual_version: '3.0.0', status: 'stale', message: 'Preview again', updated_mod: null,
     }]);
     let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;

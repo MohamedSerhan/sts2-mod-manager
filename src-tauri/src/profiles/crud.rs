@@ -632,8 +632,25 @@ pub(crate) fn profile_mod_matches_installed_with_registry(
     installed: &ModInfo,
     config_path: &Path,
 ) -> bool {
-    if profile_or_installed_is_workshop(pm, installed) {
-        return profile_mod_matches_installed(pm, installed);
+    // A saved Workshop entry may legitimately have a different generated
+    // artifact id from the current Steam scan. The Workshop item id is the
+    // authoritative identity for two Steam-owned rows, so preserve that
+    // deduplication exception before comparing artifact ids.
+    if crate::mods::workshop_item_id_from_reference(pm.source.as_deref(), pm.folder_name.as_deref())
+        .is_some_and(|item_id| {
+            installed.install_source.is_workshop()
+                && profile_mod_matches_installed(pm, installed)
+                && crate::mods::workshop_item_id_from_reference(
+                    installed
+                        .workshop_url
+                        .as_deref()
+                        .or(installed.source.as_deref()),
+                    installed.folder_name.as_deref(),
+                )
+                .is_some_and(|installed_id| installed_id == item_id)
+        })
+    {
+        return true;
     }
     if pm
         .mod_version_id
@@ -650,6 +667,10 @@ pub(crate) fn profile_mod_matches_installed_with_registry(
         return profile_mod_artifact_id_matches(pm, installed, config_path).unwrap_or(false);
     }
 
+    if profile_or_installed_is_workshop(pm, installed) {
+        return profile_mod_matches_installed(pm, installed);
+    }
+
     profile_mod_matches_installed(pm, installed)
 }
 
@@ -658,8 +679,21 @@ pub(crate) fn profile_mod_matches_installed_with_version_db(
     installed: &ModInfo,
     version_db: &crate::mod_versions::ModVersionsDb,
 ) -> bool {
-    if profile_or_installed_is_workshop(pm, installed) {
-        return profile_mod_matches_installed(pm, installed);
+    if crate::mods::workshop_item_id_from_reference(pm.source.as_deref(), pm.folder_name.as_deref())
+        .is_some_and(|item_id| {
+            installed.install_source.is_workshop()
+                && profile_mod_matches_installed(pm, installed)
+                && crate::mods::workshop_item_id_from_reference(
+                    installed
+                        .workshop_url
+                        .as_deref()
+                        .or(installed.source.as_deref()),
+                    installed.folder_name.as_deref(),
+                )
+                .is_some_and(|installed_id| installed_id == item_id)
+        })
+    {
+        return true;
     }
     if pm
         .mod_version_id
@@ -674,6 +708,10 @@ pub(crate) fn profile_mod_matches_installed_with_version_db(
             return true;
         }
         return profile_mod_artifact_id_matches_in_db(pm, installed, version_db).unwrap_or(false);
+    }
+
+    if profile_or_installed_is_workshop(pm, installed) {
+        return profile_mod_matches_installed(pm, installed);
     }
 
     profile_mod_matches_installed(pm, installed)

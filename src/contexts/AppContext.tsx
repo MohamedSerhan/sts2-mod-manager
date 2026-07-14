@@ -303,7 +303,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // stand on their own.
         setAuditResults((prev) => {
           if (!prev) return results;
-          return mergeAuditResults(prev, results);
+          return mergeAuditResults(prev, results, new Set(only.flatMap(auditTargetKeys)));
         });
       } else {
         setAuditResults(results);

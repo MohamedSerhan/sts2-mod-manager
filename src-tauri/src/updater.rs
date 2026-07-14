@@ -953,15 +953,54 @@ fn latest_nexus_file_for_lane<'a>(
     files: &'a [crate::nexus::NexusFile],
     lane_key: &str,
 ) -> Option<&'a crate::nexus::NexusFile> {
-    let normalized_lane = crate::nexus::normalize_nexus_file_lane_key(lane_key);
     files
         .iter()
-        .filter(|file| {
-            crate::nexus::nexus_file_lane_key(file).is_some_and(|candidate| {
-                crate::nexus::normalize_nexus_file_lane_key(&candidate) == normalized_lane
-            })
-        })
+        .filter(|file| crate::nexus::nexus_file_lane_key(file).as_deref() == Some(lane_key))
         .max_by_key(|file| nexus_file_update_sort_key(file))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NexusLaneResolutionStrategy {
+    ApiFileId,
+    DownloadTimestamp,
+    StoredLane,
+    SourceVersion,
+    SingleFile,
+}
+
+impl NexusLaneResolutionStrategy {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ApiFileId => "api-file-id",
+            Self::DownloadTimestamp => "download-timestamp",
+            Self::StoredLane => "stored-lane",
+            Self::SourceVersion => "source-version",
+            Self::SingleFile => "single-file",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NexusLaneResolution<'a> {
+    file: &'a crate::nexus::NexusFile,
+    strategy: NexusLaneResolutionStrategy,
+}
+
+fn nexus_lane_resolution_from_saved_file<'a>(
+    files: &'a [crate::nexus::NexusFile],
+    saved_file: &'a crate::nexus::NexusFile,
+    stored_lane: Option<&str>,
+    strategy: NexusLaneResolutionStrategy,
+) -> NexusLaneResolution<'a> {
+    let latest = crate::nexus::nexus_file_lane_key(saved_file)
+        .as_deref()
+        .and_then(|lane| latest_nexus_file_for_lane(files, lane))
+        .or_else(|| stored_lane.and_then(|lane| latest_nexus_file_for_lane(files, lane)))
+        .unwrap_or(saved_file);
+    NexusLaneResolution {
+        file: latest,
+        strategy,
+    }
 }
 
 fn source_versions_match(left: Option<&str>, right: Option<&str>) -> bool {
@@ -978,7 +1017,7 @@ fn resolve_nexus_file_for_installed_lane<'a>(
     files: &'a [crate::nexus::NexusFile],
     source_entry: Option<&ModSourceEntry>,
     record: Option<&crate::mod_versions::ModVersionRecord>,
-) -> Option<&'a crate::nexus::NexusFile> {
+) -> Option<NexusLaneResolution<'a>> {
     let entry_identity = source_entry.map(nexus_identity_from_source_entry);
     let record_identity = record.map(|record| crate::nexus::NexusFileIdentity {
         file_id: record.nexus_file_id,
@@ -1004,17 +1043,38 @@ fn resolve_nexus_file_for_installed_lane<'a>(
 
     if let Some(file_id) = file_id {
         if let Some(saved_file) = files.iter().find(|file| file.file_id == file_id) {
-            let lane = crate::nexus::nexus_file_lane_key(saved_file)
-                .or_else(|| stored_lane.map(str::to_string));
-            if let Some(lane) = lane {
-                return latest_nexus_file_for_lane(files, &lane).or(Some(saved_file));
-            }
-            return Some(saved_file);
+            return Some(nexus_lane_resolution_from_saved_file(
+                files,
+                saved_file,
+                stored_lane,
+                NexusLaneResolutionStrategy::ApiFileId,
+            ));
+        }
+        // Browser-generated Nexus archive names end in the upload timestamp,
+        // not the API's `file_id`. Persisted `nexus_file_id` values can hold
+        // that suffix, so reconcile it against `uploaded_timestamp` before
+        // falling back to weaker lane/version evidence.
+        if let Some(saved_file) = files.iter().find(|file| {
+            file.uploaded_timestamp
+                .and_then(|timestamp| u64::try_from(timestamp).ok())
+                == Some(file_id)
+        }) {
+            return Some(nexus_lane_resolution_from_saved_file(
+                files,
+                saved_file,
+                stored_lane,
+                NexusLaneResolutionStrategy::DownloadTimestamp,
+            ));
         }
     }
 
     if let Some(lane) = stored_lane {
-        return latest_nexus_file_for_lane(files, lane);
+        if let Some(file) = latest_nexus_file_for_lane(files, lane) {
+            return Some(NexusLaneResolution {
+                file,
+                strategy: NexusLaneResolutionStrategy::StoredLane,
+            });
+        }
     }
 
     let installed_source_version = record
@@ -1027,10 +1087,12 @@ fn resolve_nexus_file_for_installed_lane<'a>(
             .collect();
         if exact_matches.len() == 1 {
             let matched = exact_matches[0];
-            if let Some(lane) = crate::nexus::nexus_file_lane_key(matched) {
-                return latest_nexus_file_for_lane(files, &lane).or(Some(matched));
-            }
-            return Some(matched);
+            return Some(nexus_lane_resolution_from_saved_file(
+                files,
+                matched,
+                None,
+                NexusLaneResolutionStrategy::SourceVersion,
+            ));
         }
         if exact_matches.len() > 1 {
             return None;
@@ -1038,7 +1100,10 @@ fn resolve_nexus_file_for_installed_lane<'a>(
     }
 
     if files.len() == 1 {
-        return files.first();
+        return files.first().map(|file| NexusLaneResolution {
+            file,
+            strategy: NexusLaneResolutionStrategy::SingleFile,
+        });
     }
     None
 }
@@ -1049,7 +1114,7 @@ fn resolve_nexus_version_for_installed_lane(
     record: Option<&crate::mod_versions::ModVersionRecord>,
 ) -> Option<String> {
     resolve_nexus_file_for_installed_lane(files, source_entry, record)
-        .and_then(|file| file.version.clone())
+        .and_then(|resolution| resolution.file.version.clone())
         .filter(|version| !version.trim().is_empty())
 }
 
@@ -4189,10 +4254,10 @@ mod version_helper_tests {
     }
 
     #[test]
-    fn nexus_lane_resolver_matches_downloads_with_changing_suffixes() {
+    fn nexus_lane_resolver_matches_browser_suffix_to_api_upload_timestamp() {
         let files = vec![
-            nexus_file(1779793473, "Download-103-3-1-8-1779793473", "3.1.8", 200),
-            nexus_file(1783123686, "Download-103-3-3-5-1783123686", "3.3.5", 300),
+            nexus_file(4316, "Download", "3.1.8", 1779793473),
+            nexus_file(6257, "Download", "3.3.5", 1783125259),
         ];
         let entry = ModSourceEntry {
             installed_version: Some("3.1.8".into()),
@@ -4201,9 +4266,50 @@ mod version_helper_tests {
             ..Default::default()
         };
 
+        let resolution = resolve_nexus_file_for_installed_lane(&files, Some(&entry), None).unwrap();
+        assert_eq!(
+            resolution.strategy,
+            NexusLaneResolutionStrategy::DownloadTimestamp
+        );
+        assert_eq!(resolution.file.file_id, 6257);
+        assert_eq!(resolution.file.version.as_deref(), Some("3.3.5"));
+    }
+
+    #[test]
+    fn nexus_lane_resolver_falls_through_stale_lane_to_source_version() {
+        let files = vec![
+            nexus_file(5896, "Download", "3.3.1", 1782034599),
+            nexus_file(6257, "Download", "3.3.5", 1783125259),
+        ];
+        let entry = ModSourceEntry {
+            installed_version: Some("3.3.1".into()),
+            nexus_file_lane_key: Some("stale browser lane".into()),
+            ..Default::default()
+        };
+
         assert_eq!(
             resolve_nexus_version_for_installed_lane(&files, Some(&entry), None).as_deref(),
             Some("3.3.5")
+        );
+    }
+
+    #[test]
+    fn nexus_lane_resolver_keeps_download_beta_separate_from_main() {
+        let files = vec![
+            nexus_file(1111, "Download (Beta)", "0.2.2", 1774953582),
+            nexus_file(1218, "Download (Beta)", "0.2.4", 1775186847),
+            nexus_file(6257, "Download", "3.3.5", 1783125259),
+        ];
+        let entry = ModSourceEntry {
+            installed_version: Some("0.2.2".into()),
+            nexus_file_id: Some(1774953582),
+            nexus_file_lane_key: Some("download beta 103 1774953582".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_nexus_version_for_installed_lane(&files, Some(&entry), None).as_deref(),
+            Some("0.2.4")
         );
     }
 
@@ -5021,12 +5127,36 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                     let mut effective_version = info.version.clone();
                     match client.get_mod_files(domain, mod_id).await {
                         Ok(files) if !files.is_empty() => {
-                            effective_version = resolve_nexus_version_for_installed_lane(
+                            let resolution = resolve_nexus_file_for_installed_lane(
                                 &files,
                                 source_entry,
                                 source_record.as_ref(),
                             );
-                            if effective_version.is_none() {
+                            effective_version = resolution
+                                .as_ref()
+                                .and_then(|resolved| resolved.file.version.clone())
+                                .filter(|version| !version.trim().is_empty());
+                            if let Some(resolved) = resolution {
+                                log::info!(
+                                    "audit: Nexus lane resolved for '{}' to v{} (strategy={}, domain={}, mod_id={}, active_mod_version_id={:?}, install_source={:?}, source_entry_version={:?}, source_entry_source={:?}, source_entry_file_id={:?}, source_entry_lane={:?}, selected_api_file_id={}, selected_name={:?}, selected_file_name={:?}, selected_category={:?}, selected_uploaded_timestamp={:?})",
+                                    m.name,
+                                    effective_version.as_deref().unwrap_or("?"),
+                                    resolved.strategy.as_str(),
+                                    domain,
+                                    mod_id,
+                                    m.mod_version_id,
+                                    m.install_source,
+                                    source_entry.and_then(|entry| entry.installed_version.as_deref()),
+                                    source_entry.and_then(|entry| entry.installed_version_source.as_deref()),
+                                    source_entry.and_then(|entry| entry.nexus_file_id),
+                                    source_entry.and_then(|entry| entry.nexus_file_lane_key.as_deref()),
+                                    resolved.file.file_id,
+                                    resolved.file.name.as_deref(),
+                                    resolved.file.file_name.as_deref(),
+                                    resolved.file.category_id,
+                                    resolved.file.uploaded_timestamp,
+                                );
+                            } else {
                                 log::warn!(
                                     "audit: Nexus lane unresolved for '{}' (domain={}, mod_id={}, active_mod_version_id={:?}, install_source={:?}, source_entry_version={:?}, source_entry_source={:?}, source_entry_file_id={:?}, source_entry_file_name={:?}, source_entry_lane={:?}, page_version={:?}, files={:?})",
                                     m.name,
@@ -5042,25 +5172,12 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                                     info.version,
                                     files.iter().map(|file| (
                                         file.file_id,
-                                        file.name.as_deref().or(file.file_name.as_deref()),
+                                        file.name.as_deref(),
+                                        file.file_name.as_deref(),
                                         file.version.as_deref(),
                                         file.category_id,
                                         file.uploaded_timestamp,
                                     )).collect::<Vec<_>>(),
-                                );
-                            } else {
-                                log::info!(
-                                    "audit: Nexus lane resolved for '{}' to v{} (domain={}, mod_id={}, active_mod_version_id={:?}, install_source={:?}, source_entry_version={:?}, source_entry_source={:?}, source_entry_file_id={:?}, source_entry_lane={:?})",
-                                    m.name,
-                                    effective_version.as_deref().unwrap_or("?"),
-                                    domain,
-                                    mod_id,
-                                    m.mod_version_id,
-                                    m.install_source,
-                                    source_entry.and_then(|entry| entry.installed_version.as_deref()),
-                                    source_entry.and_then(|entry| entry.installed_version_source.as_deref()),
-                                    source_entry.and_then(|entry| entry.nexus_file_id),
-                                    source_entry.and_then(|entry| entry.nexus_file_lane_key.as_deref()),
                                 );
                             }
                         }

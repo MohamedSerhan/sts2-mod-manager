@@ -1630,6 +1630,104 @@ describe('<LibraryTable modpackName={null}>', () => {
     }
   });
 
+  it('shows the BaseLib Nexus lane instead of Latest and promotes it with Updates first', async () => {
+    const workshopUrl = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3737335127';
+    const nexusUrl = 'https://www.nexusmods.com/slaythespire2/mods/103';
+    registerInvokeHandler('get_installed_mods', () => [
+      mkModInfo({
+        mod_version_id: 'alpha-local',
+        name: 'Alpha',
+        version: '1.0.0',
+        folder_name: 'Alpha',
+        mod_id: 'Alpha',
+      }),
+      mkModInfo({
+        mod_version_id: 'baselib-steam',
+        name: 'BaseLib',
+        version: '3.3.5',
+        folder_name: 'BaseLib',
+        mod_id: 'BaseLib',
+        source: workshopUrl,
+        install_source: 'steam_workshop',
+        workshop_item_id: '3737335127',
+        workshop_url: workshopUrl,
+        nexus_url: nexusUrl,
+      }),
+    ]);
+    registerInvokeHandler('get_library_version_options', () => ({
+      'baselib-steam': [
+        {
+          mod_version_id: 'baselib-steam', name: 'BaseLib', version: '3.3.5',
+          folder_name: 'BaseLib', mod_id: 'BaseLib', installed: true,
+          installed_enabled: true, cached: true, pinned: false, used_by_profiles: [],
+          source: workshopUrl, install_source: 'steam_workshop',
+          workshop_item_id: '3737335127', workshop_url: workshopUrl,
+        },
+        {
+          mod_version_id: 'baselib-nexus', name: 'BaseLib', version: '3.3.1',
+          folder_name: 'BaseLib.sts2mm-conflict-1', mod_id: 'BaseLib',
+          installed: true, installed_enabled: false, cached: true, pinned: false,
+          used_by_profiles: [], source: nexusUrl, nexus_url: nexusUrl,
+          install_source: 'local',
+        },
+      ],
+    }));
+    const auditByKey = new Map<string, ModAuditEntry>([
+      ['baselib-steam', entryAudit('BaseLib', {
+        mod_version_id: 'baselib-steam',
+        folder_name: 'BaseLib',
+        installed_version: '3.3.5',
+        nexus_url: nexusUrl,
+        nexus_version: '3.3.5',
+        nexus_update_available: true,
+        needs_update: true,
+        update_source: 'nexus',
+        update_plans: [{
+          target: {
+            name: 'BaseLib',
+            mod_version_id: 'baselib-nexus',
+            folder_name: 'BaseLib.sts2mm-conflict-1',
+            mod_id: 'BaseLib',
+          },
+          current_version: '3.3.1',
+          target_version: '3.3.5',
+          provider: 'nexus',
+          source: nexusUrl,
+          capability: 'manual',
+          reason: '',
+          selectable: false,
+          pending: true,
+        }],
+      })],
+    ]);
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <Wrap
+        modpackName={null}
+        auditByKey={auditByKey}
+        onReviewUpdates={vi.fn()}
+      />,
+    );
+    const rows = await screen.findAllByTestId('library-row');
+    const baseLibRow = rows.find((row) =>
+      row.querySelector('.gf-profile-library-title')?.textContent === 'BaseLib'
+    );
+    expect(baseLibRow).toBeDefined();
+    expect(
+      within(baseLibRow!).getByRole('button', { name: /Nexus.*3\.3\.1.*3\.3\.5/i }),
+    ).toBeInTheDocument();
+    expect(within(baseLibRow!).queryByText('Latest')).not.toBeInTheDocument();
+
+    const titles = () =>
+      Array.from(container.querySelectorAll('.gf-profile-library-title')).map(
+        (element) => element.textContent ?? '',
+      );
+    expect(titles()[0]).toBe('Alpha');
+    await chooseOption(user, /Sort/i, /Updates first/i);
+    expect(titles()[0]).toBe('BaseLib');
+  });
+
   it('renders provider-evidence pills as clickable buttons that fire onReviewUpdates (F7)', async () => {
     // Regression: when a row has pending provider plans (nexus/steam),
     // the update-affordance pills used to render as inert <span>s, so

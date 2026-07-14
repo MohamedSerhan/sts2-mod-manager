@@ -349,7 +349,25 @@ pub fn nexus_file_lane_key_from_label(raw: &str, version: Option<&str>) -> Optio
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|token| !token.is_empty() && *token != "zip")
         .collect();
-    (!tokens.is_empty()).then(|| tokens.join(" "))
+    (!tokens.is_empty()).then(|| normalize_nexus_file_lane_key(&tokens.join(" ")))
+}
+
+/// Normalize the stable part of a Nexus download lane. Download filenames
+/// append a changing numeric timestamp/file suffix; keeping that token makes
+/// every release look like a different lane and prevents the updater from
+/// advancing a previously installed Nexus stream.
+pub fn normalize_nexus_file_lane_key(raw: &str) -> String {
+    let mut tokens: Vec<&str> = raw.split_whitespace().collect();
+    if tokens
+        .first()
+        .is_some_and(|token| token.eq_ignore_ascii_case("download"))
+        && tokens.last().is_some_and(|token| {
+            token.len() >= 9 && token.chars().all(|character| character.is_ascii_digit())
+        })
+    {
+        tokens.pop();
+    }
+    tokens.join(" ")
 }
 
 pub fn nexus_file_lane_key(file: &NexusFile) -> Option<String> {
@@ -622,6 +640,21 @@ mod nexus_helper_tests {
             Some("the watcher sts2 v0 103 2")
         );
         assert_ne!(nexus_file_lane_key(&beta), nexus_file_lane_key(&release));
+    }
+
+    #[test]
+    fn nexus_download_lanes_ignore_changing_download_suffix() {
+        let old_lane =
+            nexus_file_lane_key_from_label("Download-103-3-1-8-1779793473.zip", Some("3.1.8"));
+        let new_lane =
+            nexus_file_lane_key_from_label("Download-103-3-3-5-1783123686.zip", Some("3.3.5"));
+
+        assert_eq!(old_lane, Some("download 103".into()));
+        assert_eq!(new_lane, old_lane);
+        assert_eq!(
+            normalize_nexus_file_lane_key("download 103 1779793473"),
+            "download 103"
+        );
     }
 
     #[test]

@@ -953,9 +953,14 @@ fn latest_nexus_file_for_lane<'a>(
     files: &'a [crate::nexus::NexusFile],
     lane_key: &str,
 ) -> Option<&'a crate::nexus::NexusFile> {
+    let normalized_lane = crate::nexus::normalize_nexus_file_lane_key(lane_key);
     files
         .iter()
-        .filter(|file| crate::nexus::nexus_file_lane_key(file).as_deref() == Some(lane_key))
+        .filter(|file| {
+            crate::nexus::nexus_file_lane_key(file).is_some_and(|candidate| {
+                crate::nexus::normalize_nexus_file_lane_key(&candidate) == normalized_lane
+            })
+        })
         .max_by_key(|file| nexus_file_update_sort_key(file))
 }
 
@@ -4184,6 +4189,25 @@ mod version_helper_tests {
     }
 
     #[test]
+    fn nexus_lane_resolver_matches_downloads_with_changing_suffixes() {
+        let files = vec![
+            nexus_file(1779793473, "Download-103-3-1-8-1779793473", "3.1.8", 200),
+            nexus_file(1783123686, "Download-103-3-3-5-1783123686", "3.3.5", 300),
+        ];
+        let entry = ModSourceEntry {
+            installed_version: Some("3.1.8".into()),
+            nexus_file_id: Some(1779793473),
+            nexus_file_lane_key: Some("download 103 1779793473".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_nexus_version_for_installed_lane(&files, Some(&entry), None).as_deref(),
+            Some("3.3.5")
+        );
+    }
+
+    #[test]
     fn nexus_lane_resolver_suppresses_same_version_multi_file_ambiguity() {
         let files = vec![
             nexus_file(1, "Necro Icons", "0.0.1", 300),
@@ -5003,9 +5027,40 @@ async fn audit_one_mod(m: &ModInfo, ctx: &AuditCtx<'_>) -> ModAuditEntry {
                                 source_record.as_ref(),
                             );
                             if effective_version.is_none() {
+                                log::warn!(
+                                    "audit: Nexus lane unresolved for '{}' (domain={}, mod_id={}, active_mod_version_id={:?}, install_source={:?}, source_entry_version={:?}, source_entry_source={:?}, source_entry_file_id={:?}, source_entry_file_name={:?}, source_entry_lane={:?}, page_version={:?}, files={:?})",
+                                    m.name,
+                                    domain,
+                                    mod_id,
+                                    m.mod_version_id,
+                                    m.install_source,
+                                    source_entry.and_then(|entry| entry.installed_version.as_deref()),
+                                    source_entry.and_then(|entry| entry.installed_version_source.as_deref()),
+                                    source_entry.and_then(|entry| entry.nexus_file_id),
+                                    source_entry.and_then(|entry| entry.nexus_file_name.as_deref()),
+                                    source_entry.and_then(|entry| entry.nexus_file_lane_key.as_deref()),
+                                    info.version,
+                                    files.iter().map(|file| (
+                                        file.file_id,
+                                        file.name.as_deref().or(file.file_name.as_deref()),
+                                        file.version.as_deref(),
+                                        file.category_id,
+                                        file.uploaded_timestamp,
+                                    )).collect::<Vec<_>>(),
+                                );
+                            } else {
                                 log::info!(
-                                    "audit: suppressing Nexus update for '{}' because the page has multiple files and no installed file lane could be resolved",
-                                    m.name
+                                    "audit: Nexus lane resolved for '{}' to v{} (domain={}, mod_id={}, active_mod_version_id={:?}, install_source={:?}, source_entry_version={:?}, source_entry_source={:?}, source_entry_file_id={:?}, source_entry_lane={:?})",
+                                    m.name,
+                                    effective_version.as_deref().unwrap_or("?"),
+                                    domain,
+                                    mod_id,
+                                    m.mod_version_id,
+                                    m.install_source,
+                                    source_entry.and_then(|entry| entry.installed_version.as_deref()),
+                                    source_entry.and_then(|entry| entry.installed_version_source.as_deref()),
+                                    source_entry.and_then(|entry| entry.nexus_file_id),
+                                    source_entry.and_then(|entry| entry.nexus_file_lane_key.as_deref()),
                                 );
                             }
                         }

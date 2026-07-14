@@ -1,1 +1,0 @@
-Update review now includes Steam Workshop updates alongside every attached GitHub and Nexus update without listing the same provider action twice, keeps source labels readable, and persistently guides safe removal of stored local copies.

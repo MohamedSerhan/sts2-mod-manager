@@ -37,6 +37,16 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.8.5] - 2026-07-14
+
+### Fixed
+
+- The launch warning actions now stay readable and usable at narrow window widths.
+- Update review now includes Steam Workshop updates alongside every attached GitHub and Nexus update without listing the same provider action twice, keeps source labels readable, and persistently guides safe removal of stored local copies.
+- Fixed Steam Workshop mod rows so they show the right source, prefer newer Workshop copies when both copies are active, stop treating Workshop-provided dependencies as missing during launch checks, clarify launch blockers, and offer saved-data cleanup during Windows uninstall.
+- Saving modpack changes now converges reliably, duplicate-source warnings only appear for simultaneously active copies, and removing a local version leaves Steam Workshop files untouched.
+- Bulk updates now let you review each source and download only the selected GitHub versions without changing other pending updates.
+
 ## [1.8.4] - 2026-07-08
 
 ### Fixed

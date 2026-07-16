@@ -37,6 +37,12 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.8.6] - 2026-07-16
+
+### Added
+
+- The Mod Library can now review and safely consolidate old versions across every mod by keeping one chosen copy, remapping affected modpacks, and removing the other local copies, with compact readable source labels, accurate protection, visible reasons, and saved update links that remain available.
+
 ## [1.8.5] - 2026-07-14
 
 ### Fixed

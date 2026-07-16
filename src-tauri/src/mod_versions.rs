@@ -98,7 +98,7 @@ pub struct LocalModVersionOption {
     pub used_by_profiles: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ArtifactProvider {
     Steam,
     Nexus,
@@ -131,6 +131,42 @@ pub struct LocalModVersionDeleteSummary {
     pub removed_record: bool,
     pub deleted_cache: bool,
     pub deleted_disk: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LibraryVersionCleanupReason {
+    RecommendedOld,
+    NewestProviderCopy,
+    Active,
+    Pinned,
+    ProfileUsed,
+    SteamManaged,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LibraryVersionCleanupCandidate {
+    pub option: LocalModVersionOption,
+    pub provider: String,
+    pub recommended: bool,
+    pub protected: bool,
+    pub reasons: Vec<LibraryVersionCleanupReason>,
+    #[serde(default)]
+    pub replacement_candidates: Vec<LocalModVersionOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LibraryVersionCleanupFamily {
+    pub family_key: String,
+    pub display_name: String,
+    pub candidates: Vec<LibraryVersionCleanupCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct LibraryVersionCleanupPreview {
+    pub families: Vec<LibraryVersionCleanupFamily>,
+    pub recommended_count: usize,
+    pub protected_count: usize,
 }
 
 fn db_path(config_path: &Path) -> PathBuf {
@@ -1420,6 +1456,141 @@ fn local_version_options_by_family(
         .collect()
 }
 
+fn cleanup_provider_key(option: &LocalModVersionOption) -> &'static str {
+    match artifact_provider_for_option(option) {
+        ArtifactProvider::Steam => "steam",
+        ArtifactProvider::Nexus => "nexus",
+        ArtifactProvider::GitHub => "github",
+        ArtifactProvider::Local => "local",
+    }
+}
+
+fn cleanup_option_cmp(
+    left: &LocalModVersionOption,
+    right: &LocalModVersionOption,
+) -> std::cmp::Ordering {
+    match (
+        parse_source_version_label(&left.version),
+        parse_source_version_label(&right.version),
+    ) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (None, None) => left
+            .version
+            .to_lowercase()
+            .cmp(&right.version.to_lowercase()),
+    }
+    .then_with(|| left.installed_enabled.cmp(&right.installed_enabled))
+    .then_with(|| left.installed.cmp(&right.installed))
+    .then_with(|| left.cached.cmp(&right.cached))
+    .then_with(|| left.mod_version_id.cmp(&right.mod_version_id))
+}
+
+pub fn preview_library_version_cleanup(
+    installed_mods: &[ModInfo],
+    profiles: &[crate::profiles::Profile],
+    config_path: &Path,
+    cache_path: &Path,
+) -> LibraryVersionCleanupPreview {
+    let db = load(config_path);
+    let by_family = local_version_options_by_family(installed_mods, profiles, &db, cache_path);
+    let mut preview = LibraryVersionCleanupPreview::default();
+
+    for (family_key, mut options) in by_family {
+        if options.len() < 2 {
+            continue;
+        }
+        options.sort_by(|left, right| cleanup_option_cmp(right, left));
+
+        let mut newest_by_provider: HashMap<&'static str, String> = HashMap::new();
+        for option in &options {
+            newest_by_provider
+                .entry(cleanup_provider_key(option))
+                .or_insert_with(|| option.mod_version_id.clone());
+        }
+
+        let display_name = options
+            .iter()
+            .find_map(|option| {
+                option
+                    .display_name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+            })
+            .map(str::to_string)
+            .unwrap_or_else(|| options[0].name.clone());
+        let mut candidates = Vec::with_capacity(options.len());
+        for option in &options {
+            let provider = cleanup_provider_key(option);
+            let newest_provider_copy = newest_by_provider
+                .get(provider)
+                .is_some_and(|id| id == &option.mod_version_id);
+            let steam_managed = provider == "steam" || option.workshop_item_id.is_some();
+            let profile_used = !option.used_by_profiles.is_empty();
+            let protected = newest_provider_copy
+                || option.installed_enabled
+                || option.pinned
+                || profile_used
+                || steam_managed;
+            let recommended = !protected;
+            let mut reasons = Vec::new();
+            if recommended {
+                reasons.push(LibraryVersionCleanupReason::RecommendedOld);
+                preview.recommended_count += 1;
+            } else {
+                preview.protected_count += 1;
+                if newest_provider_copy {
+                    reasons.push(LibraryVersionCleanupReason::NewestProviderCopy);
+                }
+                if option.installed_enabled {
+                    reasons.push(LibraryVersionCleanupReason::Active);
+                }
+                if option.pinned {
+                    reasons.push(LibraryVersionCleanupReason::Pinned);
+                }
+                if profile_used {
+                    reasons.push(LibraryVersionCleanupReason::ProfileUsed);
+                }
+                if steam_managed {
+                    reasons.push(LibraryVersionCleanupReason::SteamManaged);
+                }
+            }
+            let replacement_candidates = if protected && !option.pinned && !steam_managed {
+                options
+                    .iter()
+                    .filter(|candidate| candidate.mod_version_id != option.mod_version_id)
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            candidates.push(LibraryVersionCleanupCandidate {
+                option: option.clone(),
+                provider: provider.to_string(),
+                recommended,
+                protected,
+                reasons,
+                replacement_candidates,
+            });
+        }
+        preview.families.push(LibraryVersionCleanupFamily {
+            family_key,
+            display_name,
+            candidates,
+        });
+    }
+
+    preview.families.sort_by(|left, right| {
+        left.display_name
+            .to_lowercase()
+            .cmp(&right.display_name.to_lowercase())
+            .then_with(|| left.family_key.cmp(&right.family_key))
+    });
+    preview
+}
+
 fn local_option_dedupe_key(option: &LocalModVersionOption, db: &ModVersionsDb) -> String {
     let record = db
         .records
@@ -2402,6 +2573,217 @@ mod tests {
             bundle_members: vec![],
             bundle_member_ids: vec![],
         }
+    }
+
+    fn cleanup_record(
+        id: &str,
+        version: &str,
+        source: &str,
+        install_source: ModInstallSource,
+    ) -> ModVersionRecord {
+        ModVersionRecord {
+            id: id.into(),
+            identity_key: format!("mod_id:mod-id|version:{version}|content:{id}"),
+            name: "Test".into(),
+            version: version.into(),
+            source_version: Some(version.into()),
+            folder_name: Some(format!("Test-{version}-{id}")),
+            mod_id: Some("mod-id".into()),
+            source: Some(source.into()),
+            install_source,
+            workshop_item_id: install_source.is_workshop().then(|| "123456".to_string()),
+            workshop_url: install_source
+                .is_workshop()
+                .then(|| crate::mods::workshop_url("123456")),
+            content_hash: Some(id.into()),
+            cache_relpath: Some(cache_relpath_for_id(id)),
+            ..ModVersionRecord::default()
+        }
+    }
+
+    fn cache_cleanup_record(cache_path: &Path, id: &str) {
+        let path = cache_path_for_id(cache_path, id);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, format!("archive-{id}")).unwrap();
+    }
+
+    #[test]
+    fn cleanup_preview_recommends_only_unused_older_provider_versions() {
+        let config = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let old = cleanup_record(
+            "github-old",
+            "1.0.0",
+            "github:owner/repo",
+            ModInstallSource::Local,
+        );
+        let latest = cleanup_record(
+            "github-latest",
+            "2.0.0",
+            "github:owner/repo",
+            ModInstallSource::Local,
+        );
+        let steam = cleanup_record(
+            "steam-latest",
+            "2.0.0",
+            &crate::mods::workshop_url("123456"),
+            ModInstallSource::SteamWorkshop,
+        );
+        save(
+            &ModVersionsDb {
+                records: [old.clone(), latest.clone(), steam.clone()]
+                    .into_iter()
+                    .map(|record| (record.id.clone(), record))
+                    .collect(),
+                ..ModVersionsDb::default()
+            },
+            config.path(),
+        )
+        .unwrap();
+        cache_cleanup_record(cache.path(), &old.id);
+        cache_cleanup_record(cache.path(), &latest.id);
+
+        let mut active = mod_info("Test", "2.0.0", Some("github-latest"));
+        active.mod_version_id = Some(latest.id.clone());
+        active.folder_name = latest.folder_name.clone();
+        let mut workshop = workshop_mod_info("123456", "2.0.0");
+        workshop.name = "Test".into();
+        workshop.mod_id = Some("mod-id".into());
+        workshop.mod_version_id = Some(steam.id.clone());
+        let preview =
+            preview_library_version_cleanup(&[active, workshop], &[], config.path(), cache.path());
+
+        assert_eq!(preview.families.len(), 1);
+        assert_eq!(preview.recommended_count, 1);
+        let candidates = &preview.families[0].candidates;
+        assert!(candidates
+            .iter()
+            .find(|candidate| candidate.option.mod_version_id == old.id)
+            .is_some_and(|candidate| candidate.recommended));
+        assert!(candidates
+            .iter()
+            .find(|candidate| candidate.option.mod_version_id == latest.id)
+            .is_some_and(|candidate| {
+                candidate.protected
+                    && candidate
+                        .reasons
+                        .contains(&LibraryVersionCleanupReason::NewestProviderCopy)
+            }));
+        assert!(candidates
+            .iter()
+            .find(|candidate| candidate.option.mod_version_id == steam.id)
+            .is_some_and(|candidate| {
+                candidate.protected
+                    && candidate
+                        .reasons
+                        .contains(&LibraryVersionCleanupReason::SteamManaged)
+            }));
+        let wire = serde_json::to_value(&preview).unwrap();
+        let steam_wire = wire["families"][0]["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|candidate| candidate["option"]["mod_version_id"] == steam.id)
+            .unwrap();
+        assert!(steam_wire["replacement_candidates"]
+            .as_array()
+            .is_some_and(Vec::is_empty));
+    }
+
+    #[test]
+    fn cleanup_preview_protects_profile_used_older_version() {
+        let config = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let old = cleanup_record(
+            "github-old",
+            "1.0.0",
+            "github:owner/repo",
+            ModInstallSource::Local,
+        );
+        let latest = cleanup_record(
+            "github-latest",
+            "2.0.0",
+            "github:owner/repo",
+            ModInstallSource::Local,
+        );
+        save(
+            &ModVersionsDb {
+                records: [old.clone(), latest.clone()]
+                    .into_iter()
+                    .map(|record| (record.id.clone(), record))
+                    .collect(),
+                ..ModVersionsDb::default()
+            },
+            config.path(),
+        )
+        .unwrap();
+        cache_cleanup_record(cache.path(), &old.id);
+        cache_cleanup_record(cache.path(), &latest.id);
+        let now = chrono::Utc::now();
+        let profile = crate::profiles::Profile {
+            id: "legacy".into(),
+            name: "Legacy".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![profile_mod(old.id.clone(), "1.0.0", "github-old")],
+            created_at: now,
+            updated_at: now,
+            public: None,
+            mod_extras: HashMap::new(),
+        };
+
+        let preview = preview_library_version_cleanup(&[], &[profile], config.path(), cache.path());
+        let old_candidate = preview.families[0]
+            .candidates
+            .iter()
+            .find(|candidate| candidate.option.mod_version_id == old.id)
+            .unwrap();
+        assert!(!old_candidate.recommended);
+        assert!(old_candidate
+            .reasons
+            .contains(&LibraryVersionCleanupReason::ProfileUsed));
+        assert!(old_candidate
+            .replacement_candidates
+            .iter()
+            .any(|candidate| candidate.mod_version_id == latest.id));
+    }
+
+    #[test]
+    fn cleanup_preview_stays_grouped_for_one_hundred_mod_families() {
+        let config = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let mut records = HashMap::new();
+        for index in 0..100 {
+            for (suffix, version) in [("old", "1.0.0"), ("new", "2.0.0")] {
+                let id = format!("mod-{index}-{suffix}");
+                let mut record = cleanup_record(
+                    &id,
+                    version,
+                    &format!("github:owner/mod-{index}"),
+                    ModInstallSource::Local,
+                );
+                record.name = format!("Mod {index:03}");
+                record.mod_id = Some(format!("mod-{index}"));
+                cache_cleanup_record(cache.path(), &id);
+                records.insert(id, record);
+            }
+        }
+        save(
+            &ModVersionsDb {
+                records,
+                ..ModVersionsDb::default()
+            },
+            config.path(),
+        )
+        .unwrap();
+
+        let preview = preview_library_version_cleanup(&[], &[], config.path(), cache.path());
+        assert_eq!(preview.families.len(), 100);
+        assert_eq!(preview.recommended_count, 100);
+        assert!(preview
+            .families
+            .iter()
+            .all(|family| family.candidates.len() == 2));
     }
 
     #[test]

@@ -97,6 +97,81 @@ async function openSourceEditor(
 }
 
 describe('<ModsView>', () => {
+  it('opens the global stored-version cleanup from the library bulk toolbar', async () => {
+    seedMods([baseMod()]);
+    registerInvokeHandler('preview_library_version_cleanup', () => ({
+      families: [],
+      recommended_count: 0,
+      protected_count: 0,
+    }));
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    await screen.findByText('BaseLib');
+    await user.click(screen.getByRole('button', { name: /Clean up versions/i }));
+
+    expect(await screen.findByRole('dialog', { name: /Clean up stored versions/i }))
+      .toBeInTheDocument();
+    expect(screen.getByText(/No old versions to clean up/i)).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: /^Close$/i })[0]);
+    expect(screen.queryByRole('dialog', { name: /Clean up stored versions/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it('refreshes the library after global version cleanup succeeds', async () => {
+    seedMods([baseMod()]);
+    registerInvokeHandler('preview_library_version_cleanup', () => ({
+      recommended_count: 1,
+      protected_count: 1,
+      families: [{
+        family_key: 'mod_id:baselib',
+        display_name: 'BaseLib',
+        candidates: [{
+          option: {
+            mod_version_id: 'baselib-old',
+            name: 'BaseLib',
+            version: '3.0.0',
+            folder_name: 'BaseLib-3.0.0',
+            mod_id: 'baselib',
+            installed: false,
+            installed_enabled: false,
+            cached: true,
+            pinned: false,
+            used_by_profiles: [],
+          },
+          provider: 'local',
+          recommended: true,
+          protected: false,
+          reasons: ['recommended_old'],
+          replacement_candidates: [],
+        }],
+      }],
+    }));
+    registerInvokeHandler('execute_library_version_cleanup', () => [{
+      mod_version_id: 'baselib-old',
+      success: true,
+      switched_active: false,
+      remapped_profiles: 0,
+      deleted_disk: false,
+      deleted_cache: true,
+      removed_record: true,
+    }]);
+    const user = userEvent.setup();
+    render(<Wrap />);
+
+    await screen.findByText('BaseLib');
+    const initialRefreshes = getInvokeCalls().filter((call) => call.cmd === 'get_installed_mods').length;
+    await user.click(screen.getByRole('button', { name: /Clean up versions/i }));
+    await screen.findByRole('checkbox', { name: /BaseLib v3\.0\.0/i });
+    await user.click(screen.getByRole('button', { name: /Remove selected/i }));
+    await user.click(await screen.findByRole('button', { name: /Remove versions/i }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls().filter((call) => call.cmd === 'get_installed_mods').length)
+        .toBeGreaterThan(initialRefreshes);
+    });
+  });
+
   it('toolbar "Auto-detect sources" button opens the auto-detect scan', async () => {
     seedMods([baseMod()]);
     registerInvokeHandler('auto_detect_sources', () => ({

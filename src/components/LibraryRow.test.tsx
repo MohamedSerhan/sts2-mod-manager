@@ -82,6 +82,34 @@ function renderRow(overrides: Partial<LibraryRowProps> = {}) {
 }
 
 describe('<LibraryRow>', () => {
+  it('keeps the numeric version separate and fully readable beside provider badges', () => {
+    renderRow({
+      enableReorder: false,
+      selectedVersionKey: 'steam-020',
+      versionOptions: [
+        {
+          key: 'steam-020',
+          version: '0.2.0',
+          label: '0.2.0 (active)',
+          sourceLabel: 'Steam Workshop',
+          installed: true,
+          installedEnabled: true,
+        },
+        {
+          key: 'nexus-023',
+          version: '0.2.3',
+          label: '0.2.3 (stored)',
+          sourceLabel: 'GitHub + Nexus',
+          cached: true,
+        },
+      ],
+    });
+
+    const selector = screen.getByRole('combobox', { name: /Choose version/i });
+    expect(selector.querySelector('.gf-version-option-main')).toHaveTextContent('v0.2.0');
+    expect(selector.querySelector('.gf-version-option-source')).toHaveTextContent('Steam Workshop');
+  });
+
   it('renders the mod display name, raw name when overridden, version, and folder', () => {
     renderRow({
       row: baseMod({

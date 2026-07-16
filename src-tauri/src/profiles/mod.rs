@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::error::{AppError, Result};
 use crate::mod_versions::{
-    LocalModVersionAffectedProfile, LocalModVersionOption, LocalModVersionRemovalPreview,
+    LibraryVersionCleanupPreview, LocalModVersionAffectedProfile, LocalModVersionOption,
+    LocalModVersionRemovalPreview,
 };
 use crate::mods::{ModInfo, ModInstallSource};
 use crate::state::{AppState, AppStateInner};
@@ -84,6 +85,26 @@ pub struct ManualModVersionRemovalResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub removed_profiles: Vec<LocalModVersionAffectedProfile>,
     pub switched_active: bool,
+    pub deleted_disk: bool,
+    pub deleted_cache: bool,
+    pub removed_record: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LibraryVersionCleanupRequestItem {
+    pub mod_version_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement_mod_version_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct LibraryVersionCleanupItemResult {
+    pub mod_version_id: String,
+    pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub switched_active: bool,
+    pub remapped_profiles: usize,
     pub deleted_disk: bool,
     pub deleted_cache: bool,
     pub removed_record: bool,
@@ -383,6 +404,23 @@ fn scan_library_mods_with_versions(
 }
 
 #[tauri::command]
+pub fn preview_library_version_cleanup(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<LibraryVersionCleanupPreview, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    let installed_mods = scan_library_mods_with_versions(mods_path, disabled_path, &s.config_path);
+    let profiles = list_profiles(&s.profiles_path);
+    Ok(crate::mod_versions::preview_library_version_cleanup(
+        &installed_mods,
+        &profiles,
+        &s.config_path,
+        &s.cache_path,
+    ))
+}
+
+#[tauri::command]
 pub fn preview_library_mod_version_removal(
     mod_version_id: String,
     state: tauri::State<'_, AppState>,
@@ -425,6 +463,214 @@ pub fn remove_library_mod_version(
     )
     .map(|()| true)
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn execute_library_version_cleanup(
+    items: Vec<LibraryVersionCleanupRequestItem>,
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<Vec<LibraryVersionCleanupItemResult>, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let mods_path = s.mods_path.as_ref().ok_or("Game path not set")?;
+    let disabled_path = s.disabled_mods_path.as_ref().ok_or("Game path not set")?;
+    let installed_mods = scan_library_mods_with_versions(mods_path, disabled_path, &s.config_path);
+    let profiles = list_profiles(&s.profiles_path);
+    let requires_closed_game = items.iter().any(|item| {
+        crate::mod_versions::preview_local_mod_version_removal(
+            &s.config_path,
+            &s.cache_path,
+            &installed_mods,
+            &profiles,
+            &item.mod_version_id,
+        )
+        .map(|preview| preview.installed)
+        .unwrap_or(true)
+    });
+    if requires_closed_game {
+        crate::game::ensure_game_not_running()?;
+    }
+    execute_library_version_cleanup_from_paths(
+        &items,
+        mods_path,
+        disabled_path,
+        &s.profiles_path,
+        &s.config_path,
+        &s.cache_path,
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub(crate) fn execute_library_version_cleanup_from_paths(
+    items: &[LibraryVersionCleanupRequestItem],
+    mods_path: &Path,
+    disabled_path: &Path,
+    profiles_path: &Path,
+    config_path: &Path,
+    cache_path: &Path,
+) -> Result<Vec<LibraryVersionCleanupItemResult>> {
+    if items.is_empty() {
+        return Err(AppError::Other(
+            "Choose at least one stored version to remove.".into(),
+        ));
+    }
+    let mut selected_ids = HashSet::new();
+    for item in items {
+        let id = item.mod_version_id.trim();
+        if id.is_empty() || !selected_ids.insert(id.to_string()) {
+            return Err(AppError::Other(
+                "The cleanup selection contains an empty or duplicate version. Refresh and try again."
+                    .into(),
+            ));
+        }
+    }
+
+    let installed_mods = scan_library_mods_with_versions(mods_path, disabled_path, config_path);
+    let profiles = list_profiles(profiles_path);
+    let cleanup_preview = crate::mod_versions::preview_library_version_cleanup(
+        &installed_mods,
+        &profiles,
+        config_path,
+        cache_path,
+    );
+    let candidates = cleanup_preview
+        .families
+        .into_iter()
+        .flat_map(|family| family.candidates)
+        .map(|candidate| (candidate.option.mod_version_id.clone(), candidate))
+        .collect::<HashMap<_, _>>();
+
+    let mut preflight = Vec::with_capacity(items.len());
+    for item in items {
+        let candidate = candidates.get(item.mod_version_id.trim()).ok_or_else(|| {
+            AppError::Other(
+                "The version cleanup preview is stale. Refresh the list before removing anything."
+                    .into(),
+            )
+        })?;
+        if candidate.option.pinned {
+            return Err(AppError::Other(format!(
+                "Unfreeze {} before removing one of its versions.",
+                candidate.option.name
+            )));
+        }
+        if candidate
+            .reasons
+            .contains(&crate::mod_versions::LibraryVersionCleanupReason::SteamManaged)
+        {
+            return Err(AppError::Other(format!(
+                "{} is managed by Steam Workshop and cannot be removed here.",
+                candidate.option.name
+            )));
+        }
+        let replacement_id = item
+            .replacement_mod_version_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        if candidate.protected {
+            let replacement_id = replacement_id.ok_or_else(|| {
+                AppError::Other(format!(
+                    "Choose a replacement before removing {} v{}.",
+                    candidate.option.name, candidate.option.version
+                ))
+            })?;
+            if selected_ids.contains(replacement_id) {
+                return Err(AppError::Other(
+                    "A selected replacement is also marked for removal. Keep that replacement or choose another version."
+                        .into(),
+                ));
+            }
+            if !candidate
+                .replacement_candidates
+                .iter()
+                .any(|replacement| replacement.mod_version_id == replacement_id)
+            {
+                return Err(AppError::Other(
+                    "A selected replacement is no longer available. Refresh and choose again."
+                        .into(),
+                ));
+            }
+        }
+        let removal_preview = crate::mod_versions::preview_local_mod_version_removal(
+            config_path,
+            cache_path,
+            &installed_mods,
+            &profiles,
+            &item.mod_version_id,
+        )?;
+        preflight.push((item.clone(), candidate.protected, removal_preview));
+    }
+
+    let mut results = Vec::with_capacity(preflight.len());
+    for (item, protected, preview) in preflight {
+        let replacement_id = item
+            .replacement_mod_version_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let operation = if protected && (!preview.affected_profiles.is_empty() || preview.active) {
+            let replacement_id = replacement_id.expect("protected cleanup was validated");
+            let profile_replacements = preview
+                .affected_profiles
+                .iter()
+                .map(|profile| ManualModVersionProfileReplacement {
+                    profile_id: profile.profile_id.clone(),
+                    mod_version_id: replacement_id.to_string(),
+                })
+                .collect::<Vec<_>>();
+            remove_library_mod_version_manual_from_paths(
+                &item.mod_version_id,
+                ManualModVersionRemovalMode::Remap,
+                &profile_replacements,
+                preview.active.then_some(replacement_id),
+                mods_path,
+                disabled_path,
+                profiles_path,
+                config_path,
+                cache_path,
+            )
+            .map(|result| LibraryVersionCleanupItemResult {
+                mod_version_id: item.mod_version_id.clone(),
+                success: true,
+                switched_active: result.switched_active,
+                remapped_profiles: result.remapped_profiles.len(),
+                deleted_disk: result.deleted_disk,
+                deleted_cache: result.deleted_cache,
+                removed_record: result.removed_record,
+                ..LibraryVersionCleanupItemResult::default()
+            })
+        } else {
+            let installed_mods =
+                scan_library_mods_with_versions(mods_path, disabled_path, config_path);
+            let profiles = list_profiles(profiles_path);
+            crate::mod_versions::remove_local_mod_version_with_policy(
+                config_path,
+                cache_path,
+                Some(mods_path),
+                disabled_path,
+                &installed_mods,
+                &profiles,
+                &item.mod_version_id,
+                false,
+            )
+            .map(|summary| LibraryVersionCleanupItemResult {
+                mod_version_id: item.mod_version_id.clone(),
+                success: true,
+                deleted_disk: summary.deleted_disk,
+                deleted_cache: summary.deleted_cache,
+                removed_record: summary.removed_record,
+                ..LibraryVersionCleanupItemResult::default()
+            })
+        };
+        results.push(
+            operation.unwrap_or_else(|error| LibraryVersionCleanupItemResult {
+                mod_version_id: item.mod_version_id,
+                error: Some(error.to_string()),
+                ..LibraryVersionCleanupItemResult::default()
+            }),
+        );
+    }
+    Ok(results)
 }
 
 #[tauri::command]
@@ -1663,6 +1909,135 @@ mod manual_version_removal_tests {
             .replacement_candidates
             .iter()
             .any(|option| option.mod_version_id == replacement_id));
+    }
+
+    #[test]
+    fn bulk_cleanup_removes_only_recommended_cached_version() {
+        let game = tempdir().unwrap();
+        let config = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let mods_path = game.path().join("mods");
+        let disabled_path = game.path().join("mods_disabled");
+        let profiles_path = config.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+        let (old_id, _old_source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-old", "1.0.0");
+        let (latest_id, _latest_source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-new", "2.0.0");
+
+        let results = execute_library_version_cleanup_from_paths(
+            &[LibraryVersionCleanupRequestItem {
+                mod_version_id: old_id.clone(),
+                replacement_mod_version_id: None,
+            }],
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config.path(),
+            cache.path(),
+        )
+        .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].success);
+        assert!(results[0].deleted_cache);
+        assert!(crate::mod_versions::record_by_id(config.path(), &old_id).is_none());
+        assert!(crate::mod_versions::record_by_id(config.path(), &latest_id).is_some());
+    }
+
+    #[test]
+    fn bulk_cleanup_requires_replacement_before_touching_profile_used_version() {
+        let game = tempdir().unwrap();
+        let config = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let mods_path = game.path().join("mods");
+        let disabled_path = game.path().join("mods_disabled");
+        let profiles_path = config.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+        let (old_id, old_source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-old", "1.0.0");
+        let (_latest_id, _latest_source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-new", "2.0.0");
+        let mut old = crate::mods::scan_mods(old_source.path()).remove(0);
+        old.mod_version_id = Some(old_id.clone());
+        save_profile(
+            &profile("Legacy", vec![profile_mod_from_installed(&old)]),
+            &profiles_path,
+        )
+        .unwrap();
+
+        let error = execute_library_version_cleanup_from_paths(
+            &[LibraryVersionCleanupRequestItem {
+                mod_version_id: old_id.clone(),
+                replacement_mod_version_id: None,
+            }],
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config.path(),
+            cache.path(),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("Choose a replacement"));
+        assert!(crate::mod_versions::record_by_id(config.path(), &old_id).is_some());
+        assert_eq!(
+            load_profile("Legacy", &profiles_path).unwrap().mods[0]
+                .mod_version_id
+                .as_deref(),
+            Some(old_id.as_str())
+        );
+    }
+
+    #[test]
+    fn bulk_cleanup_remaps_profile_used_version_to_explicit_replacement() {
+        let game = tempdir().unwrap();
+        let config = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let mods_path = game.path().join("mods");
+        let disabled_path = game.path().join("mods_disabled");
+        let profiles_path = config.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+        let (old_id, old_source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-old", "1.0.0");
+        let (latest_id, _latest_source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-new", "2.0.0");
+        let mut old = crate::mods::scan_mods(old_source.path()).remove(0);
+        old.mod_version_id = Some(old_id.clone());
+        save_profile(
+            &profile("Legacy", vec![profile_mod_from_installed(&old)]),
+            &profiles_path,
+        )
+        .unwrap();
+
+        let results = execute_library_version_cleanup_from_paths(
+            &[LibraryVersionCleanupRequestItem {
+                mod_version_id: old_id.clone(),
+                replacement_mod_version_id: Some(latest_id.clone()),
+            }],
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config.path(),
+            cache.path(),
+        )
+        .unwrap();
+
+        assert!(results[0].success);
+        assert_eq!(results[0].remapped_profiles, 1);
+        assert_eq!(
+            load_profile("Legacy", &profiles_path).unwrap().mods[0]
+                .mod_version_id
+                .as_deref(),
+            Some(latest_id.as_str())
+        );
+        assert!(crate::mod_versions::record_by_id(config.path(), &old_id).is_none());
     }
 
     #[test]

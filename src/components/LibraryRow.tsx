@@ -910,7 +910,7 @@ export function LibraryRow({
                                 : <Archive size={13} aria-hidden="true" />}
                             </span>
                             <span className="gf-version-option-main">
-                              {option.label}
+                              v{cleanVersion(option.version) || '?'}
                             </span>
                             {option.sourceLabel && (
                               <span className="gf-version-option-source">

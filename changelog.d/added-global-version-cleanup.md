@@ -1,0 +1,1 @@
+The Mod Library can now safely clean up old stored versions across every mod while preserving active, frozen, modpack-used, and Steam-managed copies, and version numbers stay readable beside source labels.

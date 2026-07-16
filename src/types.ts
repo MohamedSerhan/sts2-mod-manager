@@ -213,6 +213,51 @@ export interface ManualModVersionRemovalResult {
   removed_record: boolean;
 }
 
+export type LibraryVersionCleanupReason =
+  | 'recommended_old'
+  | 'newest_provider_copy'
+  | 'active'
+  | 'pinned'
+  | 'profile_used'
+  | 'steam_managed';
+
+export interface LibraryVersionCleanupCandidate {
+  option: LocalModVersionOption;
+  provider: 'steam' | 'nexus' | 'github' | 'local';
+  recommended: boolean;
+  protected: boolean;
+  reasons: LibraryVersionCleanupReason[];
+  replacement_candidates: LocalModVersionOption[];
+}
+
+export interface LibraryVersionCleanupFamily {
+  family_key: string;
+  display_name: string;
+  candidates: LibraryVersionCleanupCandidate[];
+}
+
+export interface LibraryVersionCleanupPreview {
+  families: LibraryVersionCleanupFamily[];
+  recommended_count: number;
+  protected_count: number;
+}
+
+export interface LibraryVersionCleanupRequestItem {
+  mod_version_id: string;
+  replacement_mod_version_id?: string | null;
+}
+
+export interface LibraryVersionCleanupItemResult {
+  mod_version_id: string;
+  success: boolean;
+  error?: string | null;
+  switched_active: boolean;
+  remapped_profiles: number;
+  deleted_disk: boolean;
+  deleted_cache: boolean;
+  removed_record: boolean;
+}
+
 export interface ProfileMembershipState {
   profile_id?: string;
   profile_name: string;

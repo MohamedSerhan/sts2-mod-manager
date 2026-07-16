@@ -6,6 +6,7 @@ import {
   ToggleLeft,
   ToggleRight,
   Search,
+  ArchiveX,
 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { LibraryTable, NO_TAGS_FILTER_VALUE } from '../components/LibraryTable';
@@ -17,6 +18,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { HelpHint } from '../components/HelpHint';
 import { Select } from '../components/Select';
 import { BrowseView } from './Browse';
+import { VersionCleanupModal } from '../components/VersionCleanupModal';
 import { profileDisplayName } from '../lib/profileDisplay';
 import {
   deleteAllMods,
@@ -65,6 +67,7 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
   // after a bulk op forces LibraryTable to re-pull the grid. (refreshMods
   // alone only updates the header counts, which read from appMods.)
   const [bulkReloadNonce, setBulkReloadNonce] = useState(0);
+  const [versionCleanupOpen, setVersionCleanupOpen] = useState(false);
 
   // ── Bulk actions (All-Mods-only; operate on the whole install) ──────
   async function handleEnableAll() {
@@ -232,6 +235,15 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
                 <Trash2 size={14} />
                 {t('mods.deleteAll')}
               </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setVersionCleanupOpen(true)}
+                title={t('mods.versionCleanup.open')}
+              >
+                <ArchiveX size={14} />
+                {t('mods.versionCleanup.open')}
+              </Button>
               {/* Yellow-outline shortcut to the same auto-detect flow offered in
                   the "+ Add mods" menu — placed at the end of the bulk-action row.
                   Not gated on gameRunning: it only searches GitHub, never touches
@@ -264,6 +276,14 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
 
       {/* Auto-detect sources modal (shared). */}
       {lib.renderAutoDetectModal()}
+      <VersionCleanupModal
+        open={versionCleanupOpen}
+        onClose={() => setVersionCleanupOpen(false)}
+        onComplete={async () => {
+          await refreshMods();
+          setBulkReloadNonce((nonce) => nonce + 1);
+        }}
+      />
     </div>
   );
 }

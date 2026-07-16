@@ -251,6 +251,10 @@ describe('<VersionCleanupModal>', () => {
     expect(githubNewest).not.toBeChecked();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Remove selected/i })).toBeEnabled();
+
+    await user.click(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.56/i }));
+    expect(githubNewest).toBeEnabled();
+    expect(screen.queryByText('Retained replacement')).not.toBeInTheDocument();
   });
 
   it('stages every removable family copy against one retained version', async () => {

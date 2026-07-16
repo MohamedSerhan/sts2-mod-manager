@@ -165,18 +165,6 @@ export function VersionCleanupModal({
     });
   }
 
-  function setCandidateReplacement(candidateId: string, replacementId: string) {
-    if (replacementId) {
-      setSelected((current) => {
-        if (!current.has(replacementId)) return current;
-        const next = new Set(current);
-        next.delete(replacementId);
-        return next;
-      });
-    }
-    setReplacements((current) => ({ ...current, [candidateId]: replacementId }));
-  }
-
   function setProtectedEditing(enabled: boolean) {
     setEditProtected(enabled);
     if (enabled) return;
@@ -464,7 +452,10 @@ export function VersionCleanupModal({
                                 <span>{t('mods.versionCleanup.replacementLabel')}</span>
                                 <Select
                                   value={replacements[id] ?? ''}
-                                  onChange={(value) => setCandidateReplacement(id, value)}
+                                  onChange={(value) => setReplacements((current) => ({
+                                    ...current,
+                                    [id]: value,
+                                  }))}
                                   placeholder={t('mods.versionCleanup.replacementPlaceholder')}
                                   aria-label={t('mods.versionCleanup.replacementFor', {
                                     mod: family.display_name,

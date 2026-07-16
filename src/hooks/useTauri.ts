@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption, LocalModVersionRemovalPreview, ManualModVersionRemovalMode, ManualModVersionProfileReplacement, ManualModVersionRemovalResult, LaunchDiagnostics, LaunchHealthReport, LaunchQuarantineResult, UpdatePlanSelection, UpdateApplyResult } from '../types';
+import type { ModInfo, Profile, ProfileMembershipGrid, ProfileLoadOrderUpdate, ProfileModOrderKey, GameInfo, GitHubRepo, ModUpdate, QuickAddResult, ShareResult, BackupInfo, ModSourceEntry, AutoDetectResult, Subscription, SubscriptionUpdate, SwitchProfileResult, RepairProfileResult, SetProfileModsEnabledResult, ModAuditEntry, ModAuditTarget, NexusModInfo, BrowserPage, LocalModVersionOption, LocalModVersionRemovalPreview, ManualModVersionRemovalMode, ManualModVersionProfileReplacement, ManualModVersionRemovalResult, LibraryVersionCleanupPreview, LibraryVersionCleanupRequestItem, LibraryVersionCleanupItemResult, LaunchDiagnostics, LaunchHealthReport, LaunchQuarantineResult, UpdatePlanSelection, UpdateApplyResult } from '../types';
 
 type LocalModVersionOptionWire = Partial<LocalModVersionOption> & {
   modVersionId?: string;
@@ -322,6 +322,16 @@ export async function getProfileMemberships(): Promise<ProfileMembershipGrid> {
 
 export async function getLibraryVersionOptions(): Promise<Record<string, LocalModVersionOption[]>> {
   return invoke('get_library_version_options');
+}
+
+export async function previewLibraryVersionCleanup(): Promise<LibraryVersionCleanupPreview> {
+  return invoke('preview_library_version_cleanup');
+}
+
+export async function executeLibraryVersionCleanup(
+  items: LibraryVersionCleanupRequestItem[],
+): Promise<LibraryVersionCleanupItemResult[]> {
+  return invoke('execute_library_version_cleanup', { items });
 }
 
 export async function previewLibraryModVersionRemoval(modVersionId: string): Promise<LocalModVersionRemovalPreview> {

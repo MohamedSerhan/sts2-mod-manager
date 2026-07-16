@@ -3066,15 +3066,16 @@ describe('<LibraryTable modpackName={null}>', () => {
 
       await screen.findByRole('combobox', { name: /Choose version/i });
       await user.click(screen.getByRole('button', { name: /Manage stored versions/i }));
+      const manageDialog = screen.getByRole('dialog', { name: /Manage versions for Watcher/i });
 
-      const activeItem = screen.getByText('v1.4.3').closest('li') as HTMLElement;
+      const activeItem = within(manageDialog).getByText('v1.4.3').closest('li') as HTMLElement;
       expect(within(activeItem).getByText(/Switch away from this active version first/i)).toBeInTheDocument();
       expect(within(activeItem).getByRole('button', { name: /^Remove$/i })).toBeEnabled();
-      const profileItem = screen.getByText('v1.3.0').closest('li') as HTMLElement;
+      const profileItem = within(manageDialog).getByText('v1.3.0').closest('li') as HTMLElement;
       expect(within(profileItem).getByText(/Used by: Legacy/i)).toBeInTheDocument();
       expect(within(profileItem).getByRole('button', { name: /^Remove$/i })).toBeEnabled();
 
-      const cachedItem = screen.getByText('v1.5.0').closest('li') as HTMLElement;
+      const cachedItem = within(manageDialog).getByText('v1.5.0').closest('li') as HTMLElement;
       const cachedRemove = within(cachedItem).getByRole('button', { name: /^Remove$/i });
       expect(cachedRemove).toBeEnabled();
       await user.click(cachedRemove);
@@ -3085,6 +3086,99 @@ describe('<LibraryTable modpackName={null}>', () => {
           cmd: 'remove_library_mod_version',
           args: { modVersionId: 'watcher-150' },
         }));
+      });
+    });
+
+    it('keeps one version from Manage versions and remaps every older copy to it', async () => {
+      const latest = {
+        mod_version_id: 'watcher-200',
+        name: 'Watcher',
+        version: '2.0.0',
+        folder_name: 'Watcher-new',
+        mod_id: 'Watcher',
+        source: 'github:example/watcher',
+        installed: false,
+        installed_enabled: false,
+        cached: true,
+        pinned: false,
+        used_by_profiles: [],
+      };
+      const old = {
+        mod_version_id: 'watcher-100',
+        name: 'Watcher',
+        version: '1.0.0',
+        folder_name: 'Watcher',
+        mod_id: 'Watcher',
+        source: 'github:example/watcher',
+        installed: true,
+        installed_enabled: true,
+        cached: true,
+        pinned: false,
+        used_by_profiles: ['Stable'],
+      };
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [{
+          ...old,
+          version_options: [latest, old],
+          profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+        }],
+      }));
+      registerInvokeHandler('preview_library_version_cleanup', () => ({
+        recommended_count: 0,
+        protected_count: 1,
+        families: [{
+          family_key: 'mod_id:watcher',
+          display_name: 'Watcher',
+          candidates: [
+            {
+              option: latest,
+              provider: 'github',
+              recommended: false,
+              protected: false,
+              reasons: ['newest_copy'],
+              replacement_candidates: [],
+            },
+            {
+              option: old,
+              provider: 'github',
+              recommended: false,
+              protected: true,
+              reasons: ['active', 'profile_used'],
+              replacement_candidates: [latest],
+            },
+          ],
+        }],
+      }));
+      registerInvokeHandler('execute_library_version_cleanup', () => [{
+        mod_version_id: old.mod_version_id,
+        success: true,
+        switched_active: true,
+        remapped_profiles: 1,
+        deleted_disk: true,
+        deleted_cache: true,
+        removed_record: true,
+      }]);
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+
+      await user.click(await screen.findByRole('button', { name: /Manage stored versions/i }));
+      const manageDialog = screen.getByRole('dialog', { name: /Manage versions for Watcher/i });
+      const latestItem = within(manageDialog).getByText('v2.0.0').closest('li') as HTMLElement;
+      await user.click(within(latestItem).getByRole('button', { name: /Keep only this/i }));
+      await user.click(await screen.findByRole('button', { name: /Keep this version/i }));
+
+      await waitFor(() => {
+        expect(getInvokeCalls()).toContainEqual({
+          cmd: 'execute_library_version_cleanup',
+          args: {
+            items: [{
+              mod_version_id: 'watcher-100',
+              replacement_mod_version_id: 'watcher-200',
+            }],
+          },
+        });
       });
     });
 
@@ -3154,7 +3248,8 @@ describe('<LibraryTable modpackName={null}>', () => {
 
       await screen.findByRole('combobox', { name: /Choose version/i });
       await user.click(screen.getByRole('button', { name: /Manage stored versions/i }));
-      const savedItem = screen.getByText('v1').closest('li') as HTMLElement;
+      const manageDialog = screen.getByRole('dialog', { name: /Manage versions for Stats the Spire/i });
+      const savedItem = within(manageDialog).getByText('v1').closest('li') as HTMLElement;
       await user.click(within(savedItem).getByRole('button', { name: /^Remove$/i }));
       await user.click(await screen.findByRole('button', { name: /Remove version/i }));
 
@@ -3257,7 +3352,8 @@ describe('<LibraryTable modpackName={null}>', () => {
 
       await screen.findByRole('combobox', { name: /Choose version/i });
       await user.click(screen.getByRole('button', { name: /Manage stored versions/i }));
-      const activeItem = screen.getByText('v1.4.3').closest('li') as HTMLElement;
+      const manageDialog = screen.getByRole('dialog', { name: /Manage versions for Watcher/i });
+      const activeItem = within(manageDialog).getByText('v1.4.3').closest('li') as HTMLElement;
       await user.click(within(activeItem).getByRole('button', { name: /^Remove$/i }));
 
       expect(await screen.findByRole('dialog', { name: /Remove Watcher v1.4.3/i })).toBeInTheDocument();
@@ -3393,7 +3489,8 @@ describe('<LibraryTable modpackName={null}>', () => {
       render(<Wrap modpackName="Stable" />);
 
       await user.click(await screen.findByRole('button', { name: /Manage stored versions/i }));
-      const activeItem = screen.getByText('v1.4.3').closest('li') as HTMLElement;
+      const manageDialog = screen.getByRole('dialog', { name: /Manage versions for Watcher/i });
+      const activeItem = within(manageDialog).getByText('v1.4.3').closest('li') as HTMLElement;
       await user.click(within(activeItem).getByRole('button', { name: /^Remove$/i }));
       expect(await screen.findByRole('dialog', { name: /Remove Watcher v1.4.3/i })).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: /^Cancel$/i }));
@@ -3514,7 +3611,8 @@ describe('<LibraryTable modpackName={null}>', () => {
       render(<Wrap modpackName="Stable" />);
 
       await user.click(await screen.findByRole('button', { name: /Manage stored versions/i }));
-      const activeItem = screen.getByText('v1.4.3').closest('li') as HTMLElement;
+      const manageDialog = screen.getByRole('dialog', { name: /Manage versions for Watcher/i });
+      const activeItem = within(manageDialog).getByText('v1.4.3').closest('li') as HTMLElement;
       await user.click(within(activeItem).getByRole('button', { name: /^Remove$/i }));
       await user.click(await screen.findByRole('button', { name: /Remap and remove/i }));
 
@@ -3602,7 +3700,8 @@ describe('<LibraryTable modpackName={null}>', () => {
       render(<Wrap modpackName="Legacy" />);
 
       await user.click(await screen.findByRole('button', { name: /Manage stored versions/i }));
-      const storedItem = screen.getByText('v1.3.0').closest('li') as HTMLElement;
+      const manageDialog = screen.getByRole('dialog', { name: /Manage versions for Watcher/i });
+      const storedItem = within(manageDialog).getByText('v1.3.0').closest('li') as HTMLElement;
       await user.click(within(storedItem).getByRole('button', { name: /^Remove$/i }));
       expect(await screen.findByText(/No replacement version is available/i)).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: /Remove from packs and delete/i }));

@@ -58,7 +58,9 @@ import { Select } from './Select';
 import {
   getLibraryVersionOptions,
   getProfileMemberships,
+  executeLibraryVersionCleanup,
   previewLibraryModVersionRemoval,
+  previewLibraryVersionCleanup,
   removeLibraryModVersion,
   removeLibraryModVersionManual,
   selectLibraryModVersion,
@@ -568,6 +570,9 @@ export function LibraryTable({
   const [membershipSaving, setMembershipSaving] = useState<string | null>(null);
   const [storageSaving, setStorageSaving] = useState<string | null>(null);
   const [removingVersionKey, setRemovingVersionKey] = useState<string | null>(
+    null,
+  );
+  const [keepingOnlyVersionKey, setKeepingOnlyVersionKey] = useState<string | null>(
     null,
   );
   const [versionRemovalWizard, setVersionRemovalWizard] =
@@ -1229,6 +1234,79 @@ export function LibraryTable({
       );
     } finally {
       setRemovingVersionKey(null);
+    }
+  }
+
+  async function handleKeepOnlyRowVersion(
+    row: ProfileMembershipMod,
+    keeperId: string,
+  ): Promise<boolean> {
+    const displayName = membershipDisplayName(row);
+    try {
+      setKeepingOnlyVersionKey(keeperId);
+      const cleanup = await previewLibraryVersionCleanup();
+      const family = cleanup.families.find((candidateFamily) =>
+        candidateFamily.candidates.some(
+          (candidate) => candidate.option.mod_version_id === keeperId,
+        ));
+      const keeper = family?.candidates.find(
+        (candidate) => candidate.option.mod_version_id === keeperId,
+      );
+      if (!family || !keeper) {
+        throw new Error(t('mods.versionKeepOnlyUnavailable'));
+      }
+
+      const removals = family.candidates.filter(
+        (candidate) => candidate.option.mod_version_id !== keeperId,
+      );
+      const blocked = removals.some((candidate) =>
+        candidate.option.pinned
+        || candidate.reasons.includes('steam_managed')
+        || (candidate.protected && !candidate.replacement_candidates.some(
+          (replacement) => replacement.mod_version_id === keeperId,
+        )));
+      if (removals.length === 0 || blocked) {
+        throw new Error(t('mods.versionKeepOnlyUnavailable'));
+      }
+
+      const ok = await confirm({
+        title: t('mods.versionKeepOnlyConfirmTitle', {
+          mod: displayName,
+          version: cleanDisplayVersion(keeper.option.version),
+        }),
+        body: t('mods.versionKeepOnlyConfirmBody'),
+        warning: t('mods.versionCleanup.confirmWarning'),
+        confirmLabel: t('mods.versionKeepOnlyConfirm'),
+        destructive: true,
+      });
+      if (!ok) return false;
+
+      pinScroll();
+      const results = await executeLibraryVersionCleanup(removals.map((candidate) => ({
+        mod_version_id: candidate.option.mod_version_id,
+        replacement_mod_version_id: candidate.protected ? keeperId : null,
+      })));
+      const failed = results.filter((result) => !result.success);
+      if (failed.length > 0) {
+        throw new Error(
+          failed.map((result) => result.error || t('mods.versionKeepOnlyItemFailed')).join('; '),
+        );
+      }
+
+      await refreshAll();
+      await load();
+      toastCtx.success(t('mods.toast.versionKeptOnly', {
+        name: displayName,
+        version: cleanDisplayVersion(keeper.option.version),
+      }));
+      return true;
+    } catch (e) {
+      toastCtx.error(t('mods.toast.versionKeepOnlyFailed', {
+        error: e instanceof Error ? e.message : String(e),
+      }));
+      return false;
+    } finally {
+      setKeepingOnlyVersionKey(null);
     }
   }
 
@@ -1964,7 +2042,9 @@ export function LibraryTable({
                 );
                 if (selected) void handleRemoveRowVersion(row, selected);
               }}
+              onKeepOnlyVersion={(option) => handleKeepOnlyRowVersion(row, option.key)}
               removingVersionKey={removingVersionKey}
+              keepingOnlyVersionKey={keepingOnlyVersionKey}
               sourceConflict={duplicateSourceConflictKeys.has(rowKey)}
               sourceEditorSlot={sourceEditorSlot}
             />

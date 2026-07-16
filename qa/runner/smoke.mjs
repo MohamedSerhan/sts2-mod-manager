@@ -150,7 +150,8 @@ function seedFixtureGameTree({ game, config, cache, steam }) {
   // audit unless CASSETTE_MODE is set.)
   seedQaTestMod(join(game, 'mods', 'QaTestMod'));
   seedUpToDateMod(join(game, 'mods', 'UpToDateMod'));
-  seedStoredRitsuLib(join(game, 'mods_disabled', 'STS2-RitsuLib-v0.2.26'));
+  seedStoredRitsuLib(join(game, 'mods_disabled', 'STS2-RitsuLib-v0.2.26'), '0.2.26');
+  seedStoredRitsuLib(join(game, 'mods_disabled', 'STS2-RitsuLib-v0.2.20'), '0.2.20');
   // WalkbackMod is deliberately NOT seeded here — it would be flagged
   // "needs update" by the audit and break specAuditAgainstCassettesShows
   // OnePending's "1 update" count. The repair walk-back spec seeds it
@@ -277,7 +278,7 @@ function seedWorkshopFixtureTree(steam) {
   writeFileSync(join(itemDir, 'RitsuLib.dll'), Buffer.from([0]));
 }
 
-function seedStoredRitsuLib(dir) {
+function seedStoredRitsuLib(dir, version) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, 'mod_manifest.json'),
@@ -285,10 +286,10 @@ function seedStoredRitsuLib(dir) {
       {
         id: 'STS2-RitsuLib',
         name: WORKSHOP_MOD_NAME,
-        version: '0.2.26',
+        version,
         min_game_version: '0.105.0',
         author: 'QA Local',
-        description: 'Smoke fixture: stored local sibling for source-aware Workshop version selection.',
+        description: `Smoke fixture: stored local v${version} sibling for source-aware version management.`,
         dependencies: [],
       },
       null,
@@ -1055,6 +1056,137 @@ async function specDeleteUpToDateMod(driver) {
   if (existsSync(modDir)) {
     throw new Error(`mods/UpToDateMod still exists on disk after Delete`);
   }
+}
+
+/**
+ * Review and execute a global version cleanup across the real UI/disk boundary.
+ * The fixture has two stored local RitsuLib versions plus its Steam sibling;
+ * the keep-one shortcut should retain the Steam copy, select and remove both
+ * local copies, and carry the saved Nexus source to the surviving family row.
+ */
+async function specCleanupOldStoredVersions(driver) {
+  const nexusUrl = 'https://www.nexusmods.com/slaythespire2/mods/103';
+  const sourcesPath = join(FIXTURE_DIRS.config, 'mod_sources.json');
+  writeFileSync(
+    sourcesPath,
+    JSON.stringify({
+      mods: {
+        'STS2-RitsuLib-v0.2.26': {
+          nexus_url: nexusUrl,
+          nexus_game_domain: 'slaythespire2',
+          nexus_mod_id: 103,
+        },
+      },
+    }, null, 2),
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//button[contains(@class, 'gf-nav') and normalize-space(.)='Mod Library']"),
+    'Sidebar Mods nav button',
+  );
+  await waitForElement(
+    driver,
+    By.xpath("//*[normalize-space(text())='RitsuLib']"),
+    'RitsuLib library row',
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//button[normalize-space(.)='Clean up versions']"),
+    'Clean up versions button',
+  );
+  await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class,'gf-modal-title') and normalize-space(.)='Clean up stored versions']"),
+    'Version cleanup modal',
+  );
+  const oldCandidate = await waitForElement(
+    driver,
+    By.xpath("//*[contains(concat(' ', normalize-space(@class), ' '), ' gf-version-cleanup-candidate ')][.//*[normalize-space(.)='v0.2.20']]"),
+    'old RitsuLib cleanup candidate',
+  );
+  const oldCheckbox = await oldCandidate.findElement(By.css("input[type='checkbox']"));
+  if (!(await driver.executeScript('return arguments[0].checked === true', oldCheckbox))) {
+    throw new Error('old RitsuLib version was not selected by the safe cleanup preview');
+  }
+  const newerLocalCandidate = await waitForElement(
+    driver,
+    By.xpath("//*[contains(concat(' ', normalize-space(@class), ' '), ' gf-version-cleanup-candidate ')][.//*[normalize-space(.)='v0.2.26']]"),
+    'newer local RitsuLib candidate',
+  );
+  const newerLocalCheckbox = await newerLocalCandidate.findElement(By.css("input[type='checkbox']"));
+  if (!(await driver.executeScript('return arguments[0].checked === true', newerLocalCheckbox))) {
+    throw new Error('older local RitsuLib source copy was not selected beneath the newer Steam copy');
+  }
+
+  await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class,'gf-version-cleanup-candidate')][.//*[normalize-space(.)='v0.4.41']]//*[contains(@class,'gf-version-cleanup-protected') and contains(.,'Protected')]"),
+    'protected badge on Steam-managed RitsuLib version',
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//*[@role='combobox' and @aria-label='Version to keep for RitsuLib']"),
+    'Version to keep selector',
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//*[@role='option' and contains(.,'v0.4.41') and contains(.,'Steam Workshop')]"),
+    'Steam Workshop keeper option',
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//button[normalize-space(.)='Keep only this version']"),
+    'Keep only this RitsuLib version button',
+  );
+
+  await clickLocated(
+    driver,
+    By.xpath("//button[normalize-space(.)='Remove selected']"),
+    'Remove selected versions button',
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//*[contains(@class,'gf-modal-foot')]//button[normalize-space(.)='Remove versions']"),
+    'Confirm version cleanup button',
+  );
+  await waitForElement(
+    driver,
+    By.xpath("//*[contains(@class,'gf-version-cleanup-results')][contains(.,'Removed: 2')]"),
+    'Version cleanup result summary',
+  );
+
+  const oldDir = join(FIXTURE_DIRS.game, 'mods_disabled', 'STS2-RitsuLib-v0.2.20');
+  await driver.wait(
+    async () => !existsSync(oldDir),
+    10_000,
+    'old RitsuLib folder remained after global version cleanup',
+  );
+  const newerLocalDir = join(FIXTURE_DIRS.game, 'mods_disabled', 'STS2-RitsuLib-v0.2.26');
+  await driver.wait(
+    async () => !existsSync(newerLocalDir),
+    10_000,
+    'older Nexus RitsuLib copy remained after the newer Steam copy was retained',
+  );
+  const workshopDir = join(
+    FIXTURE_DIRS.steam,
+    'steamapps',
+    'workshop',
+    'content',
+    '2868840',
+    WORKSHOP_ITEM_ID,
+  );
+  if (!existsSync(workshopDir)) {
+    throw new Error('global cleanup touched the Steam Workshop RitsuLib copy');
+  }
+  const savedSources = JSON.parse(readFileSync(sourcesPath, 'utf8').replace(/^\uFEFF/, ''));
+  if (savedSources.mods?.[WORKSHOP_ITEM_ID]?.nexus_url !== nexusUrl) {
+    throw new Error('global cleanup did not carry the saved Nexus source to the surviving Steam family row');
+  }
+  await clickLocated(
+    driver,
+    By.xpath("//*[contains(@class,'gf-version-cleanup-foot')]//button[normalize-space(.)='Close']"),
+    'Close version cleanup modal button',
+  );
 }
 
 /**
@@ -2270,6 +2402,7 @@ const STATE_SPECS = [
   ['auto-detected GitHub save promotes the source for updates', specAutoDetectedGitHubSavePromotesSource],
   ['delete UpToDateMod via kebab → Remove mod…', specDeleteUpToDateMod],
   ['create modpack via Modpacks → Create modpack', specCreateModpack],
+  ['global cleanup removes older local copies and preserves source metadata', specCleanupOldStoredVersions],
   ['modpack switch preserves freeze state (v1.3.1 contract)', specModpackSwitchPreservesFreeze],
   ['#22: toggle state sticky across modpack switch', specToggleStickyAcrossModpackSwitch],
   ['#20: disabled library extras are preserved', specDisabledLibraryExtrasArePreserved],

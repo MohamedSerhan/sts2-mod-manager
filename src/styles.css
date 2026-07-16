@@ -1340,7 +1340,7 @@ body {
   white-space: nowrap;
 }
 .gf-version-select .gf-select-value .gf-version-option-source {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
 }
 .gf-version-option-label {

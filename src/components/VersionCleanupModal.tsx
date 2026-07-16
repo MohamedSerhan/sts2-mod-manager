@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, CircleHelp, Info, LockKeyhole, Search, X }
 import { useTranslation } from 'react-i18next';
 import type {
   LibraryVersionCleanupCandidate,
+  LibraryVersionCleanupFamily,
   LibraryVersionCleanupItemResult,
   LibraryVersionCleanupPreview,
 } from '../types';
@@ -32,6 +33,21 @@ function candidateState(candidate: LibraryVersionCleanupCandidate): 'active' | '
   return 'saved';
 }
 
+function keepOnlyCandidates(
+  family: LibraryVersionCleanupFamily,
+): LibraryVersionCleanupCandidate[] {
+  return family.candidates.filter((keeper) =>
+    (keeper.option.installed || keeper.option.cached)
+    && family.candidates.every((candidate) =>
+      candidate.option.mod_version_id === keeper.option.mod_version_id
+      || (!candidate.option.pinned
+        && !candidate.reasons.includes('steam_managed')
+        && (!candidate.protected || candidate.replacement_candidates.some(
+          (replacement) =>
+            replacement.mod_version_id === keeper.option.mod_version_id,
+        )))));
+}
+
 export function VersionCleanupModal({
   open,
   onClose,
@@ -44,10 +60,11 @@ export function VersionCleanupModal({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [editProtected, setEditProtected] = useState(false);
   const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [replacements, setReplacements] = useState<Record<string, string>>({});
+  const [keepOnlyTargets, setKeepOnlyTargets] = useState<Record<string, string>>({});
   const [results, setResults] = useState<LibraryVersionCleanupItemResult[]>([]);
 
   async function loadPreview() {
@@ -64,6 +81,7 @@ export function VersionCleanupModal({
         ),
       ));
       setReplacements({});
+      setKeepOnlyTargets({});
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
@@ -74,7 +92,7 @@ export function VersionCleanupModal({
   useEffect(() => {
     if (!open) return;
     setFilter('');
-    setShowAdvanced(false);
+    setEditProtected(false);
     setVisibleLimit(PAGE_SIZE);
     setResults([]);
     void loadPreview();
@@ -106,6 +124,12 @@ export function VersionCleanupModal({
   const selectedCandidates = [...selected]
     .map((id) => candidateById.get(id))
     .filter((candidate): candidate is LibraryVersionCleanupCandidate => !!candidate);
+  const retainedReplacementIds = new Set(
+    selectedCandidates
+      .filter((candidate) => candidate.protected)
+      .map((candidate) => replacements[candidate.option.mod_version_id])
+      .filter((id): id is string => !!id),
+  );
   const invalidReplacement = selectedCandidates.some((candidate) => {
     if (!candidate.protected) return false;
     const replacement = replacements[candidate.option.mod_version_id];
@@ -115,7 +139,25 @@ export function VersionCleanupModal({
 
   function toggleCandidate(candidate: LibraryVersionCleanupCandidate, checked: boolean) {
     const id = candidate.option.mod_version_id;
+    if (!checked) {
+      setReplacements((current) => {
+        if (!(id in current)) return current;
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+    }
     setSelected((current) => {
+      const retainedIds = new Set(
+        [...current]
+          .map((selectedId) => candidateById.get(selectedId))
+          .filter((selectedCandidate): selectedCandidate is LibraryVersionCleanupCandidate => (
+            !!selectedCandidate && selectedCandidate.protected
+          ))
+          .map((selectedCandidate) => replacements[selectedCandidate.option.mod_version_id])
+          .filter((replacementId): replacementId is string => !!replacementId),
+      );
+      if (checked && retainedIds.has(id)) return current;
       const next = new Set(current);
       if (checked) next.add(id);
       else next.delete(id);
@@ -123,8 +165,20 @@ export function VersionCleanupModal({
     });
   }
 
-  function setAdvanced(enabled: boolean) {
-    setShowAdvanced(enabled);
+  function setCandidateReplacement(candidateId: string, replacementId: string) {
+    if (replacementId) {
+      setSelected((current) => {
+        if (!current.has(replacementId)) return current;
+        const next = new Set(current);
+        next.delete(replacementId);
+        return next;
+      });
+    }
+    setReplacements((current) => ({ ...current, [candidateId]: replacementId }));
+  }
+
+  function setProtectedEditing(enabled: boolean) {
+    setEditProtected(enabled);
     if (enabled) return;
     const protectedIds = new Set(
       [...candidateById.values()]
@@ -133,6 +187,40 @@ export function VersionCleanupModal({
     );
     setSelected((current) => new Set([...current].filter((id) => !protectedIds.has(id))));
     setReplacements({});
+  }
+
+  function stageKeepOnly(
+    family: LibraryVersionCleanupFamily,
+    keeperId: string,
+  ) {
+    if (!keepOnlyCandidates(family).some(
+      (candidate) => candidate.option.mod_version_id === keeperId,
+    )) return;
+    const familyIds = new Set(
+      family.candidates.map((candidate) => candidate.option.mod_version_id),
+    );
+    setEditProtected(true);
+    setSelected((current) => {
+      const next = new Set(
+        [...current].filter((id) => !familyIds.has(id)),
+      );
+      for (const candidate of family.candidates) {
+        if (candidate.option.mod_version_id !== keeperId) {
+          next.add(candidate.option.mod_version_id);
+        }
+      }
+      return next;
+    });
+    setReplacements((current) => {
+      const next = { ...current };
+      for (const id of familyIds) delete next[id];
+      for (const candidate of family.candidates) {
+        if (candidate.protected && candidate.option.mod_version_id !== keeperId) {
+          next[candidate.option.mod_version_id] = keeperId;
+        }
+      }
+      return next;
+    });
   }
 
   async function executeCleanup() {
@@ -239,10 +327,10 @@ export function VersionCleanupModal({
                 <label className="gf-version-cleanup-advanced">
                   <input
                     type="checkbox"
-                    checked={showAdvanced}
-                    onChange={(event) => setAdvanced(event.target.checked)}
+                    checked={editProtected}
+                    onChange={(event) => setProtectedEditing(event.target.checked)}
                   />
-                  <span>{t('mods.versionCleanup.showAdvanced')}</span>
+                  <span>{t('mods.versionCleanup.editProtected')}</span>
                   <span
                     className="gf-version-cleanup-help"
                     role="img"
@@ -259,12 +347,53 @@ export function VersionCleanupModal({
               </div>
 
               <div className="gf-version-cleanup-list">
-                {filteredFamilies.slice(0, visibleLimit).map((family) => (
+                {filteredFamilies.slice(0, visibleLimit).map((family) => {
+                  const keepers = keepOnlyCandidates(family);
+                  const keepOnlyTarget = keepOnlyTargets[family.family_key] ?? '';
+                  return (
                   <details key={family.family_key} className="gf-version-cleanup-family" open>
                     <summary>
                       <strong>{family.display_name}</strong>
                       <span>{t('mods.versionCleanup.versionCount', { count: family.candidates.length })}</span>
                     </summary>
+                    <div className="gf-version-cleanup-keep-one">
+                      <div className="gf-version-cleanup-keep-one-copy">
+                        <strong>{t('mods.versionCleanup.keepOneTitle')}</strong>
+                        <span>
+                          {keepers.length > 0
+                            ? t('mods.versionCleanup.keepOneBody')
+                            : t('mods.versionCleanup.keepOneUnavailable')}
+                        </span>
+                      </div>
+                      <Select
+                        value={keepOnlyTarget}
+                        onChange={(value) => setKeepOnlyTargets((current) => ({
+                          ...current,
+                          [family.family_key]: value,
+                        }))}
+                        options={keepers.map((candidate) => ({
+                          value: candidate.option.mod_version_id,
+                          label: t('mods.versionCleanup.keepOneOption', {
+                            version: cleanVersion(candidate.option.version),
+                            provider: t(`mods.versionCleanup.provider.${candidate.provider}`),
+                            state: t(`mods.versionCleanup.state.${candidateState(candidate)}`),
+                          }),
+                        }))}
+                        placeholder={t('mods.versionCleanup.keepOnePlaceholder')}
+                        aria-label={t('mods.versionCleanup.keepOneAria', {
+                          mod: family.display_name,
+                        })}
+                        disabled={keepers.length === 0}
+                      />
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={!keepOnlyTarget || running}
+                        onClick={() => stageKeepOnly(family, keepOnlyTarget)}
+                      >
+                        {t('mods.versionCleanup.keepOneAction')}
+                      </Button>
+                    </div>
                     <div className="gf-version-cleanup-candidates">
                       {family.candidates.map((candidate) => {
                         const id = candidate.option.mod_version_id;
@@ -272,7 +401,9 @@ export function VersionCleanupModal({
                           && !candidate.option.pinned
                           && !candidate.reasons.includes('steam_managed')
                           && candidate.replacement_candidates.length > 0;
-                        const disabled = candidate.protected && (!showAdvanced || !canAdvancedRemove);
+                        const retainedAsReplacement = retainedReplacementIds.has(id);
+                        const disabled = retainedAsReplacement
+                          || (candidate.protected && (!editProtected || !canAdvancedRemove));
                         const checked = selected.has(id);
                         const reasonText = candidate.reasons
                           .map((reason) => t(`mods.versionCleanup.reason.${reason}`))
@@ -290,23 +421,32 @@ export function VersionCleanupModal({
                             }),
                           }));
                         return (
-                          <div key={id} className={`gf-version-cleanup-candidate${checked ? ' is-selected' : ''}${showAdvanced && candidate.protected ? ' is-protected' : ''}`}>
+                          <div key={id} className={`gf-version-cleanup-candidate${checked ? ' is-selected' : ''}${candidate.protected ? ' is-protected' : ''}`}>
                             <label className="gf-version-cleanup-choice">
                               <input
                                 type="checkbox"
                                 checked={checked}
                                 disabled={disabled}
                                 onChange={(event) => toggleCandidate(candidate, event.target.checked)}
+                                title={retainedAsReplacement
+                                  ? t('mods.versionCleanup.retainedReplacementBadge')
+                                  : undefined}
                                 aria-label={t('mods.versionCleanup.selectVersion', {
                                   mod: family.display_name,
                                   version: cleanVersion(candidate.option.version),
                                 })}
                               />
                               <span className="gf-version-cleanup-version">v{cleanVersion(candidate.option.version)}</span>
-                              {showAdvanced && candidate.protected && (
+                              {candidate.protected && (
                                 <span className="gf-version-cleanup-protected" title={protectedTitle}>
                                   <LockKeyhole size={11} aria-hidden />
                                   {t('mods.versionCleanup.protectedBadge')}
+                                </span>
+                              )}
+                              {retainedAsReplacement && (
+                                <span className="gf-version-cleanup-retained">
+                                  <CheckCircle2 size={11} aria-hidden />
+                                  {t('mods.versionCleanup.retainedReplacementBadge')}
                                 </span>
                               )}
                             </label>
@@ -324,7 +464,7 @@ export function VersionCleanupModal({
                                 <span>{t('mods.versionCleanup.replacementLabel')}</span>
                                 <Select
                                   value={replacements[id] ?? ''}
-                                  onChange={(value) => setReplacements((current) => ({ ...current, [id]: value }))}
+                                  onChange={(value) => setCandidateReplacement(id, value)}
                                   placeholder={t('mods.versionCleanup.replacementPlaceholder')}
                                   aria-label={t('mods.versionCleanup.replacementFor', {
                                     mod: family.display_name,
@@ -339,7 +479,8 @@ export function VersionCleanupModal({
                       })}
                     </div>
                   </details>
-                ))}
+                  );
+                })}
               </div>
               {filteredFamilies.length > visibleLimit && (
                 <Button

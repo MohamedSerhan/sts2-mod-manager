@@ -33,6 +33,7 @@ const SAME_AS_ENGLISH_ALLOWED = new Set([
   'mods.versionCleanup.provider.github',
   'mods.versionCleanup.provider.nexus',
   'mods.versionCleanup.reasonJoiner',
+  'mods.versionCleanup.keepOneOption',
   'mods.versionCleanup.replacementOption',
   'onboarding.step1.browsePlaceholderLinux',
   'onboarding.step1.browsePlaceholderMac',

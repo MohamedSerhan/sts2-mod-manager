@@ -1061,8 +1061,8 @@ async function specDeleteUpToDateMod(driver) {
 /**
  * Review and execute a global version cleanup across the real UI/disk boundary.
  * The fixture has two stored local RitsuLib versions plus its Steam sibling;
- * both older local copies should be preselected and removed while the saved
- * Nexus source is carried to the surviving Steam family row.
+ * the keep-one shortcut should retain the Steam copy, select and remove both
+ * local copies, and carry the saved Nexus source to the surviving family row.
  */
 async function specCleanupOldStoredVersions(driver) {
   const nexusUrl = 'https://www.nexusmods.com/slaythespire2/mods/103';
@@ -1118,15 +1118,25 @@ async function specCleanupOldStoredVersions(driver) {
     throw new Error('older local RitsuLib source copy was not selected beneath the newer Steam copy');
   }
 
-  await clickLocated(
-    driver,
-    By.xpath("//label[contains(@class,'gf-version-cleanup-advanced')][contains(.,'Show protected versions')]"),
-    'Show protected versions toggle',
-  );
   await waitForElement(
     driver,
     By.xpath("//*[contains(@class,'gf-version-cleanup-candidate')][.//*[normalize-space(.)='v0.4.41']]//*[contains(@class,'gf-version-cleanup-protected') and contains(.,'Protected')]"),
     'protected badge on Steam-managed RitsuLib version',
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//*[@role='combobox' and @aria-label='Version to keep for RitsuLib']"),
+    'Version to keep selector',
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//*[@role='option' and contains(.,'v0.4.41') and contains(.,'Steam Workshop')]"),
+    'Steam Workshop keeper option',
+  );
+  await clickLocated(
+    driver,
+    By.xpath("//button[normalize-space(.)='Keep only this version']"),
+    'Keep only this RitsuLib version button',
   );
 
   await clickLocated(

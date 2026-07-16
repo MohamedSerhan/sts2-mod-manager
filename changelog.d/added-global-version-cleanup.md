@@ -1,1 +1,1 @@
-The Mod Library can now clearly review and safely clean up old versions across every mod, with readable source labels, visible protection reasons, and saved update links that remain available after local copies are removed.
+The Mod Library can now review and safely consolidate old versions across every mod by keeping one chosen copy, remapping affected modpacks, and removing the other local copies, with compact readable source labels, accurate protection, visible reasons, and saved update links that remain available.

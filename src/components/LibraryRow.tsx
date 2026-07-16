@@ -244,7 +244,9 @@ export interface LibraryRowProps {
   selectedVersionKey?: string;
   onSelectVersion?: (key: string) => void;
   onRemoveVersion?: (option: LibraryRowVersionOption) => void | Promise<void>;
+  onKeepOnlyVersion?: (option: LibraryRowVersionOption) => boolean | Promise<boolean>;
   removingVersionKey?: string | null;
+  keepingOnlyVersionKey?: string | null;
   /** Whether THIS row's update is in flight (per-row spinner). */
   isUpdating?: boolean;
   /** Whether THIS row's repair is in flight. */
@@ -315,7 +317,9 @@ export function LibraryRow({
   selectedVersionKey,
   onSelectVersion = noop,
   onRemoveVersion = noop,
+  onKeepOnlyVersion = () => false,
   removingVersionKey = null,
+  keepingOnlyVersionKey = null,
   isUpdating = false,
   isRepairing = false,
   isRollingBack = false,
@@ -1174,8 +1178,15 @@ export function LibraryRow({
                 {versionOptions.map((option) => {
                   const reason = versionRemoveBlockReason(option);
                   const removing = removingVersionKey === option.key;
+                  const keepingOnly = keepingOnlyVersionKey === option.key;
                   const managedBySteam =
                     option.installSource === 'steam_workshop' && option.installed;
+                  const canKeepOnly = versionOptions.length > 1
+                    && (option.installed || option.cached)
+                    && !versionOptions.some((candidate) => candidate.pinned)
+                    && !versionOptions.some((candidate) =>
+                      candidate.key !== option.key
+                      && candidate.installSource === 'steam_workshop');
                   const workshopVersionUrl = versionWorkshopUrl(option);
                   return (
                     <li key={option.key} className="gf-version-manager-item">
@@ -1200,31 +1211,45 @@ export function LibraryRow({
                           </span>
                         )}
                       </div>
-                      {managedBySteam ? (
+                      <div className="gf-version-manager-actions">
                         <button
                           type="button"
-                          className="gf-btn-3 gf-version-manager-remove"
-                          disabled={!workshopVersionUrl}
-                          onClick={() => {
-                            if (workshopVersionUrl) onOpenExternalUrl(workshopVersionUrl);
+                          className="gf-btn-3 gf-version-manager-keep"
+                          disabled={!canKeepOnly || keepingOnlyVersionKey !== null || removingVersionKey !== null}
+                          title={!canKeepOnly ? t('mods.versionKeepOnlyUnavailable') : undefined}
+                          onClick={async () => {
+                            const kept = await onKeepOnlyVersion(option);
+                            if (kept) setVersionManagerOpen(false);
                           }}
                         >
-                          {workshopVersionUrl
-                            ? t('mods.versionOpenWorkshop')
-                            : t('mods.versionSteamManaged')}
+                          {keepingOnly ? t('mods.versionKeepingOnly') : t('mods.versionKeepOnly')}
                         </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="gf-btn-3 gf-btn-danger gf-version-manager-remove"
-                          disabled={removing}
-                          onClick={() => onRemoveVersion(option)}
-                        >
-                          {removing
-                            ? t('mods.versionRemoving')
-                            : t('mods.versionRemove')}
-                        </button>
-                      )}
+                        {managedBySteam ? (
+                          <button
+                            type="button"
+                            className="gf-btn-3 gf-version-manager-remove"
+                            disabled={!workshopVersionUrl || keepingOnlyVersionKey !== null}
+                            onClick={() => {
+                              if (workshopVersionUrl) onOpenExternalUrl(workshopVersionUrl);
+                            }}
+                          >
+                            {workshopVersionUrl
+                              ? t('mods.versionOpenWorkshop')
+                              : t('mods.versionSteamManaged')}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="gf-btn-3 gf-btn-danger gf-version-manager-remove"
+                            disabled={removing || keepingOnlyVersionKey !== null}
+                            onClick={() => onRemoveVersion(option)}
+                          >
+                            {removing
+                              ? t('mods.versionRemoving')
+                              : t('mods.versionRemove')}
+                          </button>
+                        )}
+                      </div>
                     </li>
                   );
                 })}

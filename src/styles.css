@@ -1319,19 +1319,26 @@ body {
 .gf-version-select > span {
   flex: 0 0 auto;
 }
-.gf-version-select .gf-select-wrap { flex: 1 1 220px; min-width: 210px; max-width: 280px; }
+.gf-version-select .gf-select-wrap {
+  flex: 0 1 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 230px;
+}
 .gf-version-select .gf-select {
+  width: max-content;
+  max-width: 100%;
   height: 24px;
-  min-width: 210px;
+  min-width: 0;
   font-size: 11.5px;
   font-weight: 600;
   padding: 0 7px 0 8px;
 }
 .gf-version-select .gf-select-value {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
 }
 .gf-version-select .gf-select-value .gf-version-option-label {
-  width: 100%;
+  width: auto;
 }
 .gf-version-select .gf-select-value .gf-version-option-main {
   flex: 0 0 auto;
@@ -1476,7 +1483,21 @@ body {
   flex: 0 0 auto;
   white-space: nowrap;
 }
+.gf-version-manager-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.gf-version-manager-keep {
+  white-space: nowrap;
+}
 .gf-version-manager-remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.gf-version-manager-keep:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -1624,6 +1645,34 @@ body {
 .gf-version-cleanup-candidate.is-protected {
   background: color-mix(in oklab, var(--warn) 7%, transparent);
 }
+.gf-version-cleanup-keep-one {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 260px) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--indigo-line);
+  background: color-mix(in oklab, var(--aqua) 5%, transparent);
+}
+.gf-version-cleanup-keep-one-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--ink-mute);
+  font-size: 11.5px;
+}
+.gf-version-cleanup-keep-one-copy strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+.gf-version-cleanup-keep-one .gf-select-wrap {
+  min-width: 0;
+}
+.gf-version-cleanup-keep-one .gf-select {
+  width: 100%;
+  min-width: 0;
+}
 .gf-version-cleanup-choice {
   display: inline-flex;
   align-items: center;
@@ -1653,6 +1702,22 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   cursor: help;
+}
+.gf-version-cleanup-retained {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in oklab, var(--ok) 42%, transparent);
+  border-radius: 999px;
+  color: var(--ok);
+  background: color-mix(in oklab, var(--ok) 11%, transparent);
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 .gf-version-cleanup-provider,
 .gf-version-cleanup-state {
@@ -1805,6 +1870,17 @@ body {
   font-size: 12px;
 }
 @media (max-width: 640px) {
+  .gf-version-manager-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .gf-version-manager-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  .gf-version-cleanup-keep-one {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .gf-version-removal-field {
     grid-template-columns: 1fr;
   }

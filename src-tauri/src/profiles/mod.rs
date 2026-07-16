@@ -2041,6 +2041,72 @@ mod manual_version_removal_tests {
     }
 
     #[test]
+    fn bulk_cleanup_consolidates_multiple_profile_versions_to_one_copy() {
+        let game = tempdir().unwrap();
+        let config = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let mods_path = game.path().join("mods");
+        let disabled_path = game.path().join("mods_disabled");
+        let profiles_path = config.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+        let (old_id, old_source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-old", "1.0.0");
+        let (middle_id, middle_source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-middle", "1.5.0");
+        let (keeper_id, _keeper_source) =
+            cache_single_mod(config.path(), cache.path(), "Watcher-new", "2.0.0");
+        let mut old = crate::mods::scan_mods(old_source.path()).remove(0);
+        old.mod_version_id = Some(old_id.clone());
+        let mut middle = crate::mods::scan_mods(middle_source.path()).remove(0);
+        middle.mod_version_id = Some(middle_id.clone());
+        save_profile(
+            &profile("Old pack", vec![profile_mod_from_installed(&old)]),
+            &profiles_path,
+        )
+        .unwrap();
+        save_profile(
+            &profile("Middle pack", vec![profile_mod_from_installed(&middle)]),
+            &profiles_path,
+        )
+        .unwrap();
+
+        let results = execute_library_version_cleanup_from_paths(
+            &[
+                LibraryVersionCleanupRequestItem {
+                    mod_version_id: old_id.clone(),
+                    replacement_mod_version_id: Some(keeper_id.clone()),
+                },
+                LibraryVersionCleanupRequestItem {
+                    mod_version_id: middle_id.clone(),
+                    replacement_mod_version_id: Some(keeper_id.clone()),
+                },
+            ],
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config.path(),
+            cache.path(),
+        )
+        .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|result| result.success));
+        for profile_name in ["Old pack", "Middle pack"] {
+            assert_eq!(
+                load_profile(profile_name, &profiles_path).unwrap().mods[0]
+                    .mod_version_id
+                    .as_deref(),
+                Some(keeper_id.as_str())
+            );
+        }
+        assert!(crate::mod_versions::record_by_id(config.path(), &old_id).is_none());
+        assert!(crate::mod_versions::record_by_id(config.path(), &middle_id).is_none());
+        assert!(crate::mod_versions::record_by_id(config.path(), &keeper_id).is_some());
+    }
+
+    #[test]
     fn manual_remap_updates_profile_and_switches_active_disk_copy() {
         let game = tempdir().unwrap();
         let config = tempdir().unwrap();

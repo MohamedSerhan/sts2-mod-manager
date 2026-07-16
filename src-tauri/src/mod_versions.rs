@@ -1520,7 +1520,10 @@ pub fn preview_library_version_cleanup(
         for option in &options {
             let provider = cleanup_provider_key(option);
             let newest_copy = newest_copy_id == Some(option.mod_version_id.as_str());
-            let steam_managed = provider == "steam" || option.workshop_item_id.is_some();
+            // A local GitHub/Nexus copy can carry a Workshop item id as
+            // family/source metadata. Only the artifact's owning provider
+            // makes it Steam-managed; metadata alone must not lock local files.
+            let steam_managed = provider == "steam";
             let profile_used = !option.used_by_profiles.is_empty();
             let protected =
                 option.installed_enabled || option.pinned || profile_used || steam_managed;
@@ -2035,8 +2038,9 @@ pub(crate) fn remove_local_mod_version_with_policy(
         .filter(|info| mod_info_matches_record_identity(info, &record))
         .collect();
     let cached = cached_record_path(cache_path, &record).is_some();
-    let record_is_workshop = record.install_source == ModInstallSource::SteamWorkshop
-        || record.workshop_item_id.is_some();
+    // Local copies may retain a Workshop id as cross-provider metadata. File
+    // ownership comes from the recorded install source, not that optional link.
+    let record_is_workshop = record.install_source == ModInstallSource::SteamWorkshop;
     if record_is_workshop && !installed_matches.is_empty() {
         return Err(AppError::Other(
             "Steam Workshop mods are managed by Steam. Unsubscribe or remove them in Steam instead."
@@ -2702,7 +2706,10 @@ mod tests {
         let config = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
         let nexus_url = "https://www.nexusmods.com/slaythespire2/mods/103";
-        let nexus = cleanup_record("baselib-nexus", "3.3.1", nexus_url, ModInstallSource::Local);
+        let mut nexus =
+            cleanup_record("baselib-nexus", "3.3.1", nexus_url, ModInstallSource::Local);
+        nexus.workshop_item_id = Some("123456".into());
+        nexus.workshop_url = Some(crate::mods::workshop_url("123456"));
         let steam = cleanup_record(
             "baselib-steam",
             "3.3.5",
@@ -2738,9 +2745,13 @@ mod tests {
             .is_some_and(|candidate| {
                 candidate.recommended
                     && !candidate.protected
+                    && candidate.provider == "nexus"
                     && candidate
                         .reasons
                         .contains(&LibraryVersionCleanupReason::RecommendedOld)
+                    && !candidate
+                        .reasons
+                        .contains(&LibraryVersionCleanupReason::SteamManaged)
             }));
         assert!(candidates
             .iter()
@@ -2751,6 +2762,74 @@ mod tests {
                         .reasons
                         .contains(&LibraryVersionCleanupReason::SteamManaged)
             }));
+    }
+
+    #[test]
+    fn cleanup_preview_allows_profile_used_nexus_metadata_copy_to_remap_to_steam() {
+        let config = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let nexus_url = "https://www.nexusmods.com/slaythespire2/mods/103";
+        let mut nexus =
+            cleanup_record("baselib-nexus", "3.3.1", nexus_url, ModInstallSource::Local);
+        nexus.workshop_item_id = Some("123456".into());
+        nexus.workshop_url = Some(crate::mods::workshop_url("123456"));
+        let steam = cleanup_record(
+            "baselib-steam",
+            "3.3.5",
+            &crate::mods::workshop_url("123456"),
+            ModInstallSource::SteamWorkshop,
+        );
+        save(
+            &ModVersionsDb {
+                records: [nexus.clone(), steam.clone()]
+                    .into_iter()
+                    .map(|record| (record.id.clone(), record))
+                    .collect(),
+                ..ModVersionsDb::default()
+            },
+            config.path(),
+        )
+        .unwrap();
+        cache_cleanup_record(cache.path(), &nexus.id);
+
+        let mut workshop = workshop_mod_info("123456", "3.3.5");
+        workshop.name = "Test".into();
+        workshop.mod_id = Some("mod-id".into());
+        workshop.mod_version_id = Some(steam.id.clone());
+        let now = chrono::Utc::now();
+        let mut profile_entry = profile_mod(nexus.id.clone(), "3.3.1", "baselib-nexus");
+        profile_entry.source = Some(nexus_url.into());
+        let profile = crate::profiles::Profile {
+            id: "legacy".into(),
+            name: "Legacy".into(),
+            game_version: None,
+            created_by: None,
+            mods: vec![profile_entry],
+            created_at: now,
+            updated_at: now,
+            public: None,
+            mod_extras: HashMap::new(),
+        };
+
+        let preview =
+            preview_library_version_cleanup(&[workshop], &[profile], config.path(), cache.path());
+        let candidate = preview.families[0]
+            .candidates
+            .iter()
+            .find(|candidate| candidate.option.mod_version_id == nexus.id)
+            .unwrap();
+        assert_eq!(candidate.provider, "nexus");
+        assert!(candidate.protected);
+        assert!(candidate
+            .reasons
+            .contains(&LibraryVersionCleanupReason::ProfileUsed));
+        assert!(!candidate
+            .reasons
+            .contains(&LibraryVersionCleanupReason::SteamManaged));
+        assert!(candidate
+            .replacement_candidates
+            .iter()
+            .any(|replacement| replacement.mod_version_id == steam.id));
     }
 
     #[test]
@@ -3945,6 +4024,10 @@ mod tests {
         let mut local = mod_info("Test", "1.0.0", Some("stored"));
         local.enabled = false;
         local.mod_id = Some("shared-runtime".into());
+        // A local copy may retain this as family metadata without becoming
+        // Steam-owned itself.
+        local.workshop_item_id = Some("3747602295".into());
+        local.workshop_url = Some(crate::mods::workshop_url("3747602295"));
         let local_id = ensure_mod_info_id(&mut local, config.path()).unwrap();
 
         let mut workshop = workshop_mod_info("3747602295", "1.0.0");

@@ -3089,6 +3089,99 @@ describe('<LibraryTable modpackName={null}>', () => {
       });
     });
 
+    it('keeps one version from Manage versions and remaps every older copy to it', async () => {
+      const latest = {
+        mod_version_id: 'watcher-200',
+        name: 'Watcher',
+        version: '2.0.0',
+        folder_name: 'Watcher-new',
+        mod_id: 'Watcher',
+        source: 'github:example/watcher',
+        installed: false,
+        installed_enabled: false,
+        cached: true,
+        pinned: false,
+        used_by_profiles: [],
+      };
+      const old = {
+        mod_version_id: 'watcher-100',
+        name: 'Watcher',
+        version: '1.0.0',
+        folder_name: 'Watcher',
+        mod_id: 'Watcher',
+        source: 'github:example/watcher',
+        installed: true,
+        installed_enabled: true,
+        cached: true,
+        pinned: false,
+        used_by_profiles: ['Stable'],
+      };
+      registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'Stable', editable: true }],
+        mods: [{
+          ...old,
+          version_options: [latest, old],
+          profiles: [{ profile_name: 'Stable', included: true, enabled: true, editable: true }],
+        }],
+      }));
+      registerInvokeHandler('preview_library_version_cleanup', () => ({
+        recommended_count: 0,
+        protected_count: 1,
+        families: [{
+          family_key: 'mod_id:watcher',
+          display_name: 'Watcher',
+          candidates: [
+            {
+              option: latest,
+              provider: 'github',
+              recommended: false,
+              protected: false,
+              reasons: ['newest_copy'],
+              replacement_candidates: [],
+            },
+            {
+              option: old,
+              provider: 'github',
+              recommended: false,
+              protected: true,
+              reasons: ['active', 'profile_used'],
+              replacement_candidates: [latest],
+            },
+          ],
+        }],
+      }));
+      registerInvokeHandler('execute_library_version_cleanup', () => [{
+        mod_version_id: old.mod_version_id,
+        success: true,
+        switched_active: true,
+        remapped_profiles: 1,
+        deleted_disk: true,
+        deleted_cache: true,
+        removed_record: true,
+      }]);
+      const user = userEvent.setup();
+      render(<Wrap modpackName="Stable" />);
+
+      await user.click(await screen.findByRole('button', { name: /Manage stored versions/i }));
+      const manageDialog = screen.getByRole('dialog', { name: /Manage versions for Watcher/i });
+      const latestItem = within(manageDialog).getByText('v2.0.0').closest('li') as HTMLElement;
+      await user.click(within(latestItem).getByRole('button', { name: /Keep only this/i }));
+      await user.click(await screen.findByRole('button', { name: /Keep this version/i }));
+
+      await waitFor(() => {
+        expect(getInvokeCalls()).toContainEqual({
+          cmd: 'execute_library_version_cleanup',
+          args: {
+            items: [{
+              mod_version_id: 'watcher-100',
+              replacement_mod_version_id: 'watcher-200',
+            }],
+          },
+        });
+      });
+    });
+
     it('removes an unused saved version when the preview response omits legacy arrays', async () => {
       registerInvokeHandler('list_profiles_cmd', () => [baseProfile({ name: 'Stable' })]);
       registerInvokeHandler('get_profile_memberships', () => ({

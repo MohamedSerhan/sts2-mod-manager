@@ -61,7 +61,7 @@ function preview(): LibraryVersionCleanupPreview {
           recommended: false,
           protected: true,
           reasons: ['active', 'profile_used'],
-          replacement_candidates: [newest, old],
+          replacement_candidates: [newest, old, steam],
         },
         {
           option: old,
@@ -132,6 +132,7 @@ describe('<VersionCleanupModal>', () => {
 
     expect(await screen.findByText('[BASE] RitsuLib')).toBeInTheDocument();
     expect(screen.getByText(/keeps its saved GitHub or Nexus source link/i)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Edit protected versions/i })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.54/i })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.56/i })).toBeDisabled();
     const newestCheckboxes = screen.getAllByRole('checkbox', { name: /RitsuLib v0\.4\.57/i });
@@ -200,7 +201,7 @@ describe('<VersionCleanupModal>', () => {
     const user = userEvent.setup();
 
     await screen.findByText('[BASE] RitsuLib');
-    await user.click(screen.getByRole('checkbox', { name: /Show protected versions/i }));
+    await user.click(screen.getByRole('checkbox', { name: /Edit protected versions/i }));
     await user.click(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.54/i }));
     await user.click(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.56/i }));
     expect(screen.getByRole('button', { name: /Remove selected/i })).toBeDisabled();
@@ -208,7 +209,7 @@ describe('<VersionCleanupModal>', () => {
     await chooseOption(
       user,
       /Replacement for \[BASE\] RitsuLib v0\.4\.56/i,
-      /v0\.4\.57/i,
+      /v0\.4\.57.*Saved in Versions/i,
     );
     await user.click(screen.getByRole('button', { name: /Remove selected/i }));
     await user.click(await screen.findByRole('button', { name: /Remove versions/i }));
@@ -224,13 +225,66 @@ describe('<VersionCleanupModal>', () => {
     });
   });
 
+  it('prevents a retained replacement from also being selected for removal', async () => {
+    registerInvokeHandler('preview_library_version_cleanup', preview);
+    renderModal();
+    const user = userEvent.setup();
+
+    await screen.findByText('[BASE] RitsuLib');
+    await user.click(screen.getByRole('checkbox', { name: /Edit protected versions/i }));
+    await user.click(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.54/i }));
+    await user.click(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.56/i }));
+    await chooseOption(
+      user,
+      /Replacement for \[BASE\] RitsuLib v0\.4\.56/i,
+      /v0\.4\.57.*Saved in Versions/i,
+    );
+
+    const githubNewest = screen.getAllByRole('checkbox', { name: /RitsuLib v0\.4\.57/i })
+      .find((checkbox) => checkbox.closest('.gf-version-cleanup-candidate')?.textContent?.includes('GitHub'));
+    expect(githubNewest).toBeDisabled();
+    expect(githubNewest).not.toBeChecked();
+    expect(githubNewest).toHaveAttribute('title', 'Retained replacement');
+    expect(screen.getByText('Retained replacement')).toBeInTheDocument();
+
+    await user.click(githubNewest as HTMLElement);
+    expect(githubNewest).not.toBeChecked();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Remove selected/i })).toBeEnabled();
+  });
+
+  it('stages every removable family copy against one retained version', async () => {
+    registerInvokeHandler('preview_library_version_cleanup', preview);
+    renderModal();
+    const user = userEvent.setup();
+
+    await screen.findByText('[BASE] RitsuLib');
+    await chooseOption(
+      user,
+      /Version to keep for \[BASE\] RitsuLib/i,
+      /v0\.4\.57.*Steam Workshop.*Stored on disk/i,
+    );
+    await user.click(screen.getByRole('button', { name: /Keep only this version/i }));
+
+    expect(screen.getByRole('checkbox', { name: /Edit protected versions/i })).toBeChecked();
+    const steam = screen.getAllByRole('checkbox', { name: /RitsuLib v0\.4\.57/i })
+      .find((checkbox) => checkbox.closest('.gf-version-cleanup-candidate')?.textContent?.includes('Steam'));
+    const github = screen.getAllByRole('checkbox', { name: /RitsuLib v0\.4\.57/i })
+      .find((checkbox) => checkbox.closest('.gf-version-cleanup-candidate')?.textContent?.includes('GitHub'));
+    expect(steam).not.toBeChecked();
+    expect(github).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.56/i })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.54/i })).toBeChecked();
+    expect(screen.getByRole('button', { name: /Remove selected/i })).toBeEnabled();
+  });
+
   it('never enables Steam-managed versions for local removal', async () => {
     registerInvokeHandler('preview_library_version_cleanup', preview);
     renderModal();
     const user = userEvent.setup();
 
     await screen.findByText('[BASE] RitsuLib');
-    await user.click(screen.getByRole('checkbox', { name: /Show protected versions/i }));
+    await user.click(screen.getByRole('checkbox', { name: /Edit protected versions/i }));
     const steam = screen.getAllByRole('checkbox', { name: /RitsuLib v0\.4\.57/i })
       .find((checkbox) => checkbox.closest('.gf-version-cleanup-candidate')?.textContent?.includes('Steam'));
     expect(steam).toBeDisabled();
@@ -239,12 +293,11 @@ describe('<VersionCleanupModal>', () => {
   it('explains protected versions and marks each protected row with a lock badge', async () => {
     registerInvokeHandler('preview_library_version_cleanup', preview);
     renderModal();
-    const user = userEvent.setup();
 
     await screen.findByText('[BASE] RitsuLib');
     const help = screen.getByRole('img', { name: /About protected versions/i });
-    expect(help).toHaveAttribute('title', expect.stringContaining('used by a modpack'));
-    await user.click(screen.getByRole('checkbox', { name: /Show protected versions/i }));
+    expect(help).toHaveAttribute('title', expect.stringContaining('always shown and marked'));
+    expect(screen.getByRole('checkbox', { name: /Edit protected versions/i })).not.toBeChecked();
 
     const active = screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.56/i });
     const activeBadge = within(active.closest('.gf-version-cleanup-candidate') as HTMLElement)
@@ -335,7 +388,7 @@ describe('<VersionCleanupModal>', () => {
     const user = userEvent.setup();
 
     await screen.findByText('[BASE] RitsuLib');
-    const advanced = screen.getByRole('checkbox', { name: /Show protected versions/i });
+    const advanced = screen.getByRole('checkbox', { name: /Edit protected versions/i });
     await user.click(advanced);
     const active = screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.56/i });
     await user.click(active);

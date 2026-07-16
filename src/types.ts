@@ -215,7 +215,7 @@ export interface ManualModVersionRemovalResult {
 
 export type LibraryVersionCleanupReason =
   | 'recommended_old'
-  | 'newest_provider_copy'
+  | 'newest_copy'
   | 'active'
   | 'pinned'
   | 'profile_used'

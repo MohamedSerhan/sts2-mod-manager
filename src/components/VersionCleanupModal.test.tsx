@@ -42,7 +42,7 @@ function preview(): LibraryVersionCleanupPreview {
   });
   return {
     recommended_count: 1,
-    protected_count: 3,
+    protected_count: 2,
     families: [{
       family_key: 'mod_id:ritsulib',
       display_name: '[BASE] RitsuLib',
@@ -51,9 +51,9 @@ function preview(): LibraryVersionCleanupPreview {
           option: newest,
           provider: 'github',
           recommended: false,
-          protected: true,
-          reasons: ['newest_provider_copy'],
-          replacement_candidates: [active, old],
+          protected: false,
+          reasons: ['newest_copy'],
+          replacement_candidates: [],
         },
         {
           option: active,
@@ -98,7 +98,7 @@ function pagedPreview(count = 25): LibraryVersionCleanupPreview {
           provider: index === count - 1 ? 'nexus' : 'local',
           recommended: false,
           protected: true,
-          reasons: ['newest_provider_copy'],
+          reasons: ['profile_used'],
           replacement_candidates: [],
         }],
       };
@@ -131,11 +131,17 @@ describe('<VersionCleanupModal>', () => {
     const user = userEvent.setup();
 
     expect(await screen.findByText('[BASE] RitsuLib')).toBeInTheDocument();
+    expect(screen.getByText(/keeps its saved GitHub or Nexus source link/i)).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.54/i })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.56/i })).toBeDisabled();
-    for (const protectedCheckbox of screen.getAllByRole('checkbox', { name: /RitsuLib v0\.4\.57/i })) {
-      expect(protectedCheckbox).toBeDisabled();
-    }
+    const newestCheckboxes = screen.getAllByRole('checkbox', { name: /RitsuLib v0\.4\.57/i });
+    const githubNewest = newestCheckboxes.find((checkbox) =>
+      checkbox.closest('.gf-version-cleanup-candidate')?.textContent?.includes('GitHub'));
+    const steamNewest = newestCheckboxes.find((checkbox) =>
+      checkbox.closest('.gf-version-cleanup-candidate')?.textContent?.includes('Steam'));
+    expect(githubNewest).not.toBeDisabled();
+    expect(githubNewest).not.toBeChecked();
+    expect(steamNewest).toBeDisabled();
 
     await user.click(screen.getByRole('button', { name: /Remove selected/i }));
     await user.click(await screen.findByRole('button', { name: /Remove versions/i }));
@@ -147,6 +153,36 @@ describe('<VersionCleanupModal>', () => {
       });
     });
     expect(onComplete).toHaveBeenCalled();
+  });
+
+  it('keeps the cleanup result visible when removing the last reviewable family', async () => {
+    let previewCalls = 0;
+    registerInvokeHandler('preview_library_version_cleanup', () => {
+      previewCalls += 1;
+      return previewCalls === 1 ? preview() : {
+        recommended_count: 0,
+        protected_count: 0,
+        families: [],
+      };
+    });
+    registerInvokeHandler('execute_library_version_cleanup', () => [{
+      mod_version_id: 'ritsu-454',
+      success: true,
+      switched_active: false,
+      remapped_profiles: 0,
+      deleted_disk: false,
+      deleted_cache: true,
+      removed_record: true,
+    }]);
+    renderModal();
+    const user = userEvent.setup();
+
+    await screen.findByText('[BASE] RitsuLib');
+    await user.click(screen.getByRole('button', { name: /Remove selected/i }));
+    await user.click(await screen.findByRole('button', { name: /Remove versions/i }));
+
+    expect(await screen.findByText(/Removed: 1.*Failed: 0/i)).toBeInTheDocument();
+    expect(screen.getByText(/No mod currently has multiple versions to review/i)).toBeInTheDocument();
   });
 
   it('requires an explicit retained replacement for protected versions', async () => {
@@ -200,6 +236,28 @@ describe('<VersionCleanupModal>', () => {
     expect(steam).toBeDisabled();
   });
 
+  it('explains protected versions and marks each protected row with a lock badge', async () => {
+    registerInvokeHandler('preview_library_version_cleanup', preview);
+    renderModal();
+    const user = userEvent.setup();
+
+    await screen.findByText('[BASE] RitsuLib');
+    const help = screen.getByRole('img', { name: /About protected versions/i });
+    expect(help).toHaveAttribute('title', expect.stringContaining('used by a modpack'));
+    await user.click(screen.getByRole('checkbox', { name: /Show protected versions/i }));
+
+    const active = screen.getByRole('checkbox', { name: /RitsuLib v0\.4\.56/i });
+    const activeBadge = within(active.closest('.gf-version-cleanup-candidate') as HTMLElement)
+      .getByText('Protected');
+    expect(activeBadge).toHaveAttribute('title', expect.stringContaining('Used by a modpack'));
+    const steam = screen.getAllByRole('checkbox', { name: /RitsuLib v0\.4\.57/i })
+      .find((checkbox) => checkbox.closest('.gf-version-cleanup-candidate')?.textContent?.includes('Steam'));
+    const steamBadge = within(steam?.closest('.gf-version-cleanup-candidate') as HTMLElement)
+      .getByText('Protected');
+    expect(steamBadge).toHaveAttribute('title', expect.stringContaining('Managed by Steam'));
+    expect(screen.getAllByText('Protected')).toHaveLength(2);
+  });
+
   it('retries a failed preview and renders the empty state', async () => {
     let attempts = 0;
     registerInvokeHandler('preview_library_version_cleanup', () => {
@@ -223,6 +281,7 @@ describe('<VersionCleanupModal>', () => {
     const user = userEvent.setup();
 
     expect(await screen.findByText('Family 20')).toBeInTheDocument();
+    expect(screen.getByText('Family 20').closest('details')).toHaveAttribute('open');
     expect(screen.queryByText('Family 25')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Show more.*5/i }));
     expect(screen.getByText('Family 25')).toBeInTheDocument();

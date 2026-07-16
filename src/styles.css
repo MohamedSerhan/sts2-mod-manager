@@ -1543,6 +1543,32 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
+.gf-version-cleanup-help {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink-dim);
+  cursor: help;
+}
+.gf-version-cleanup-help:hover {
+  color: var(--ink);
+}
+.gf-version-cleanup-source-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, var(--indigo-line) 75%, transparent);
+  border-radius: 7px;
+  color: var(--ink-mute);
+  background: color-mix(in oklab, var(--indigo-panel-2) 82%, transparent);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.gf-version-cleanup-source-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--gf-text);
+}
 .gf-version-cleanup-list {
   display: flex;
   flex-direction: column;
@@ -1581,7 +1607,7 @@ body {
 }
 .gf-version-cleanup-candidate {
   display: grid;
-  grid-template-columns: minmax(118px, auto) minmax(90px, auto) minmax(90px, auto) minmax(160px, 1fr);
+  grid-template-columns: minmax(170px, auto) minmax(90px, auto) minmax(90px, auto) minmax(160px, 1fr);
   gap: 8px 12px;
   align-items: center;
   min-width: 0;
@@ -1595,9 +1621,13 @@ body {
 .gf-version-cleanup-candidate.is-selected {
   background: var(--gf-tint);
 }
+.gf-version-cleanup-candidate.is-protected {
+  background: color-mix(in oklab, var(--warn) 7%, transparent);
+}
 .gf-version-cleanup-choice {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
@@ -1606,6 +1636,23 @@ body {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+.gf-version-cleanup-protected {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in oklab, var(--warn) 42%, transparent);
+  border-radius: 999px;
+  color: var(--amber-ink);
+  background: color-mix(in oklab, var(--warn) 11%, transparent);
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: help;
 }
 .gf-version-cleanup-provider,
 .gf-version-cleanup-state {
@@ -4610,7 +4657,7 @@ body {
 
 @media (max-width: 720px) {
   .gf-version-cleanup-candidate {
-    grid-template-columns: minmax(112px, auto) minmax(0, 1fr);
+    grid-template-columns: minmax(160px, auto) minmax(0, 1fr);
   }
   .gf-version-cleanup-state,
   .gf-version-cleanup-reason {

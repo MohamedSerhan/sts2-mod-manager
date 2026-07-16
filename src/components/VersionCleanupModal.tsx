@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Search, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleHelp, Info, LockKeyhole, Search, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type {
   LibraryVersionCleanupCandidate,
@@ -243,12 +243,24 @@ export function VersionCleanupModal({
                     onChange={(event) => setAdvanced(event.target.checked)}
                   />
                   <span>{t('mods.versionCleanup.showAdvanced')}</span>
+                  <span
+                    className="gf-version-cleanup-help"
+                    role="img"
+                    aria-label={t('mods.versionCleanup.protectedHelpLabel')}
+                    title={t('mods.versionCleanup.protectedHelp')}
+                  >
+                    <CircleHelp size={13} aria-hidden />
+                  </span>
                 </label>
+              </div>
+              <div className="gf-version-cleanup-source-note">
+                <Info size={14} aria-hidden />
+                <span>{t('mods.versionCleanup.sourceRetentionNote')}</span>
               </div>
 
               <div className="gf-version-cleanup-list">
-                {filteredFamilies.slice(0, visibleLimit).map((family, familyIndex) => (
-                  <details key={family.family_key} className="gf-version-cleanup-family" open={familyIndex < 5}>
+                {filteredFamilies.slice(0, visibleLimit).map((family) => (
+                  <details key={family.family_key} className="gf-version-cleanup-family" open>
                     <summary>
                       <strong>{family.display_name}</strong>
                       <span>{t('mods.versionCleanup.versionCount', { count: family.candidates.length })}</span>
@@ -262,6 +274,12 @@ export function VersionCleanupModal({
                           && candidate.replacement_candidates.length > 0;
                         const disabled = candidate.protected && (!showAdvanced || !canAdvancedRemove);
                         const checked = selected.has(id);
+                        const reasonText = candidate.reasons
+                          .map((reason) => t(`mods.versionCleanup.reason.${reason}`))
+                          .join(t('mods.versionCleanup.reasonJoiner'));
+                        const protectedTitle = t('mods.versionCleanup.protectedBadgeTitle', {
+                          reasons: reasonText,
+                        });
                         const replacementOptions = candidate.replacement_candidates
                           .filter((replacement) => !selected.has(replacement.mod_version_id))
                           .map((replacement) => ({
@@ -272,7 +290,7 @@ export function VersionCleanupModal({
                             }),
                           }));
                         return (
-                          <div key={id} className={`gf-version-cleanup-candidate${checked ? ' is-selected' : ''}`}>
+                          <div key={id} className={`gf-version-cleanup-candidate${checked ? ' is-selected' : ''}${showAdvanced && candidate.protected ? ' is-protected' : ''}`}>
                             <label className="gf-version-cleanup-choice">
                               <input
                                 type="checkbox"
@@ -285,6 +303,12 @@ export function VersionCleanupModal({
                                 })}
                               />
                               <span className="gf-version-cleanup-version">v{cleanVersion(candidate.option.version)}</span>
+                              {showAdvanced && candidate.protected && (
+                                <span className="gf-version-cleanup-protected" title={protectedTitle}>
+                                  <LockKeyhole size={11} aria-hidden />
+                                  {t('mods.versionCleanup.protectedBadge')}
+                                </span>
+                              )}
                             </label>
                             <span className="gf-version-cleanup-provider">
                               {t(`mods.versionCleanup.provider.${candidate.provider}`)}
@@ -293,9 +317,7 @@ export function VersionCleanupModal({
                               {t(`mods.versionCleanup.state.${candidateState(candidate)}`)}
                             </span>
                             <span className="gf-version-cleanup-reason">
-                              {candidate.reasons
-                                .map((reason) => t(`mods.versionCleanup.reason.${reason}`))
-                                .join(t('mods.versionCleanup.reasonJoiner'))}
+                              {reasonText}
                             </span>
                             {checked && candidate.protected && (
                               <label className="gf-version-cleanup-replacement">
@@ -335,22 +357,22 @@ export function VersionCleanupModal({
                   <AlertTriangle size={14} /> {t('mods.versionCleanup.replacementRequired')}
                 </div>
               )}
-              {results.length > 0 && (
-                <div className="gf-version-cleanup-results" role="status">
-                  <strong>{t('mods.versionCleanup.resultsTitle')}</strong>
-                  <span>{t('mods.versionCleanup.resultsSummary', {
-                    removed: results.filter((result) => result.success).length,
-                    failed: results.filter((result) => !result.success).length,
-                  })}</span>
-                  {results.filter((result) => !result.success).map((result) => (
-                    <span key={result.mod_version_id} className="gf-version-cleanup-result-error">
-                      {result.error}
-                    </span>
-                  ))}
-                </div>
-              )}
             </>
           ) : null}
+          {results.length > 0 && (
+            <div className="gf-version-cleanup-results" role="status">
+              <strong>{t('mods.versionCleanup.resultsTitle')}</strong>
+              <span>{t('mods.versionCleanup.resultsSummary', {
+                removed: results.filter((result) => result.success).length,
+                failed: results.filter((result) => !result.success).length,
+              })}</span>
+              {results.filter((result) => !result.success).map((result) => (
+                <span key={result.mod_version_id} className="gf-version-cleanup-result-error">
+                  {result.error}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="gf-modal-foot gf-version-cleanup-foot">

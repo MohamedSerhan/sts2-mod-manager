@@ -137,7 +137,7 @@ pub struct LocalModVersionDeleteSummary {
 #[serde(rename_all = "snake_case")]
 pub enum LibraryVersionCleanupReason {
     RecommendedOld,
-    NewestProviderCopy,
+    NewestCopy,
     Active,
     Pinned,
     ProfileUsed,
@@ -1503,12 +1503,7 @@ pub fn preview_library_version_cleanup(
         }
         options.sort_by(|left, right| cleanup_option_cmp(right, left));
 
-        let mut newest_by_provider: HashMap<&'static str, String> = HashMap::new();
-        for option in &options {
-            newest_by_provider
-                .entry(cleanup_provider_key(option))
-                .or_insert_with(|| option.mod_version_id.clone());
-        }
+        let newest_copy_id = options.first().map(|option| option.mod_version_id.as_str());
 
         let display_name = options
             .iter()
@@ -1524,26 +1519,21 @@ pub fn preview_library_version_cleanup(
         let mut candidates = Vec::with_capacity(options.len());
         for option in &options {
             let provider = cleanup_provider_key(option);
-            let newest_provider_copy = newest_by_provider
-                .get(provider)
-                .is_some_and(|id| id == &option.mod_version_id);
+            let newest_copy = newest_copy_id == Some(option.mod_version_id.as_str());
             let steam_managed = provider == "steam" || option.workshop_item_id.is_some();
             let profile_used = !option.used_by_profiles.is_empty();
-            let protected = newest_provider_copy
-                || option.installed_enabled
-                || option.pinned
-                || profile_used
-                || steam_managed;
-            let recommended = !protected;
+            let protected =
+                option.installed_enabled || option.pinned || profile_used || steam_managed;
+            let recommended = !protected && !newest_copy;
             let mut reasons = Vec::new();
             if recommended {
                 reasons.push(LibraryVersionCleanupReason::RecommendedOld);
                 preview.recommended_count += 1;
-            } else {
+            } else if newest_copy {
+                reasons.push(LibraryVersionCleanupReason::NewestCopy);
+            }
+            if protected {
                 preview.protected_count += 1;
-                if newest_provider_copy {
-                    reasons.push(LibraryVersionCleanupReason::NewestProviderCopy);
-                }
                 if option.installed_enabled {
                     reasons.push(LibraryVersionCleanupReason::Active);
                 }
@@ -2102,6 +2092,23 @@ pub(crate) fn remove_local_mod_version_with_policy(
         }
     }
 
+    // Source links live in mod_sources.json, independently from the version
+    // record and local files. When the removed copy owns the folder-keyed
+    // source entry, carry that metadata to a surviving copy in the same family
+    // before deleting anything. This keeps GitHub/Nexus update checks available
+    // even when the last local copy from that provider is cleaned up.
+    if let Some(survivor) = installed_mods.iter().find(|info| {
+        family_key_for_mod(info) == family && !mod_info_matches_record_identity(info, &record)
+    }) {
+        crate::mod_sources::carry_source_entry(
+            record.folder_name.as_deref(),
+            &record.name,
+            survivor.folder_name.as_deref(),
+            &survivor.name,
+            config_path,
+        );
+    }
+
     let mut summary = LocalModVersionDeleteSummary::default();
     for info in installed_matches {
         let base = if info.enabled {
@@ -2608,7 +2615,7 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_preview_recommends_only_unused_older_provider_versions() {
+    fn cleanup_preview_recommends_only_unused_older_versions() {
         let config = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
         let old = cleanup_record(
@@ -2667,7 +2674,7 @@ mod tests {
                 candidate.protected
                     && candidate
                         .reasons
-                        .contains(&LibraryVersionCleanupReason::NewestProviderCopy)
+                        .contains(&LibraryVersionCleanupReason::NewestCopy)
             }));
         assert!(candidates
             .iter()
@@ -2688,6 +2695,62 @@ mod tests {
         assert!(steam_wire["replacement_candidates"]
             .as_array()
             .is_some_and(Vec::is_empty));
+    }
+
+    #[test]
+    fn cleanup_preview_recommends_older_nexus_copy_when_newer_steam_exists() {
+        let config = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let nexus_url = "https://www.nexusmods.com/slaythespire2/mods/103";
+        let nexus = cleanup_record("baselib-nexus", "3.3.1", nexus_url, ModInstallSource::Local);
+        let steam = cleanup_record(
+            "baselib-steam",
+            "3.3.5",
+            &crate::mods::workshop_url("123456"),
+            ModInstallSource::SteamWorkshop,
+        );
+        save(
+            &ModVersionsDb {
+                records: [nexus.clone(), steam.clone()]
+                    .into_iter()
+                    .map(|record| (record.id.clone(), record))
+                    .collect(),
+                ..ModVersionsDb::default()
+            },
+            config.path(),
+        )
+        .unwrap();
+        cache_cleanup_record(cache.path(), &nexus.id);
+
+        let mut workshop = workshop_mod_info("123456", "3.3.5");
+        workshop.name = "Test".into();
+        workshop.mod_id = Some("mod-id".into());
+        workshop.mod_version_id = Some(steam.id.clone());
+        let preview =
+            preview_library_version_cleanup(&[workshop], &[], config.path(), cache.path());
+
+        assert_eq!(preview.recommended_count, 1);
+        assert_eq!(preview.protected_count, 1);
+        let candidates = &preview.families[0].candidates;
+        assert!(candidates
+            .iter()
+            .find(|candidate| candidate.option.mod_version_id == nexus.id)
+            .is_some_and(|candidate| {
+                candidate.recommended
+                    && !candidate.protected
+                    && candidate
+                        .reasons
+                        .contains(&LibraryVersionCleanupReason::RecommendedOld)
+            }));
+        assert!(candidates
+            .iter()
+            .find(|candidate| candidate.option.mod_version_id == steam.id)
+            .is_some_and(|candidate| {
+                candidate.protected
+                    && candidate
+                        .reasons
+                        .contains(&LibraryVersionCleanupReason::SteamManaged)
+            }));
     }
 
     #[test]
@@ -3535,6 +3598,66 @@ mod tests {
 
         assert!(!stale_zip.exists());
         assert!(record_by_id(config.path(), &stale_id).is_none());
+    }
+
+    #[test]
+    fn remove_local_mod_version_carries_saved_source_to_surviving_family_copy() {
+        let base = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let disabled = tempfile::tempdir().unwrap();
+        let nexus_url = "https://www.nexusmods.com/slaythespire2/mods/103";
+
+        write_manifest(base.path(), "3.3.1");
+        let mut nexus = mod_info("Test", "3.3.1", Some("nexus-copy"));
+        nexus.mod_id = Some("mod-id".into());
+        nexus.source = Some(nexus_url.into());
+        nexus.nexus_url = Some(nexus_url.into());
+        let nexus_id = ensure_mod_info_id(&mut nexus, config.path()).unwrap();
+        cache_mod_version_by_id(&mut nexus, base.path(), cache.path(), config.path()).unwrap();
+        crate::mod_sources::save_sources(
+            &crate::mod_sources::ModSourcesDb {
+                mods: HashMap::from([(
+                    "Mod".into(),
+                    crate::mod_sources::ModSourceEntry {
+                        nexus_url: Some(nexus_url.into()),
+                        nexus_game_domain: Some("slaythespire2".into()),
+                        nexus_mod_id: Some(103),
+                        ..crate::mod_sources::ModSourceEntry::default()
+                    },
+                )]),
+            },
+            config.path(),
+        )
+        .unwrap();
+
+        let mut workshop = workshop_mod_info("123456", "3.3.5");
+        workshop.name = "Test".into();
+        workshop.mod_id = Some("mod-id".into());
+        remove_local_mod_version(
+            config.path(),
+            cache.path(),
+            disabled.path(),
+            &[workshop.clone()],
+            &[],
+            &nexus_id,
+        )
+        .unwrap();
+
+        assert!(record_by_id(config.path(), &nexus_id).is_none());
+        let sources = crate::mod_sources::load_sources(config.path());
+        assert_eq!(
+            sources
+                .mods
+                .get("123456")
+                .and_then(|entry| entry.nexus_url.as_deref()),
+            Some(nexus_url),
+        );
+        crate::mod_sources::enrich_mods_with_sources(
+            std::slice::from_mut(&mut workshop),
+            config.path(),
+        );
+        assert_eq!(workshop.nexus_url.as_deref(), Some(nexus_url));
     }
 
     #[test]

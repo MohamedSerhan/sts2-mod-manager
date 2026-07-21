@@ -415,6 +415,7 @@ pub(crate) fn select_profile_mod_version_from_paths(
     config_path: &Path,
     cache_path: &Path,
     apply_to_disk: bool,
+    target_enabled: Option<bool>,
 ) -> Result<super::Profile> {
     if profile_is_edit_locked(profile_name, profiles_path, config_path) {
         return Err(AppError::Other(format!(
@@ -456,7 +457,10 @@ pub(crate) fn select_profile_mod_version_from_paths(
                 ))
             })?;
 
-    let enabled = profile.mods[index].enabled;
+    // Ordinary version selection preserves the saved row's state. An
+    // archived-row toggle can explicitly request an enabled restore so the
+    // artifact lands in mods/ rather than merely being unpacked to storage.
+    let enabled = target_enabled.unwrap_or(profile.mods[index].enabled);
     let selected_installed = installed_mods.iter().find(|m| {
         installed_mod_matches_version_target_with_version_db(m, selected_target, &version_db)
     });
@@ -1098,7 +1102,7 @@ pub struct SetProfileModsEnabledResult {
     pub enabled: bool,
     /// Display names of mods actually moved into the requested state.
     pub toggled: Vec<String>,
-    /// Profile mods with no matching installed mod (can't be toggled).
+    /// Profile mods with no matching installed or cached artifact.
     pub missing: Vec<String>,
     /// Matched mods whose move failed.
     pub failed: Vec<String>,
@@ -1121,25 +1125,97 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
     disabled_path: &Path,
     profiles_path: &Path,
     config_path: &Path,
+    cache_path: &Path,
 ) -> Result<SetProfileModsEnabledResult> {
     let mut profile = load_profile(profile_name, profiles_path)?;
     let mut installed =
         merge_active_disabled_mods(scan_mods(mods_path), scan_disabled_mods(disabled_path));
     crate::mod_versions::enrich_mods_with_versions(&mut installed, config_path);
+    let version_db = crate::mod_versions::load(config_path);
 
     let mut toggled = Vec::new();
     let mut missing = Vec::new();
     let mut failed = Vec::new();
+    let mut profile_changed = false;
 
     for index in 0..profile.mods.len() {
         let pm = profile.mods[index].clone();
         match installed
             .iter()
-            .find(|m| profile_mod_matches_installed_with_registry(&pm, m, config_path))
+            .position(|m| profile_mod_matches_installed_with_registry(&pm, m, config_path))
         {
-            None => missing.push(pm.name.clone()),
-            Some(inst) => {
+            None if !enabled => {
+                // A diskless/cached-only row is already inactive. Disable all
+                // still needs to converge the saved modpack state, but it is
+                // not an error and there is nothing to move on disk.
+                if profile.mods[index].enabled {
+                    profile.mods[index].enabled = false;
+                    profile_changed = true;
+                }
+            }
+            None => {
+                // The membership grid can represent an exact profile version
+                // that exists only in Versions. Restore that cached artifact
+                // before declaring it missing so Enable all works on the same
+                // rows the active modpack view displays.
+                let cached_record =
+                    crate::mod_versions::record_for_profile_mod_in_db(&pm, &version_db).filter(
+                        |record| {
+                            crate::mod_versions::cached_record_path(cache_path, record).is_some()
+                        },
+                    );
+                let Some(record) = cached_record else {
+                    missing.push(pm.name.clone());
+                    continue;
+                };
+                match select_local_mod_version_on_disk(
+                    &installed,
+                    &pm.name,
+                    pm.mod_id.as_deref(),
+                    None,
+                    Some(record.id.as_str()),
+                    Some(record.install_source),
+                    true,
+                    mods_path,
+                    disabled_path,
+                    config_path,
+                    cache_path,
+                ) {
+                    Ok(restored) => {
+                        profile.mods[index].enabled = true;
+                        profile_changed = true;
+                        toggled.push(
+                            restored
+                                .display_name
+                                .clone()
+                                .unwrap_or_else(|| restored.name.clone()),
+                        );
+                        // Version restore may cache/delete a sibling artifact
+                        // and move runtime-ID conflicts. Keep subsequent rows
+                        // aligned with the new on-disk state.
+                        installed = merge_active_disabled_mods(
+                            scan_mods(mods_path),
+                            scan_disabled_mods(disabled_path),
+                        );
+                        crate::mod_versions::enrich_mods_with_versions(&mut installed, config_path);
+                    }
+                    Err(e) => {
+                        log::error!(
+                            "set_profile_mods_enabled: failed to restore cached '{}': {}",
+                            pm.name,
+                            e
+                        );
+                        failed.push(pm.name.clone());
+                    }
+                }
+            }
+            Some(installed_index) => {
+                let inst = installed[installed_index].clone();
                 if inst.enabled == enabled {
+                    if profile.mods[index].enabled != enabled {
+                        profile.mods[index].enabled = enabled;
+                        profile_changed = true;
+                    }
                     continue; // already in the requested state
                 }
                 // `inst.enabled` tells us where it currently lives; move it the
@@ -1154,9 +1230,11 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
                     .display_name
                     .clone()
                     .unwrap_or_else(|| inst.name.clone());
-                match move_mod_by_info(inst, src, dest) {
+                match move_mod_by_info(&inst, src, dest) {
                     Ok(()) => {
                         profile.mods[index].enabled = enabled;
+                        profile_changed = true;
+                        installed[installed_index].enabled = enabled;
                         toggled.push(label);
                     }
                     Err(e) => {
@@ -1172,10 +1250,20 @@ pub(crate) fn set_profile_mods_enabled_from_paths(
         }
     }
 
-    if !toggled.is_empty() {
+    if profile_changed {
         profile.updated_at = chrono::Utc::now();
         save_profile(&profile, profiles_path)?;
     }
+
+    // A profile can contain legacy duplicate entries for the same artifact.
+    // Keep the bulk-action summary useful instead of repeating names in its
+    // toast while preserving the first occurrence order.
+    let mut seen = HashSet::new();
+    toggled.retain(|name| seen.insert(name.to_lowercase()));
+    seen.clear();
+    missing.retain(|name| seen.insert(name.to_lowercase()));
+    seen.clear();
+    failed.retain(|name| seen.insert(name.to_lowercase()));
 
     Ok(SetProfileModsEnabledResult {
         enabled,
@@ -1953,6 +2041,7 @@ mod profile_membership_tests {
             &disabled_path,
             &profiles_path,
             config_tmp.path(),
+            &config_tmp.path().join("cache"),
         )
         .unwrap();
 
@@ -1991,6 +2080,7 @@ mod profile_membership_tests {
             &disabled_path,
             &profiles_path,
             config_tmp.path(),
+            &config_tmp.path().join("cache"),
         )
         .unwrap();
 
@@ -2024,6 +2114,7 @@ mod profile_membership_tests {
             &disabled_path,
             &profiles_path,
             config_tmp.path(),
+            &config_tmp.path().join("cache"),
         )
         .unwrap();
 
@@ -2031,6 +2122,97 @@ mod profile_membership_tests {
         assert!(disabled_path.join("Here").join("Here.dll").exists());
         let saved = load_profile("Pack", &profiles_path).unwrap();
         assert!(!saved.mods[0].enabled);
+    }
+
+    #[test]
+    fn set_profile_mods_enabled_restores_cached_profile_version() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        write_mod(&mods_path, "BaseLib", "BaseLib", "3.2.1");
+        let mut cached = scan_mods(&mods_path).into_iter().next().unwrap();
+        let cached_id =
+            crate::mod_versions::ensure_mod_info_id(&mut cached, config_tmp.path()).unwrap();
+        assert!(crate::mod_versions::cache_mod_version_by_id(
+            &mut cached,
+            &mods_path,
+            cache_tmp.path(),
+            config_tmp.path(),
+        )
+        .is_some());
+        fs::remove_dir_all(mods_path.join("BaseLib")).unwrap();
+
+        let mut pack = empty_profile("Pack");
+        let mut archived = profile_mod_entry("BaseLib", "BaseLib", "3.2.1", false);
+        archived.mod_version_id = Some(cached_id.clone());
+        archived.mod_id = Some("BaseLib".into());
+        archived.hash = cached.hash.clone();
+        archived.files = cached.files.clone();
+        pack.mods.push(archived);
+        save_profile(&pack, &profiles_path).unwrap();
+
+        let result = set_profile_mods_enabled_from_paths(
+            "Pack",
+            true,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .unwrap();
+
+        assert_eq!(result.toggled, vec!["BaseLib".to_string()]);
+        assert!(result.missing.is_empty(), "missing={:?}", result.missing);
+        assert!(result.failed.is_empty(), "failed={:?}", result.failed);
+        assert!(mods_path.join("BaseLib").join("BaseLib.dll").exists());
+        let saved = load_profile("Pack", &profiles_path).unwrap();
+        assert!(saved.mods[0].enabled);
+        assert_eq!(
+            saved.mods[0].mod_version_id.as_deref(),
+            Some(cached_id.as_str())
+        );
+    }
+
+    #[test]
+    fn set_profile_mods_disabled_converges_diskless_profile_rows_without_missing_error() {
+        let game_tmp = tempfile::tempdir().unwrap();
+        let config_tmp = tempfile::tempdir().unwrap();
+        let cache_tmp = tempfile::tempdir().unwrap();
+        let mods_path = game_tmp.path().join("mods");
+        let disabled_path = game_tmp.path().join("mods_disabled");
+        let profiles_path = config_tmp.path().join("profiles");
+        fs::create_dir_all(&mods_path).unwrap();
+        fs::create_dir_all(&disabled_path).unwrap();
+        fs::create_dir_all(&profiles_path).unwrap();
+
+        let mut pack = empty_profile("Pack");
+        pack.mods
+            .push(profile_mod_entry("Ghost", "Ghost", "1.0.0", true));
+        save_profile(&pack, &profiles_path).unwrap();
+
+        let result = set_profile_mods_enabled_from_paths(
+            "Pack",
+            false,
+            &mods_path,
+            &disabled_path,
+            &profiles_path,
+            config_tmp.path(),
+            cache_tmp.path(),
+        )
+        .unwrap();
+
+        assert!(result.toggled.is_empty());
+        assert!(result.missing.is_empty());
+        assert!(result.failed.is_empty());
+        assert!(!load_profile("Pack", &profiles_path).unwrap().mods[0].enabled);
     }
 
     #[test]
@@ -2648,6 +2830,7 @@ mod profile_membership_tests {
             config_tmp.path(),
             cache_tmp.path(),
             false,
+            None,
         )
         .unwrap();
 

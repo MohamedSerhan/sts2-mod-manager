@@ -122,6 +122,44 @@ function mergeAuditResults(
   return merged;
 }
 
+function normalizedIdentity(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLocaleLowerCase();
+  return normalized || null;
+}
+
+/** Audit results are session-cached, while the Library can change after a
+ * delete or an external filesystem refresh. Keep strong artifact/folder rows
+ * only while that installed identity still exists; use names solely for
+ * legacy audit payloads that do not carry a strong identity. */
+function pruneAuditResultsForInstalledMods(
+  audit: ModAuditEntry[] | null,
+  installed: ModInfo[],
+): ModAuditEntry[] | null {
+  if (!audit) return audit;
+
+  const installedStrongKeys = new Set<string>();
+  const installedNames = new Set<string>();
+  for (const mod of installed) {
+    for (const value of [mod.mod_version_id, mod.folder_name]) {
+      const key = normalizedIdentity(value);
+      if (key) installedStrongKeys.add(key);
+    }
+    const name = normalizedIdentity(mod.name);
+    if (name) installedNames.add(name);
+  }
+
+  return audit.filter((entry) => {
+    const strongKeys = [entry.mod_version_id, entry.folder_name]
+      .map(normalizedIdentity)
+      .filter((key): key is string => Boolean(key));
+    if (strongKeys.length > 0) {
+      return strongKeys.some((key) => installedStrongKeys.has(key));
+    }
+    const name = normalizedIdentity(entry.mod_name);
+    return Boolean(name && installedNames.has(name));
+  });
+}
+
 /** Failsafe — if the watcher never fires (user closed the browser without
  *  downloading, Downloads folder isn't being watched, etc.), drop the
  *  sticky toast after this long so it doesn't loiter forever. */
@@ -247,6 +285,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const installed = await getInstalledMods();
       setMods(installed);
+      setAuditResults((previous) => pruneAuditResultsForInstalledMods(previous, installed));
     } catch (e) {
       console.error('Failed to get mods:', e);
     }

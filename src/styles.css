@@ -3539,8 +3539,23 @@ body {
     white-space: normal;
   }
 }
-.gf-update-plan { width: min(680px, calc(100vw - 32px)); }
-.gf-update-plan-body { display: flex; flex-direction: column; gap: 10px; }
+.gf-update-plan {
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(900px, 90vh);
+  min-height: 0;
+  overflow: hidden;
+}
+.gf-update-plan > .gf-modal-head,
+.gf-update-plan > .gf-update-plan-foot { flex: 0 0 auto; }
+.gf-update-plan-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .gf-update-plan-select-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .gf-update-plan-list { display: flex; flex-direction: column; gap: 7px; }
 .gf-update-plan-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--indigo-line); border-radius: 7px; }

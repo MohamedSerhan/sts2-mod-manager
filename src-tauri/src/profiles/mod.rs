@@ -1066,6 +1066,7 @@ pub fn select_profile_mod_version(
     selected_workshop_item_id: Option<String>,
     selected_workshop_url: Option<String>,
     apply_to_disk: Option<bool>,
+    target_enabled: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<Profile, String> {
     if apply_to_disk.unwrap_or(false) {
@@ -1096,6 +1097,7 @@ pub fn select_profile_mod_version(
         &s.config_path,
         &s.cache_path,
         apply_to_disk.unwrap_or(false),
+        target_enabled,
     )
     .map_err(|e| e.to_string())
 }
@@ -1156,7 +1158,7 @@ pub fn set_profile_mods_enabled(
     state: tauri::State<'_, AppState>,
 ) -> std::result::Result<SetProfileModsEnabledResult, String> {
     crate::game::ensure_game_not_running()?;
-    let (mods_path, disabled_path, profiles_path, config_path) = {
+    let (mods_path, disabled_path, profiles_path, config_path, cache_path) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         (
             s.mods_path.as_ref().ok_or("Game path not set")?.clone(),
@@ -1166,6 +1168,7 @@ pub fn set_profile_mods_enabled(
                 .clone(),
             s.profiles_path.clone(),
             s.config_path.clone(),
+            s.cache_path.clone(),
         )
     };
     set_profile_mods_enabled_from_paths(
@@ -1175,6 +1178,7 @@ pub fn set_profile_mods_enabled(
         &disabled_path,
         &profiles_path,
         &config_path,
+        &cache_path,
     )
     .map_err(|e| e.to_string())
 }

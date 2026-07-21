@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AllProviders } from '../__test__/providers';
-import type { ModAuditEntry } from '../types';
+import type { ModAuditEntry, UpdatePlanItem } from '../types';
 import type { ModLibrary } from '../hooks/useModLibrary';
 import { ModLibraryToolbar } from './ModLibraryToolbar';
 
@@ -45,14 +45,14 @@ describe('<ModLibraryToolbar>', () => {
     // own tiny useState-backed pair so the toolbar's Review click can
     // actually toggle the sheet open in this unit-test seam.
     function Harness() {
-      const [planSheetOpen, setPlanSheetOpen] = useState(false);
+      const [planSheetPlans, setPlanSheetPlans] = useState<UpdatePlanItem[] | null>(null);
       const lib = {
         auditResults, auditing: false, updatingAll: false, refreshing: false,
         updateAllGithub: vi.fn(), handleRefresh: vi.fn(), handleCheckUpdates: vi.fn(),
         openUpdatePlanSource: vi.fn(), unfreezeUpdatePlan: vi.fn(),
-        planSheetOpen,
-        openPlanSheet: () => setPlanSheetOpen(true),
-        closePlanSheet: () => setPlanSheetOpen(false),
+        planSheetPlans,
+        openPlanSheet: (plans: UpdatePlanItem[]) => setPlanSheetPlans(plans),
+        closePlanSheet: () => setPlanSheetPlans(null),
       } as unknown as ModLibrary;
       return <ModLibraryToolbar lib={lib} />;
     }
@@ -73,7 +73,7 @@ describe('<ModLibraryToolbar>', () => {
       auditResults, auditing: false, updatingAll: false, refreshing: false,
       updateAllGithub: vi.fn(), handleRefresh: vi.fn(), handleCheckUpdates: vi.fn(),
       openUpdatePlanSource: vi.fn(), unfreezeUpdatePlan: vi.fn(),
-      planSheetOpen: false, openPlanSheet: vi.fn(), closePlanSheet: vi.fn(),
+      planSheetPlans: null, openPlanSheet: vi.fn(), closePlanSheet: vi.fn(),
     } as unknown as ModLibrary;
 
     render(<AllProviders><ModLibraryToolbar lib={lib} /></AllProviders>);

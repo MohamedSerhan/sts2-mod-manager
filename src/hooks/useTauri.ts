@@ -385,6 +385,7 @@ export async function selectProfileModVersion(
   current: ModAuditTarget,
   selected: ModAuditTarget,
   applyToDisk = false,
+  targetEnabled?: boolean,
 ): Promise<Profile> {
   return invoke('select_profile_mod_version', {
     profileId,
@@ -403,6 +404,7 @@ export async function selectProfileModVersion(
     selectedWorkshopItemId: selected.workshop_item_id ?? null,
     selectedWorkshopUrl: selected.workshop_url ?? null,
     applyToDisk,
+    ...(targetEnabled == null ? {} : { targetEnabled }),
   });
 }
 

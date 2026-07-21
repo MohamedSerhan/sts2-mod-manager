@@ -1550,6 +1550,8 @@
     "workshopManagedTitle": "Управляется Мастерской Steam. Используйте настройки/порядок загрузки STS2 или откройте страницу Мастерской; менеджер не будет перемещать или удалять файлы Steam.",
     "workshopManagedDesc": "Этими файлами управляет Steam; обновляйте, отменяйте подписку или восстанавливайте их в Мастерской Steam.",
     "duplicateSourceWarning": "Если включены и этот мод, и копия из Мастерской Steam, STS2 может предпочесть копию из локальной папки mods.",
+    "activeViaBundle": "Активно через {{bundle}}",
+    "activeViaBundleTitle": "Эта установленная копия неактивна, поскольку активный набор {{bundle}} уже содержит тот же игровой мод.",
     "modActions": "Действия с модом",
     "copyVersion": "Копировать версию (v{{version}})",
     "customizeMenu": "Настроить меню…",
@@ -1628,11 +1630,28 @@
       "upToDate": "Актуально"
     },
     "updatePlan": {
-      "title": "Просмотр доступных обновлений", "subtitle": "Выберите загрузки GitHub и проверьте обновления из других источников.",
-      "selectAll": "Выбрать все", "selectNone": "Снять выбор", "selectItem": "Выбрать {{name}}", "versionChange": "v{{current}} → v{{target}}", "openManual": "Открыть страницу загрузки", "unfreeze": "Разморозить",
-      "downloadSelected_one": "Загрузить {{count}} выбранное обновление GitHub в «Версии»", "downloadSelected_other": "Загрузить {{count}} выбранных обновлений GitHub в «Версии»",
-      "capability": { "downloadable": "Загрузка с GitHub", "manual": "Ручная загрузка", "steam-managed": "Управляется Steam", "frozen": "Исключено из-за заморозки" },
-      "result": { "updated": "Загружено в «Версии»", "stale": "Источник изменился — обновите список", "skipped": "Пропущено", "failed": "Ошибка загрузки" }
+      "title": "Просмотр доступных обновлений",
+      "subtitle": "Выберите загрузки GitHub и проверьте обновления из других источников.",
+      "selectAll": "Выбрать все",
+      "selectNone": "Снять выбор",
+      "selectItem": "Выбрать {{name}}",
+      "versionChange": "v{{current}} → v{{target}}",
+      "openManual": "Открыть страницу загрузки",
+      "unfreeze": "Разморозить",
+      "downloadSelected_one": "Загрузить {{count}} выбранное обновление GitHub в «Версии»",
+      "downloadSelected_other": "Загрузить {{count}} выбранных обновлений GitHub в «Версии»",
+      "capability": {
+        "downloadable": "Загрузка с GitHub",
+        "manual": "Ручная загрузка",
+        "steam-managed": "Управляется Steam",
+        "frozen": "Исключено из-за заморозки"
+      },
+      "result": {
+        "updated": "Загружено в «Версии»",
+        "stale": "Источник изменился — обновите список",
+        "skipped": "Пропущено",
+        "failed": "Ошибка загрузки"
+      }
     },
     "rollbackNoSource": "У «{{name}}» не привязан источник GitHub — откат загружает с GitHub. Сначала добавьте источник через «Изменить источники…».",
     "rollbackConfirmTitle": "Откатить «{{name}}»?",
@@ -1671,6 +1690,7 @@
     "versionManageHeading": "Версии {{mod}}",
     "versionManageSub": "Удаляйте старые сохраненные версии, которые больше не нужны. Активные версии и версии из сборок открывают мастер удаления.",
     "versionActiveStatus": "Активно в игре",
+    "restoreArchivedAndEnable": "Восстановить эту архивную версию и включить её в игре",
     "versionStoredOnDiskStatus": "Сохранено на диске",
     "versionSavedStatus": "Сохранено в версиях",
     "versionMissingStatus": "Не установлено на диске",

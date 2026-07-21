@@ -1550,6 +1550,8 @@
     "workshopManagedTitle": "Managed by Steam Workshop. Use STS2's settings/load order or open the Workshop page; the manager won't move or delete Steam-owned files.",
     "workshopManagedDesc": "Steam owns these files; use Steam Workshop to update, unsubscribe, or repair them.",
     "duplicateSourceWarning": "STS2 may prefer the local mods folder copy when both this mod and the Steam Workshop copy are enabled.",
+    "activeViaBundle": "Active via {{bundle}}",
+    "activeViaBundleTitle": "This installed copy is inactive because the active {{bundle}} bundle already provides the same game mod.",
     "modActions": "Mod actions",
     "copyVersion": "Copy version (v{{version}})",
     "customizeMenu": "Customize menu…",
@@ -1631,16 +1633,26 @@
     "updatePlan": {
       "title": "Review available updates",
       "subtitle": "Choose GitHub downloads and review updates managed elsewhere.",
-      "selectAll": "Select all",
-      "selectNone": "Select none",
+      "selectAll": "Select all downloads",
+      "selectNone": "Clear downloads",
       "selectItem": "Select {{name}}",
       "versionChange": "v{{current}} → v{{target}}",
       "openManual": "Open manual page",
       "unfreeze": "Unfreeze",
       "downloadSelected_one": "Download {{count}} selected GitHub update to Versions",
       "downloadSelected_other": "Download {{count}} selected GitHub updates to Versions",
-      "capability": { "downloadable": "GitHub download", "manual": "Manual download", "steam-managed": "Managed in Steam", "frozen": "Excluded while frozen" },
-      "result": { "updated": "Downloaded to Versions", "stale": "Changed upstream — preview again", "skipped": "Skipped", "failed": "Download failed" }
+      "capability": {
+        "downloadable": "GitHub download",
+        "manual": "Manual download",
+        "steam-managed": "Managed in Steam",
+        "frozen": "Excluded while frozen"
+      },
+      "result": {
+        "updated": "Downloaded to Versions",
+        "stale": "Changed upstream — preview again",
+        "skipped": "Skipped",
+        "failed": "Download failed"
+      }
     },
     "rollbackNoSource": "'{{name}}' has no GitHub source linked — rollback fetches from GitHub. Add a source via Edit sources… first.",
     "rollbackConfirmTitle": "Roll back '{{name}}'?",
@@ -1679,8 +1691,9 @@
     "versionManageHeading": "Manage versions for {{mod}}",
     "versionManageSub": "Remove older stored versions you no longer need. Active or modpack-used versions open a guided removal.",
     "versionActiveStatus": "Active in game",
-    "versionStoredOnDiskStatus": "Stored on disk",
-    "versionSavedStatus": "Saved in Versions",
+    "restoreArchivedAndEnable": "Restore this archived version and enable it in the game",
+    "versionStoredOnDiskStatus": "Installed, inactive",
+    "versionSavedStatus": "Archived in Versions",
     "versionMissingStatus": "Missing from disk",
     "versionStoredStatus": "Stored",
     "versionRemove": "Remove",
@@ -1707,8 +1720,8 @@
     "versionRemovalWizardTitle": "Remove {{mod}} v{{version}}",
     "versionRemovalWizardSub": "Choose how affected modpacks should handle this version before the files are deleted.",
     "versionRemovalImpactActive": "Active in game",
-    "versionRemovalImpactStored": "Stored on disk",
-    "versionRemovalImpactSaved": "Saved archive",
+    "versionRemovalImpactStored": "Installed, inactive",
+    "versionRemovalImpactSaved": "Archived in Versions",
     "versionRemovalImpactPacks_one": "Used by {{count}} modpack",
     "versionRemovalImpactPacks_two": "Used by {{count}} modpacks",
     "versionRemovalImpactPacks_few": "Used by {{count}} modpacks",
@@ -1765,8 +1778,8 @@
       },
       "state": {
         "active": "Active in game",
-        "stored": "Stored on disk",
-        "saved": "Saved in Versions"
+        "stored": "Installed, inactive",
+        "saved": "Archived in Versions"
       },
       "reason": {
         "recommended_old": "Older than another available version",

@@ -37,6 +37,14 @@ _Changes are tracked as fragments in [`changelog.d/`](changelog.d/) and assemble
 
 ---
 
+## [1.8.7] - 2026-07-21
+
+### Fixed
+
+- Version labels now distinguish installed inactive copies from archived versions, the Mod Library hides archived-only duplicates and explains active bundle replacements, and Steam Workshop rows show the authored mod version.
+- Modpack Enable all now restores archived versions, Disable all handles unavailable entries cleanly, and archived rows can be restored from their toggle.
+- Update review now stays scoped to the clicked mod, removes deleted entries after refresh, hides irrelevant bulk controls, and keeps every row and action reachable in long lists.
+
 ## [1.8.6] - 2026-07-16
 
 ### Added

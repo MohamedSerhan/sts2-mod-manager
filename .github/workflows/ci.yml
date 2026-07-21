@@ -199,7 +199,10 @@ jobs:
   smoke:
     needs: changes
     if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.qa == 'true' }}
-    runs-on: windows-latest
+    # Windows Server 2025's hosted WebView2 currently fails before session
+    # creation (DevToolsActivePort is never written). Keep this UI gate on the
+    # proven Windows 2022 image; the regular app-build matrix still covers latest.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

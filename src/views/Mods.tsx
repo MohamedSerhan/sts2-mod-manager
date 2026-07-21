@@ -25,6 +25,11 @@ import {
   enableAllMods,
   disableAllMods,
 } from '../hooks/useTauri';
+import type { ProfileMembershipMod } from '../types';
+
+function isInstalledLibraryRow(row: ProfileMembershipMod): boolean {
+  return row.installed !== false;
+}
 
 interface ModsViewProps {
   /** 1.7.0 T17 — legacy advanced-mode toggle was removed when the
@@ -267,6 +272,7 @@ export function ModsView({ onManageActiveModpack, onGoToSettings, initialTab = '
         modpackName={activeProfileKey}
         modpackLabel={activeProfileLabel}
         priorityTag={priorityTag}
+        filterRow={isInstalledLibraryRow}
         reloadToken={`bulk:${bulkReloadNonce}|versions:${lib.versionOptionsReloadToken}`}
         onReviewUpdates={lib.openPlanSheet}
         {...tableActionProps}

@@ -78,6 +78,7 @@ import type {
   Profile,
   ProfileMembershipGrid,
   ProfileMembershipMod,
+  UpdatePlanItem,
 } from '../types';
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -195,7 +196,7 @@ export interface LibraryTableProps {
    *  that has pending update plans. Opens the update review sheet so the
    *  user can pick + apply — never silently applies. Optional so the
    *  Library view keeps the pills inert when nothing else is wired. */
-  onReviewUpdates?: () => void;
+  onReviewUpdates?: (plans: UpdatePlanItem[]) => void;
   onTogglePin?: (mod: ModInfo) => void;
   onSnooze?: (mod: ModInfo, audit: ModAuditEntry | undefined) => void;
   onUnsnooze?: (mod: ModInfo) => void;
@@ -212,6 +213,7 @@ export interface LibraryTableProps {
     current: ProfileMembershipMod,
     selected: LocalModVersionOption,
     applyToDisk: boolean,
+    targetEnabled?: boolean,
   ) => Promise<void> | void;
   /** Render-prop for the inline source editor: when a row's key
    *  matches, the parent returns the editor JSX to slot inside the
@@ -226,7 +228,10 @@ function compareMembershipDisplayName(
   const byName = membershipDisplayName(a).localeCompare(
     membershipDisplayName(b),
     undefined,
-    { sensitivity: 'base', numeric: true },
+    {
+      sensitivity: 'base',
+      numeric: true,
+    },
   );
   if (byName !== 0) return byName;
   return membershipRowKey(a).localeCompare(membershipRowKey(b), undefined, {
@@ -787,27 +792,29 @@ export function LibraryTable({
         );
         return byVersion || compareMembershipDisplayName(a, b);
       });
-      const fallbackOptions = dedupeVersionOptions(sortedGroup.map((option) => ({
-        mod_version_id: membershipRowKey(option),
-        name: option.name,
-        version: option.version,
-        folder_name: option.folder_name,
-        mod_id: option.mod_id,
-        display_name: option.display_name,
-        source: option.source,
-        github_url: option.github_url,
-        nexus_url: option.nexus_url,
-        install_source: option.install_source,
-        workshop_item_id: option.workshop_item_id,
-        workshop_url: option.workshop_url,
-        installed: true,
-        installed_enabled: option.installed_enabled,
-        cached: false,
-        pinned: false,
-        used_by_profiles: option.profiles
-          .filter((profile) => profile.included)
-          .map((profile) => profile.profile_name),
-      })));
+      const fallbackOptions = dedupeVersionOptions(
+        sortedGroup.map((option) => ({
+          mod_version_id: membershipRowKey(option),
+          name: option.name,
+          version: option.version,
+          folder_name: option.folder_name,
+          mod_id: option.mod_id,
+          display_name: option.display_name,
+          source: option.source,
+          github_url: option.github_url,
+          nexus_url: option.nexus_url,
+          install_source: option.install_source,
+          workshop_item_id: option.workshop_item_id,
+          workshop_url: option.workshop_url,
+          installed: option.installed ?? true,
+          installed_enabled: option.installed_enabled,
+          cached: option.cached ?? false,
+          pinned: false,
+          used_by_profiles: option.profiles
+            .filter((profile) => profile.included)
+            .map((profile) => profile.profile_name),
+        })),
+      );
       for (const row of group) {
         if (map.has(membershipRowKey(row))) continue;
         map.set(membershipRowKey(row), fallbackOptions);
@@ -863,6 +870,26 @@ export function LibraryTable({
       }
     }
     return conflicts;
+  }, [effectiveGrid, modInfoForRow]);
+
+  const activeBundleOwnerByRuntimeId = useMemo(() => {
+    const owners = new Map<string, string>();
+    for (const row of effectiveGrid?.mods ?? []) {
+      if (!row.installed_enabled) continue;
+      const info = modInfoForRow(row);
+      const memberIds = info?.bundle_member_ids ?? row.bundle_member_ids ?? [];
+      if (memberIds.length === 0) continue;
+      const bundleName =
+        info?.display_name?.trim() ||
+        row.display_name?.trim() ||
+        info?.name ||
+        row.name;
+      for (const runtimeId of memberIds) {
+        const key = conflictNormalize(runtimeId);
+        if (key && !owners.has(key)) owners.set(key, bundleName);
+      }
+    }
+    return owners;
   }, [effectiveGrid, modInfoForRow]);
 
   /** Rows that have this modpack in their `profiles` array (so the
@@ -1166,6 +1193,57 @@ export function LibraryTable({
         next.delete(rowKey);
         return next;
       });
+    }
+  }
+
+  async function handleRestoreCachedRow(row: ProfileMembershipMod) {
+    if (!row.mod_version_id || storageSaving || membershipSaving) return;
+    const selected: LocalModVersionOption = {
+      mod_version_id: row.mod_version_id,
+      name: row.name,
+      version: row.version,
+      folder_name: row.folder_name,
+      mod_id: row.mod_id,
+      display_name: row.display_name,
+      source: row.source,
+      github_url: row.github_url,
+      nexus_url: row.nexus_url,
+      install_source: row.install_source,
+      workshop_item_id: row.workshop_item_id,
+      workshop_url: row.workshop_url,
+      bundle_member_ids: row.bundle_member_ids,
+      installed: false,
+      installed_enabled: false,
+      cached: true,
+      pinned: false,
+      used_by_profiles: [],
+    };
+    const packActive =
+      modpackName != null &&
+      (modpackName === activeProfileId ||
+        (!activeProfileId && modpackName === activeProfile));
+    try {
+      pinScroll();
+      setStorageSaving(libraryStorageKey(row));
+      await onSelectProfileVersion?.(row, selected, packActive, true);
+      await onMembershipChanged?.();
+      await onLoadOrderChanged?.();
+      await refreshAll();
+      await load();
+      toastCtx.success(
+        t('profiles.library.versionSelectToast', {
+          name: selected.display_name?.trim() || selected.name,
+          version: selected.version,
+        }),
+      );
+    } catch (e) {
+      toastCtx.error(
+        t('profiles.library.versionSelectFailed', {
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setStorageSaving(null);
     }
   }
 
@@ -1838,6 +1916,11 @@ export function LibraryTable({
           );
           const rowKey = membershipRowKey(row);
           const modInfo = modInfoForRow(row);
+          const activeBundleName = !row.installed_enabled
+            ? activeBundleOwnerByRuntimeId.get(
+                conflictNormalize(modInfo?.mod_id ?? row.mod_id),
+              )
+            : undefined;
           const audit = auditByKey?.get(rowKey) ?? auditByKey?.get(row.name);
           const updatePlans = projectProviderUpdates(groupAuditsFor(row)).pendingPlans;
           const sourceEditorSlot =
@@ -1989,6 +2072,14 @@ export function LibraryTable({
               }}
               onToggleMembership={handleToggleMembership}
               onToggleStorage={handleToggleStorage}
+              onRestoreCached={
+                packScoped &&
+                row.installed === false &&
+                row.cached &&
+                onSelectProfileVersion
+                  ? handleRestoreCachedRow
+                  : undefined
+              }
               mod={modInfo}
               audit={audit}
               updatePlans={updatePlans}
@@ -2046,6 +2137,7 @@ export function LibraryTable({
               removingVersionKey={removingVersionKey}
               keepingOnlyVersionKey={keepingOnlyVersionKey}
               sourceConflict={duplicateSourceConflictKeys.has(rowKey)}
+              activeBundleName={activeBundleName}
               sourceEditorSlot={sourceEditorSlot}
             />
           );

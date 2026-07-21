@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Snowflake, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -38,10 +38,32 @@ export function UpdatePlanSheet({
     if (provider === 'steam') return t('mods.versionSource.steamWorkshop');
     return provider;
   };
-  const selectable = useMemo(() => plans.filter((plan) => plan.selectable && plan.capability === 'downloadable'), [plans]);
+  const selectable = useMemo(
+    () => plans.filter((plan) => plan.selectable && plan.capability === 'downloadable'),
+    [plans],
+  );
+  const selectableKeys = useMemo(
+    () => new Set(selectable.map(planKey)),
+    [selectable],
+  );
+  const selectionScope = useMemo(
+    () => selectable.map((plan) => [
+      planKey(plan),
+      plan.current_version,
+      plan.target_version ?? '',
+      plan.source ?? '',
+    ].join('\u0000')).join('\u0001'),
+    [selectable],
+  );
   const [selected, setSelected] = useState(() => new Set(selectable.map(planKey)));
   const [results, setResults] = useState<UpdateApplyResult[] | null>(null);
   const selectedPlans = selectable.filter((plan) => selected.has(planKey(plan)));
+
+  useEffect(() => {
+    setSelected(new Set(selectable.map(planKey)));
+    setResults(null);
+  }, [selectionScope, selectable]);
+
   const handleApply = async () => {
     setResults(await onApply(selectedPlans));
   };
@@ -66,15 +88,16 @@ export function UpdatePlanSheet({
           </button>
         </div>
         <div className="gf-modal-body gf-update-plan-body">
-          {!results && (
+          {!results && selectable.length > 0 && (
             <div className="gf-update-plan-select-actions">
               <button
+                type="button"
                 className="gf-btn-3 gf-btn-sm"
                 onClick={() => setSelected(new Set(selectable.map(planKey)))}
               >
                 {t('mods.updatePlan.selectAll')}
               </button>
-              <button className="gf-btn-3 gf-btn-sm" onClick={() => setSelected(new Set())}>
+              <button type="button" className="gf-btn-3 gf-btn-sm" onClick={() => setSelected(new Set())}>
                 {t('mods.updatePlan.selectNone')}
               </button>
             </div>
@@ -99,7 +122,7 @@ export function UpdatePlanSheet({
               };
               return (
                 <div className="gf-update-plan-row" key={key}>
-                  {plan.selectable && !results ? (
+                  {selectableKeys.has(key) && !results ? (
                     <input
                       type="checkbox"
                       checked={selected.has(key)}
@@ -152,11 +175,12 @@ export function UpdatePlanSheet({
           </div>
         </div>
         <div className="gf-modal-foot gf-update-plan-foot">
-          <button className="gf-btn-3" onClick={onClose} disabled={applying}>
-            {results ? t('common.close') : t('common.cancel')}
+          <button type="button" className="gf-btn-3" onClick={onClose} disabled={applying}>
+            {results || selectable.length === 0 ? t('common.close') : t('common.cancel')}
           </button>
-          {!results && (
+          {!results && selectable.length > 0 && (
             <button
+              type="button"
               className="gf-btn"
               disabled={applying || selectedPlans.length === 0}
               onClick={() => void handleApply()}

@@ -388,7 +388,7 @@ describe('<ModpackDetail>', () => {
 
     expect(await screen.findByText('BaseLib')).toBeInTheDocument();
     expect(screen.getByText('manifest v3.2.1')).toBeInTheDocument();
-    expect(screen.getByText('Saved in Versions')).toBeInTheDocument();
+    expect(screen.getByText('Archived in Versions')).toBeInTheDocument();
     expect(screen.queryByText(/missing/i)).toBeNull();
   });
 
@@ -2034,6 +2034,61 @@ describe('<ModpackDetail>', () => {
   });
 
   // ── Available row presentation edge case ──────────────────────────
+  it('keeps row review scoped while the pack header reviews every pack update', async () => {
+    const alpha = modInfo({
+      name: 'PackAlpha', folder_name: 'PackAlpha', mod_version_id: 'pack-alpha',
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/201',
+    });
+    const beta = modInfo({
+      name: 'PackBeta', folder_name: 'PackBeta', mod_version_id: 'pack-beta',
+      nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/202',
+    });
+    const profile = setupPack({ inPack: [alpha, beta] });
+    registerInvokeHandler('audit_mod_versions', () => [alpha, beta].map((mod, index) => ({
+      mod_name: mod.name,
+      folder_name: mod.folder_name,
+      mod_version_id: mod.mod_version_id,
+      github_repo: null,
+      installed_version: '1.0',
+      needs_update: true,
+      pinned: false,
+      nexus_url: mod.nexus_url,
+      nexus_version: '2.0',
+      nexus_update_available: true,
+      update_source: 'nexus',
+      update_plans: [{
+        target: { name: mod.name, folder_name: mod.folder_name, mod_version_id: mod.mod_version_id },
+        current_version: '1.0',
+        target_version: '2.0',
+        provider: 'nexus',
+        source: `https://www.nexusmods.com/slaythespire2/mods/${201 + index}`,
+        capability: 'manual',
+        reason: '',
+        selectable: false,
+        pending: true,
+      }],
+    })));
+
+    const user = userEvent.setup();
+    render(<Wrap profile={profile} onBack={vi.fn()} />);
+    await user.click(await screen.findByRole('button', { name: /Check for updates/i }));
+    await screen.findByRole('button', { name: /2 updates available/i });
+    const rows = await screen.findAllByTestId('library-row');
+    const alphaRow = rows.find((row) => within(row).queryByText('PackAlpha'));
+    expect(alphaRow).toBeDefined();
+
+    await user.click(within(alphaRow!).getByRole('button', { name: /Nexus.*1\.0.*2\.0/i }));
+    let modal = screen.getByRole('dialog', { name: /Review available updates/i });
+    expect(within(modal).getByText('PackAlpha')).toBeInTheDocument();
+    expect(within(modal).queryByText('PackBeta')).not.toBeInTheDocument();
+    await user.click(modal.querySelector('.gf-update-plan-foot button') as HTMLButtonElement);
+
+    await user.click(screen.getByRole('button', { name: /2 updates available/i }));
+    modal = screen.getByRole('dialog', { name: /Review available updates/i });
+    expect(within(modal).getByText('PackAlpha')).toBeInTheDocument();
+    expect(within(modal).getByText('PackBeta')).toBeInTheDocument();
+  });
+
   it('shows the Local badge for an available mod with a source but no GitHub/Nexus link', async () => {
     const profile = setupPack({
       available: [

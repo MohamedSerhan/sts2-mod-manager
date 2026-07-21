@@ -1550,6 +1550,8 @@
     "workshopManagedTitle": "由 Steam 创意工坊管理。请使用 STS2 的设置/加载顺序或打开创意工坊页面；管理器不会移动或删除 Steam 拥有的文件。",
     "workshopManagedDesc": "这些文件由 Steam 管理；请在 Steam 创意工坊中更新、取消订阅或修复。",
     "duplicateSourceWarning": "当此模组和 Steam 创意工坊副本同时启用时，STS2 可能会优先使用本地 mods 文件夹中的副本。",
+    "activeViaBundle": "已通过 {{bundle}} 启用",
+    "activeViaBundleTitle": "此已安装副本未启用，因为当前启用的 {{bundle}} 整合包已包含同一个游戏模组。",
     "modActions": "模组操作",
     "copyVersion": "复制版本 (v{{version}})",
     "customizeMenu": "自定义菜单…",
@@ -1631,16 +1633,26 @@
     "updatePlan": {
       "title": "查看可用更新",
       "subtitle": "选择 GitHub 下载，并查看由其他来源管理的更新。",
-      "selectAll": "全选",
-      "selectNone": "全不选",
+      "selectAll": "选择全部下载",
+      "selectNone": "清除下载选择",
       "selectItem": "选择 {{name}}",
       "versionChange": "v{{current}} → v{{target}}",
       "openManual": "打开手动下载页面",
       "unfreeze": "取消冻结",
       "downloadSelected_one": "将选中的 {{count}} 个 GitHub 更新下载到“版本”",
       "downloadSelected_other": "将选中的 {{count}} 个 GitHub 更新下载到“版本”",
-      "capability": { "downloadable": "GitHub 下载", "manual": "手动下载", "steam-managed": "由 Steam 管理", "frozen": "冻结时排除" },
-      "result": { "updated": "已下载到“版本”", "stale": "上游已更改，请重新预览", "skipped": "已跳过", "failed": "下载失败" }
+      "capability": {
+        "downloadable": "GitHub 下载",
+        "manual": "手动下载",
+        "steam-managed": "由 Steam 管理",
+        "frozen": "冻结时排除"
+      },
+      "result": {
+        "updated": "已下载到“版本”",
+        "stale": "上游已更改，请重新预览",
+        "skipped": "已跳过",
+        "failed": "下载失败"
+      }
     },
     "rollbackNoSource": "'{{name}}' 尚未关联 GitHub 来源 — 回滚需要从 GitHub 获取。请先通过「编辑来源…」添加来源。",
     "rollbackConfirmTitle": "回滚「{{name}}」？",
@@ -1679,8 +1691,9 @@
     "versionManageHeading": "管理 {{mod}} 的版本",
     "versionManageSub": "移除不再需要的旧存储版本。活跃或被模组包使用的版本会打开引导式移除。",
     "versionActiveStatus": "游戏中活跃",
-    "versionStoredOnDiskStatus": "存储在磁盘上",
-    "versionSavedStatus": "已保存到版本列表",
+    "restoreArchivedAndEnable": "恢复此归档版本并在游戏中启用",
+    "versionStoredOnDiskStatus": "已安装，未启用",
+    "versionSavedStatus": "已归档到版本列表",
     "versionMissingStatus": "未安装到磁盘",
     "versionStoredStatus": "已存储",
     "versionRemove": "移除",
@@ -1707,8 +1720,8 @@
     "versionRemovalWizardTitle": "移除 {{mod}} v{{version}}",
     "versionRemovalWizardSub": "在删除文件前，选择受影响的模组包如何处理此版本。",
     "versionRemovalImpactActive": "游戏中活跃",
-    "versionRemovalImpactStored": "存储在磁盘上",
-    "versionRemovalImpactSaved": "已保存压缩包",
+    "versionRemovalImpactStored": "已安装，未启用",
+    "versionRemovalImpactSaved": "已归档到版本列表",
     "versionRemovalImpactPacks_one": "{{count}} 个模组包正在使用",
     "versionRemovalImpactPacks_two": "{{count}} 个模组包正在使用",
     "versionRemovalImpactPacks_few": "{{count}} 个模组包正在使用",
@@ -1765,8 +1778,8 @@
       },
       "state": {
         "active": "游戏中活跃",
-        "stored": "存储在磁盘上",
-        "saved": "已保存到版本库"
+        "stored": "已安装，未启用",
+        "saved": "已归档到版本列表"
       },
       "reason": {
         "recommended_old": "旧于其他可用版本",

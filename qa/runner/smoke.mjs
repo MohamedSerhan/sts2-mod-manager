@@ -10,6 +10,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -1403,6 +1404,107 @@ async function specToggleStickyAcrossModpackSwitch(driver) {
 }
 
 /**
+ * Regression spec for #48: an exact modpack version that exists only in the
+ * manager's archive must remain actionable in the active modpack. Its row
+ * exposes an off toggle, and clicking it restores the cached artifact into
+ * the live mods folder instead of reporting the entry as not installed.
+ */
+async function specActiveModpackRestoresArchivedRow(driver) {
+  const modpackName = `QA Archived ${Date.now().toString(36)}`;
+  await createModpackNamed(driver, modpackName);
+  await waitForToastsToClear(driver);
+  await activateModpack(driver, modpackName);
+  await waitForToastsToClear(driver);
+
+  const archivedId = 'qa-walkback-1.0.0-archived';
+  const sourceZip = resolve(
+    REPO_ROOT,
+    'qa',
+    'fixtures',
+    'github',
+    'repos',
+    'qa-fixture',
+    'walkback-mod',
+    'releases',
+    'download',
+    'v1.0.0',
+    'WalkbackMod-v1.0.0.zip',
+  );
+  const cacheDir = join(FIXTURE_DIRS.cache, 'mod_versions');
+  mkdirSync(cacheDir, { recursive: true });
+  copyFileSync(sourceZip, join(cacheDir, `${archivedId}.zip`));
+
+  const registryPath = join(FIXTURE_DIRS.config, 'mod_versions.json');
+  const registry = existsSync(registryPath)
+    ? JSON.parse(readFileSync(registryPath, 'utf8').replace(/^\uFEFF/, ''))
+    : { records: {} };
+  registry.records ??= {};
+  registry.records[archivedId] = {
+    id: archivedId,
+    identity_key: 'qa-smoke-archived-walkback-1.0.0',
+    name: 'WalkbackMod',
+    version: '1.0.0',
+    folder_name: 'WalkbackMod',
+    mod_id: 'WalkbackMod',
+    source: 'github:qa-fixture/walkback-mod',
+    cache_relpath: `mod_versions/${archivedId}.zip`,
+  };
+  writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+
+  const { path: profilePath, profile } = loadProfileByName(modpackName);
+  profile.mods.push({
+    mod_version_id: archivedId,
+    name: 'WalkbackMod',
+    version: '1.0.0',
+    source: 'github:qa-fixture/walkback-mod',
+    files: ['WalkbackMod.dll', 'WalkbackMod.json'],
+    folder_name: 'WalkbackMod',
+    mod_id: 'WalkbackMod',
+    enabled: false,
+  });
+  writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
+
+  await driver.navigate().refresh();
+  // "Set up later" is intentionally non-persistent when no real Steam game
+  // is registered, so a WebView reload can show onboarding again even though
+  // the fixture override is valid. Clear it before opening the active card.
+  await dismissOnboardingIfPresent(driver);
+  await navToModpacks(driver);
+  const cardName = await waitForElement(
+    driver,
+    By.xpath(`//*[contains(@class,'gf-modpack-card-name') and normalize-space(.)='${modpackName}']`),
+    `modpack card "${modpackName}" after archived fixture reload`,
+  );
+  const card = await cardName.findElement(
+    By.xpath("ancestor::*[contains(@class,'gf-modpack-card')][1]"),
+  );
+  await driver.executeScript('arguments[0].scrollIntoView({ block: "center" });', card);
+  try {
+    await card.click();
+  } catch {
+    await driver.executeScript('arguments[0].click();', card);
+  }
+
+  const toggle = await waitForElement(
+    driver,
+    By.xpath(
+      "//*[normalize-space(text())='WalkbackMod']/ancestor::*[contains(@class,'gf-profile-library-row')][1]//button[@role='switch']",
+    ),
+    'archived WalkbackMod restore toggle in active modpack',
+    15_000,
+  );
+  assertEqual(await toggle.getAttribute('aria-checked'), 'false', 'archived row toggle state');
+  await toggle.click();
+
+  const restoredDir = join(FIXTURE_DIRS.game, 'mods', 'WalkbackMod');
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline && !existsSync(restoredDir)) await delay(150);
+  if (!existsSync(restoredDir)) {
+    throw new Error('archived WalkbackMod was not restored into mods/ after clicking its toggle');
+  }
+}
+
+/**
  * Regression spec for the safe modpack repair/switch contract: disabled
  * library mods that are not part of the active modpack must stay on disk and
  * must not surface as modpack drift. Repair/switch makes active `mods/`
@@ -1992,11 +2094,98 @@ async function specAuditAgainstCassettesShowsOnePending(driver) {
   //
   // Match the current/target evidence as well as the provider label so this
   // owns the source-aware row contract rather than merely finding any button.
-  await waitForElement(
+  const rowReviewButton = await waitForElement(
     driver,
     By.xpath("//*[contains(text(),'QaTestMod')]/ancestor::*[contains(@class,'gf-mod-row') or contains(@class,'gf-card')][1]//button[contains(.,'GitHub:') and contains(.,'v1.0.0') and contains(.,'v2.0.0')]"),
     'GitHub provider-evidence review button on QaTestMod row',
     5_000,
+  );
+  await rowReviewButton.click();
+
+  const reviewSheet = await waitForElement(
+    driver,
+    By.css('.gf-update-plan'),
+    'row-scoped update review sheet',
+  );
+  const reviewedQaMod = await reviewSheet.findElements(By.xpath(".//*[contains(text(),'QaTestMod')]"));
+  if (reviewedQaMod.length === 0) {
+    throw new Error('row review should include QaTestMod');
+  }
+  const unrelatedMod = await reviewSheet.findElements(By.xpath(".//*[contains(text(),'UpToDateMod')]"));
+  if (unrelatedMod.length !== 0) {
+    throw new Error('row review should exclude unrelated mods');
+  }
+
+  const clearDownloads = await reviewSheet.findElement(
+    By.xpath(".//button[normalize-space(.)='Clear downloads']"),
+  );
+  await clearDownloads.click();
+  const emptyDownload = await reviewSheet.findElement(
+    By.xpath(".//button[contains(normalize-space(.),'Download 0 selected GitHub updates')]"),
+  );
+  if (await emptyDownload.isEnabled()) {
+    throw new Error('clearing downloads should disable apply');
+  }
+
+  const selectAllDownloads = await reviewSheet.findElement(
+    By.xpath(".//button[normalize-space(.)='Select all downloads']"),
+  );
+  await selectAllDownloads.click();
+  const selectedDownload = await reviewSheet.findElement(
+    By.xpath(".//button[contains(normalize-space(.),'Download 1 selected GitHub update')]"),
+  );
+  if (!(await selectedDownload.isEnabled())) {
+    throw new Error('select all should restore the downloadable plan');
+  }
+
+  // Exercise the real CSS overflow contract without changing fixture state:
+  // duplicate the rendered row until the review exceeds the viewport, then
+  // prove only the body scrolls while the footer remains reachable.
+  const longReviewLayout = await driver.executeScript(`
+    const sheet = document.querySelector('.gf-update-plan');
+    const body = sheet?.querySelector('.gf-update-plan-body');
+    const list = sheet?.querySelector('.gf-update-plan-list');
+    const footer = sheet?.querySelector('.gf-update-plan-foot');
+    const seed = list?.querySelector('.gf-update-plan-row');
+    if (!sheet || !body || !list || !footer || !seed) return null;
+    for (let i = 0; i < 18; i += 1) list.append(seed.cloneNode(true));
+    body.scrollTop = body.scrollHeight;
+    const sheetRect = sheet.getBoundingClientRect();
+    const footerRect = footer.getBoundingClientRect();
+    return {
+      viewportHeight: window.innerHeight,
+      sheetTop: sheetRect.top,
+      sheetBottom: sheetRect.bottom,
+      footerBottom: footerRect.bottom,
+      bodyClientHeight: body.clientHeight,
+      bodyScrollHeight: body.scrollHeight,
+      bodyScrollTop: body.scrollTop,
+    };
+  `);
+  if (!longReviewLayout) {
+    throw new Error('could not inspect the long update-review layout');
+  }
+  if (longReviewLayout.bodyScrollHeight <= longReviewLayout.bodyClientHeight) {
+    throw new Error('long update review did not create a body scroll region');
+  }
+  if (longReviewLayout.bodyScrollTop <= 0) {
+    throw new Error('long update review body could not scroll to its final rows');
+  }
+  if (longReviewLayout.sheetTop < 0 || longReviewLayout.sheetBottom > longReviewLayout.viewportHeight + 1) {
+    throw new Error(`long update review escaped the viewport: ${JSON.stringify(longReviewLayout)}`);
+  }
+  if (longReviewLayout.footerBottom > longReviewLayout.sheetBottom + 1) {
+    throw new Error(`long update review footer is unreachable: ${JSON.stringify(longReviewLayout)}`);
+  }
+
+  const cancelReview = await reviewSheet.findElement(
+    By.xpath(".//*[contains(@class,'gf-update-plan-foot')]//button[normalize-space(.)='Cancel']"),
+  );
+  await cancelReview.click();
+  await driver.wait(
+    async () => (await driver.findElements(By.css('.gf-update-plan'))).length === 0,
+    5_000,
+    'row-scoped update review sheet did not close',
   );
 }
 
@@ -2405,6 +2594,7 @@ const STATE_SPECS = [
   ['global cleanup removes older local copies and preserves source metadata', specCleanupOldStoredVersions],
   ['modpack switch preserves freeze state (v1.3.1 contract)', specModpackSwitchPreservesFreeze],
   ['#22: toggle state sticky across modpack switch', specToggleStickyAcrossModpackSwitch],
+  ['#48: active modpack restores an archived row from its toggle', specActiveModpackRestoresArchivedRow],
   ['#20: disabled library extras are preserved', specDisabledLibraryExtrasArePreserved],
   ['Save changes converges and the second Save is a no-op', specSaveChangesConverges],
   ['Steam Workshop references stay Steam-owned in mixed modpacks', specWorkshopModpackReferenceStaysSteamOwned],

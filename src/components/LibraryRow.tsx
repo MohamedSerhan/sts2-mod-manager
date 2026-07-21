@@ -217,6 +217,9 @@ export interface LibraryRowProps {
   // Mutation callbacks — the parent owns Tauri calls + toasts + state.
   onToggleMembership: (row: ProfileMembershipMod) => void | Promise<void>;
   onToggleStorage: (row: ProfileMembershipMod) => void | Promise<void>;
+  /** Restore a cached-only profile version to disk and enable it. Only
+   *  surfaced for archived rows in the active modpack. */
+  onRestoreCached?: (row: ProfileMembershipMod) => void | Promise<void>;
 
   // ─── Optional ModRow-style action surface ────────────────────────
   // All optional: LibraryTable in modpack-detail mode doesn't strictly
@@ -262,7 +265,7 @@ export interface LibraryRowProps {
   /** Open the review sheet for a group of provider update plans. Wired
    *  through from ModLibrary/ModpackDetail so the provider-evidence pills
    *  on a row with pending plans stay clickable (never silently apply). */
-  onReviewUpdates?: () => void;
+  onReviewUpdates?: (plans: UpdatePlanItem[]) => void;
   onTogglePin?: () => void;
   onSnooze?: () => void;
   onUnsnooze?: () => void;
@@ -277,6 +280,11 @@ export interface LibraryRowProps {
   onOpenExternalUrl?: (url: string) => void;
   onAutoDetectSource?: () => void;
   sourceConflict?: boolean;
+  /** Name of an enabled bundle that already provides this inactive row's
+   *  runtime ID. The disk copy stays inactive to avoid loading two mods with
+   *  the same ID, but the row should make clear that its functionality is
+   *  already active through the bundle. */
+  activeBundleName?: string;
   /** Optional slot rendered inside the row (currently used by the
    *  Library view to attach the inline SourceEditor below the row). */
   sourceEditorSlot?: ReactNode;
@@ -306,6 +314,7 @@ export function LibraryRow({
   onDragEnd,
   onToggleMembership,
   onToggleStorage,
+  onRestoreCached,
   mod,
   audit,
   updatePlans = [],
@@ -340,6 +349,7 @@ export function LibraryRow({
   onOpenExternalUrl = noop,
   onAutoDetectSource = noop,
   sourceConflict = false,
+  activeBundleName,
   sourceEditorSlot,
 }: LibraryRowProps) {
   const { t } = useTranslation();
@@ -367,6 +377,12 @@ export function LibraryRow({
   // hidden there even though rows can be "in pack".
   const reorderable = enableReorder && inPack && inPackIndex >= 0;
   const rowInstalled = row.installed ?? true;
+  const canRestoreCached =
+    !rowInstalled &&
+    !!row.cached &&
+    packScoped &&
+    packActive &&
+    !!onRestoreCached;
   const cleanVersion = (value: string | null | undefined) =>
     (value ?? '').trim().replace(/^v/i, '');
   // "In N modpacks" — how many of the user's modpacks include this mod. Only
@@ -445,14 +461,24 @@ export function LibraryRow({
   );
   const installedSourceVersion = cleanVersion(audit?.installed_source_version);
   const hasConfirmedGithub = !!mod?.github_url && !mod.github_auto_detected;
-  const sourceVersionLabel =
-    hasConfirmedGithub || (!!audit?.github_repo && !audit.github_auto_detected)
+  const sourceVersionLabel = workshopOwned
+    ? t('mods.steamWorkshop')
+    : hasConfirmedGithub ||
+        (!!audit?.github_repo && !audit.github_auto_detected)
       ? t('mods.gitHub')
       : audit?.nexus_url || mod?.nexus_url
         ? t('mods.nexus')
         : 'installed';
-  const showInstalledSourceVersion =
-    !!installedSourceVersion && installedSourceVersion !== manifestVersion;
+  // Steam does not expose a human-readable release version separately from
+  // the mod author's manifest. Its ACF `manifest` value is an opaque content
+  // revision, so label the semantic manifest value as the installed Workshop
+  // version instead of showing either "manifest" or the Workshop item ID.
+  const displayedSourceVersion = workshopOwned
+    ? manifestVersion
+    : installedSourceVersion;
+  const showInstalledSourceVersion = workshopOwned
+    ? !!displayedSourceVersion
+    : !!installedSourceVersion && installedSourceVersion !== manifestVersion;
 
   const versionStateLabel = (option: LibraryRowVersionOption) => {
     if (option.installedEnabled) return t('mods.versionActiveStatus');
@@ -460,10 +486,23 @@ export function LibraryRow({
     if (option.cached) return t('mods.versionSavedStatus');
     return t('mods.versionStoredStatus');
   };
-  const providerLabel = (provider: string) => provider
-    .split('+')
-    .map((part) => part === 'github' ? t('mods.gitHub') : part === 'nexus' ? t('mods.nexus') : part === 'steam' ? t('mods.steamWorkshop') : part)
-    .join(t('mods.versionSource.joiner'));
+  const versionSelectorStateLabel = (option: LibraryRowVersionOption) =>
+    option.installedEnabled
+      ? t('mods.versionActiveTitle')
+      : versionStateLabel(option);
+  const providerLabel = (provider: string) =>
+    provider
+      .split('+')
+      .map((part) =>
+        part === 'github'
+          ? t('mods.gitHub')
+          : part === 'nexus'
+            ? t('mods.nexus')
+            : part === 'steam'
+              ? t('mods.steamWorkshop')
+              : part,
+      )
+      .join(t('mods.versionSource.joiner'));
   const versionWorkshopUrl = (option: LibraryRowVersionOption) =>
     option.workshopUrl ??
     (option.workshopItemId
@@ -548,45 +587,58 @@ export function LibraryRow({
           {/* Active/stored toggle — only where in-game state is meaningful:
             the All Mods view, or the ACTIVE pack's rows. A non-active pack's
             members aren't loaded, so showing a toggle there is misleading. */}
-          {rowInstalled && (!packScoped || packActive) && (
-            <div
-              className="gf-row-status"
-              role="presentation"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <Toggle
-                checked={row.installed_enabled}
-                onChange={() => onToggleStorage(row)}
-                // Only gate on the game running. We deliberately do NOT disable
-                // while a save is in flight: disabling the just-clicked control
-                // rips keyboard focus off it (it falls to <body>), and some
-                // WebViews react to that focus loss by scrolling the list — so
-                // the user gets yanked to the top on every toggle. Re-entrancy /
-                // double-clicks are already guarded inside handleToggleStorage
-                // (`if (storageSaving || membershipSaving) return`), so the
-                // disabled attribute was only ever redundant insurance.
-                disabled={gameRunning || workshopOwned}
-                ariaLabel={t('modpack.storage.toggleAria', {
-                  mod: displayName,
-                })}
-                title={
-                  workshopOwned
-                    ? t('mods.workshopManagedTitle')
+          {(rowInstalled || canRestoreCached) &&
+            (!packScoped || packActive) && (
+              <div
+                className="gf-row-status"
+                role="presentation"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <Toggle
+                  checked={row.installed_enabled}
+                  onChange={() =>
+                    canRestoreCached
+                      ? onRestoreCached?.(row)
+                      : onToggleStorage(row)
+                  }
+                  // Only gate on the game running. We deliberately do NOT disable
+                  // while a save is in flight: disabling the just-clicked control
+                  // rips keyboard focus off it (it falls to <body>), and some
+                  // WebViews react to that focus loss by scrolling the list — so
+                  // the user gets yanked to the top on every toggle. Re-entrancy /
+                  // double-clicks are already guarded inside handleToggleStorage
+                  // (`if (storageSaving || membershipSaving) return`), so the
+                  // disabled attribute was only ever redundant insurance.
+                  disabled={gameRunning || workshopOwned}
+                  ariaLabel={t('modpack.storage.toggleAria', {
+                    mod: displayName,
+                  })}
+                  title={
+                    canRestoreCached
+                      ? t('mods.restoreArchivedAndEnable')
+                      : workshopOwned
+                        ? t('mods.workshopManagedTitle')
+                        : activeBundleName
+                          ? t('mods.activeViaBundleTitle', {
+                              bundle: activeBundleName,
+                            })
+                          : row.installed_enabled
+                            ? t('modpack.storage.active')
+                            : t('modpack.storage.storedHint')
+                  }
+                />
+                <span className="gf-row-status-label">
+                  {canRestoreCached
+                    ? t('mods.versionSavedStatus')
                     : row.installed_enabled
                       ? t('modpack.storage.active')
-                      : t('modpack.storage.storedHint')
-                }
-              />
-              <span className="gf-row-status-label">
-                {row.installed_enabled
-                  ? t('modpack.storage.active')
-                  : t('modpack.storage.stored')}
-              </span>
-              {storageBusy && (
-                <RefreshCw size={11} className="animate-spin" aria-hidden />
-              )}
-            </div>
-          )}
+                      : t('modpack.storage.stored')}
+                </span>
+                {storageBusy && (
+                  <RefreshCw size={11} className="animate-spin" aria-hidden />
+                )}
+              </div>
+            )}
           <div className="gf-profile-library-identity min-w-0">
             <div className="gf-profile-library-titlerow">
               <h3 className="gf-profile-library-title">{displayName}</h3>
@@ -597,6 +649,17 @@ export function LibraryRow({
                 right of the name — there's more room here than mid-row, so
                 they read as one group instead of scattered bits. */}
               <span className="gf-row-tagcluster">
+                {activeBundleName && (
+                  <span
+                    className="gf-pill gf-pill-ok"
+                    title={t('mods.activeViaBundleTitle', {
+                      bundle: activeBundleName,
+                    })}
+                  >
+                    <Check size={9} />
+                    {t('mods.activeViaBundle', { bundle: activeBundleName })}
+                  </span>
+                )}
                 {mod?.tags?.slice(0, 5).map((tag) => (
                   <span key={tag} className="gf-row-tag">
                     {tag}
@@ -768,7 +831,7 @@ export function LibraryRow({
                         title={pillTitle}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onReviewUpdates();
+                          onReviewUpdates(updatePlans);
                         }}
                       >
                         {pillContent}
@@ -853,10 +916,10 @@ export function LibraryRow({
                 read as distinct things instead of three grey lookalikes. */}
               <span className="gf-meta-version" title={t('mods.versionLabel')}>
                 {showInstalledSourceVersion
-                  ? `${sourceVersionLabel} v${installedSourceVersion}`
+                  ? `${sourceVersionLabel} v${displayedSourceVersion}`
                   : t('mods.manifestVersion', { version: manifestVersion })}
               </span>
-              {showInstalledSourceVersion && (
+              {showInstalledSourceVersion && !workshopOwned && (
                 <span
                   className="gf-meta-version"
                   title={t('mods.versionLabel')}
@@ -902,12 +965,8 @@ export function LibraryRow({
                             <span
                               className={`gf-version-option-status${option.installedEnabled ? ' is-active' : ' is-stored'}`}
                               role="img"
-                              aria-label={option.installedEnabled
-                                ? t('mods.versionActiveTitle')
-                                : t('mods.versionStoredTitle')}
-                              title={option.installedEnabled
-                                ? t('mods.versionActiveTitle')
-                                : t('mods.versionStoredTitle')}
+                              aria-label={versionSelectorStateLabel(option)}
+                              title={versionSelectorStateLabel(option)}
                             >
                               {option.installedEnabled
                                 ? <CircleCheck size={13} aria-hidden="true" />

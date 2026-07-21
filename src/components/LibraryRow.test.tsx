@@ -970,6 +970,57 @@ describe('<LibraryRow> modpackName=null mode', () => {
 // matching ModInfo (`mod`).
 
 describe('<LibraryRow> active/stored switch', () => {
+  it('restores an archived-only row from its switch in the active modpack', async () => {
+    const onRestoreCached = vi.fn();
+    const onToggleStorage = vi.fn();
+    const user = userEvent.setup();
+    renderRow({
+      packScoped: true,
+      packActive: true,
+      row: baseMod({
+        mod_version_id: 'baselib-321',
+        installed: false,
+        cached: true,
+        installed_enabled: false,
+      }),
+      onRestoreCached,
+      onToggleStorage,
+    });
+
+    const toggle = screen.getByRole('switch', {
+      name: /toggle whether BaseLib is active in game/i,
+    });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).toHaveAttribute(
+      'title',
+      'Restore this archived version and enable it in the game',
+    );
+    expect(screen.getAllByText('Archived in Versions').length).toBeGreaterThan(
+      0,
+    );
+    await user.click(toggle);
+    expect(onRestoreCached).toHaveBeenCalledWith(
+      expect.objectContaining({ mod_version_id: 'baselib-321' }),
+    );
+    expect(onToggleStorage).not.toHaveBeenCalled();
+  });
+
+  it('does not show an archived restore switch for an inactive modpack', () => {
+    renderRow({
+      packScoped: true,
+      packActive: false,
+      row: baseMod({
+        mod_version_id: 'baselib-321',
+        installed: false,
+        cached: true,
+        installed_enabled: false,
+      }),
+      onRestoreCached: vi.fn(),
+    });
+
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+
   it('renders a switch reflecting installed_enabled and a flipping label', () => {
     const { unmount } = renderRow({
       mod: baseModInfo({ enabled: true }),
@@ -1306,6 +1357,40 @@ describe('<LibraryRow> Nexus-only update pill', () => {
 
     expect(screen.getByText('manifest v1.1.3')).toBeInTheDocument();
     expect(screen.queryByText('v1.0.0')).not.toBeInTheDocument();
+  });
+
+  it('labels a no-selector Workshop version without exposing opaque Steam IDs', () => {
+    const workshopUrl =
+      'https://steamcommunity.com/sharedfiles/filedetails/?id=3747889954';
+    renderRow({
+      row: baseMod({
+        name: "Rixian's MSPain",
+        version: 'v0.2.5',
+        folder_name: '3747889954',
+        mod_id: 'HideDetailsMod',
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747889954',
+        workshop_url: workshopUrl,
+      }),
+      mod: baseModInfo({
+        name: "Rixian's MSPain",
+        version: 'v0.2.5',
+        folder_name: '3747889954',
+        mod_id: 'HideDetailsMod',
+        install_source: 'steam_workshop',
+        workshop_item_id: '3747889954',
+        workshop_url: workshopUrl,
+        workshop_manifest: '2047330998367305357',
+      }),
+      versionOptions: [],
+    });
+
+    expect(
+      screen.queryByRole('combobox', { name: /Choose version/i }),
+    ).toBeNull();
+    expect(screen.getByText('Steam Workshop v0.2.5')).toBeInTheDocument();
+    expect(screen.queryByText('manifest v0.2.5')).toBeNull();
+    expect(screen.queryByText(/2047330998367305357/)).toBeNull();
   });
 });
 

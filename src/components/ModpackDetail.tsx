@@ -83,6 +83,7 @@ import type {
   Profile,
   ProfileMembershipMod,
   ShareResult,
+  UpdatePlanItem,
 } from '../types';
 import type { ProfileDrift } from '../hooks/useTauri';
 
@@ -289,7 +290,7 @@ export function ModpackDetail({
   const [editing, setEditing] = useState(false);
   // Rename this pack via the small inline-validation modal.
   const [renaming, setRenaming] = useState(false);
-  const [showUpdatePlan, setShowUpdatePlan] = useState(false);
+  const [reviewPlans, setReviewPlans] = useState<UpdatePlanItem[] | null>(null);
 
   const hasDrift = !!drift?.has_drift;
   // Bug 5: the header count is manifest membership (profile.mods.length) while
@@ -604,6 +605,7 @@ export function ModpackDetail({
     current: ProfileMembershipMod,
     selected: LocalModVersionOption,
     applyToDisk: boolean,
+    targetEnabled?: boolean,
   ) => {
     await selectProfileModVersion(
       profileKey,
@@ -626,6 +628,7 @@ export function ModpackDetail({
         name: selected.name,
       },
       applyToDisk,
+      targetEnabled,
     );
     markSharedLocalEdit();
     await refreshAfterMutation();
@@ -798,7 +801,7 @@ export function ModpackDetail({
     <button
       type="button"
       className="gf-pill gf-pill-update gf-pill-toolbar"
-      onClick={() => setShowUpdatePlan(true)}
+      onClick={() => setReviewPlans(packUpdatePlans)}
       title={t('mods.reviewUpdatesTitle')}
     >
       <Download size={12} />{' '}
@@ -1140,7 +1143,7 @@ export function ModpackDetail({
             if (q.trim()) setLibraryOpen(true);
           }}
           extraRows={missingProfileRows}
-          onReviewUpdates={() => setShowUpdatePlan(true)}
+          onReviewUpdates={setReviewPlans}
           {...lib.tableActionProps}
         />
       </section>
@@ -1249,12 +1252,12 @@ export function ModpackDetail({
       {/* Auto-detect sources modal (shared). */}
       {lib.renderAutoDetectModal()}
 
-      {showUpdatePlan && (
+      {reviewPlans && (
         <UpdatePlanSheet
-          plans={packUpdatePlans}
+          plans={reviewPlans}
           applying={lib.updatingAll}
           onApply={lib.updateAllGithub}
-          onClose={() => setShowUpdatePlan(false)}
+          onClose={() => setReviewPlans(null)}
           onOpenSource={lib.openUpdatePlanSource}
           onUnfreeze={lib.unfreezeUpdatePlan}
         />

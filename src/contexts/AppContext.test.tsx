@@ -204,6 +204,34 @@ describe('<AppProvider>', () => {
     expect(captured?.auditResults?.find((r) => r.mod_name === 'C')).toBeTruthy();             // appended
   });
 
+  it('refreshMods prunes deleted audit rows by strong identity even when another mod shares the name', async () => {
+    let installed = [
+      { name: 'Shared Name', version: '1.0.0', enabled: true, files: [], folder_name: 'AlphaFolder', mod_version_id: 'artifact-alpha' },
+      { name: 'Shared Name', version: '1.0.0', enabled: true, files: [], folder_name: 'BetaFolder', mod_version_id: 'artifact-beta' },
+    ];
+    registerInvokeHandler('get_installed_mods', () => installed);
+    registerInvokeHandler('audit_mod_versions', () => [
+      { mod_name: 'Shared Name', folder_name: 'AlphaFolder', mod_version_id: 'artifact-alpha', installed_version: '1.0.0', needs_update: true, pinned: false },
+      { mod_name: 'Shared Name', folder_name: 'BetaFolder', mod_version_id: 'artifact-beta', installed_version: '1.0.0', needs_update: true, pinned: false },
+    ]);
+
+    let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
+    render(
+      <Wrap>
+        <Probe onCtx={(c) => { captured = c; }} />
+      </Wrap>,
+    );
+    await waitFor(() => { expect(captured?.loading).toBe(false); });
+    await act(async () => { await captured!.runAudit(); });
+    expect(captured?.auditResults).toHaveLength(2);
+
+    installed = [installed[0]];
+    await act(async () => { await captured!.refreshMods(); });
+
+    expect(captured?.auditResults).toHaveLength(1);
+    expect(captured?.auditResults?.[0].mod_version_id).toBe('artifact-alpha');
+  });
+
   it("refreshAuditEntries with empty list is a no-op", async () => {
     let captured: ReturnType<typeof useApp> | null = null as unknown as ReturnType<typeof useApp> | null;
     render(

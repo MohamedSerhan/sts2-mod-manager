@@ -1,0 +1,1 @@
+Version labels now distinguish installed inactive copies from archived versions, the Mod Library hides archived-only duplicates and explains active bundle replacements, and Steam Workshop rows show the authored mod version.

@@ -332,6 +332,17 @@ describe('useTauri wrappers — command names + arg shapes', () => {
         applyToDisk: true,
       },
     });
+    await selectProfileModVersion(
+      'profile-1',
+      { mod_version_id: 'old-version', folder_name: 'BaseLib-old', mod_id: 'baselib', name: 'BaseLib' },
+      { mod_version_id: 'new-version', folder_name: 'BaseLib-new', mod_id: 'baselib', name: 'BaseLib' },
+      true,
+      true,
+    );
+    expect(lastCall()).toMatchObject({
+      cmd: 'select_profile_mod_version',
+      args: { applyToDisk: true, targetEnabled: true },
+    });
     await selectLibraryModVersion(
       { mod_version_id: 'old-version', folder_name: 'BaseLib-old', mod_id: 'baselib', name: 'BaseLib' },
       { mod_version_id: 'new-version', folder_name: 'BaseLib-new', mod_id: 'baselib', name: 'BaseLib' },

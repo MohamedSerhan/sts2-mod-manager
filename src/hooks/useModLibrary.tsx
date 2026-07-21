@@ -157,11 +157,10 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
   const [localVersionRevision, setLocalVersionRevision] = useState(0);
   const [repairingKey, setRepairingKey] = useState<string | null>(null);
   const [rollingBackKey, setRollingBackKey] = useState<string | null>(null);
-  // Update-plan review sheet visibility. Owned here so the toolbar's
-  // "Review updates" button AND the per-row provider-evidence pills can
-  // open the same sheet — the pills, in particular, need this state to
-  // live above the row so clicking them from LibraryTable can flip it.
-  const [planSheetOpen, setPlanSheetOpen] = useState(false);
+  // Exact update plans currently being reviewed. Keeping the plan payload,
+  // rather than a boolean, lets a row open only its own provider actions while
+  // the toolbar can still open the complete Library projection.
+  const [planSheetPlans, setPlanSheetPlans] = useState<UpdatePlanItem[] | null>(null);
 
   // Map ROW KEY → audit row, for O(1) per-row lookup in render.
   const auditByKey = useMemo(() => {
@@ -859,9 +858,9 @@ export function useModLibrary(opts: UseModLibraryOptions = {}) {
     refreshing,
     // Update-plan review sheet — lifted here so per-row provider pills
     // and the toolbar's Review button share one sheet.
-    planSheetOpen,
-    openPlanSheet: () => setPlanSheetOpen(true),
-    closePlanSheet: () => setPlanSheetOpen(false),
+    planSheetPlans,
+    openPlanSheet: (plans: UpdatePlanItem[]) => setPlanSheetPlans(plans),
+    closePlanSheet: () => setPlanSheetPlans(null),
     // Toolbar actions.
     handleOpenFolder,
     handleImportFile,

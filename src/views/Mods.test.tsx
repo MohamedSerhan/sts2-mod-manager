@@ -1769,6 +1769,112 @@ describe('<ModsView>', () => {
     });
   });
 
+  it('opens only the clicked row plans while the toolbar reviews every current update', async () => {
+    seedMods([
+      baseMod({ name: 'AlphaUpdate', folder_name: 'AlphaUpdate', mod_id: 'alpha-update', mod_version_id: 'alpha-update@1.0.0', nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/101' }),
+      baseMod({ name: 'BetaUpdate', folder_name: 'BetaUpdate', mod_id: 'beta-update', mod_version_id: 'beta-update@1.0.0', nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/102' }),
+    ]);
+    registerInvokeHandler('audit_mod_versions', () => ['AlphaUpdate', 'BetaUpdate'].map((name, index) => ({
+      mod_name: name,
+      folder_name: name,
+      installed_version: '1.0.0',
+      latest_has_assets: false,
+      needs_update: true,
+      asset_names: [],
+      releases_scanned: 0,
+      github_auto_detected: false,
+      github_repo: null,
+      pinned: false,
+      nexus_url: `https://www.nexusmods.com/slaythespire2/mods/${101 + index}`,
+      nexus_version: '2.0.0',
+      nexus_update_available: true,
+      update_source: 'nexus',
+      update_plans: [{
+        target: { name, folder_name: name, mod_id: `${name === 'AlphaUpdate' ? 'alpha' : 'beta'}-update`, mod_version_id: `${name === 'AlphaUpdate' ? 'alpha' : 'beta'}-update@1.0.0` },
+        current_version: '1.0.0',
+        target_version: '2.0.0',
+        provider: 'nexus',
+        source: `https://www.nexusmods.com/slaythespire2/mods/${101 + index}`,
+        capability: 'manual',
+        reason: '',
+        selectable: false,
+        pending: true,
+      }],
+    })));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: 'Audit mods' }));
+    await screen.findByRole('button', { name: 'Review 2 updates' });
+    const rows = await screen.findAllByTestId('library-row');
+    const alphaRow = rows.find((row) => within(row).queryByText('AlphaUpdate'));
+    expect(alphaRow).toBeDefined();
+
+    await user.click(within(alphaRow!).getByRole('button', { name: /Nexus.*1\.0\.0.*2\.0\.0/i }));
+    let modal = screen.getByRole('dialog', { name: /Review available updates/i });
+    expect(within(modal).getByText('AlphaUpdate')).toBeInTheDocument();
+    expect(within(modal).queryByText('BetaUpdate')).not.toBeInTheDocument();
+    await user.click(modal.querySelector('.gf-update-plan-foot button') as HTMLButtonElement);
+
+    await user.click(screen.getByRole('button', { name: 'Review 2 updates' }));
+    modal = screen.getByRole('dialog', { name: /Review available updates/i });
+    expect(within(modal).getByText('AlphaUpdate')).toBeInTheDocument();
+    expect(within(modal).getByText('BetaUpdate')).toBeInTheDocument();
+  });
+
+  it('removes a deleted mod from the cached update review after the Library refreshes', async () => {
+    let installed = [
+      baseMod({ name: 'DeleteUpdate', folder_name: 'DeleteUpdate', nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/301' }),
+      baseMod({ name: 'KeepUpdate', folder_name: 'KeepUpdate', nexus_url: 'https://www.nexusmods.com/slaythespire2/mods/302' }),
+    ];
+    registerInvokeHandler('get_installed_mods', () => installed);
+    registerInvokeHandler('delete_mod_cmd', () => {
+      installed = installed.filter((mod) => mod.name !== 'DeleteUpdate');
+      return null;
+    });
+    registerInvokeHandler('audit_mod_versions', () => installed.map((mod, index) => ({
+      mod_name: mod.name,
+      folder_name: mod.folder_name,
+      installed_version: '1.0.0',
+      needs_update: true,
+      pinned: false,
+      nexus_url: mod.nexus_url,
+      nexus_version: '2.0.0',
+      nexus_update_available: true,
+      update_source: 'nexus',
+      update_plans: [{
+        target: { name: mod.name, folder_name: mod.folder_name },
+        current_version: '1.0.0',
+        target_version: '2.0.0',
+        provider: 'nexus',
+        source: `https://www.nexusmods.com/slaythespire2/mods/${301 + index}`,
+        capability: 'manual',
+        reason: '',
+        selectable: false,
+        pending: true,
+      }],
+    })));
+
+    const user = userEvent.setup();
+    render(<Wrap />);
+    await user.click(await screen.findByRole('button', { name: 'Audit mods' }));
+    expect(await screen.findByRole('button', { name: 'Review 2 updates' })).toBeInTheDocument();
+    const rows = await screen.findAllByTestId('library-row');
+    const deleteRow = rows.find((row) => within(row).queryByText('DeleteUpdate'));
+    expect(deleteRow).toBeDefined();
+    await user.click(within(deleteRow!).getByRole('button', { name: /^Remove /i }));
+    await waitFor(() => {
+      expect(document.querySelector('.gf-modal-foot button.gf-btn-danger')).toBeTruthy();
+    });
+    await user.click(document.querySelector('.gf-modal-foot button.gf-btn-danger') as HTMLButtonElement);
+
+    const remainingReview = await screen.findByRole('button', { name: 'Review 1 update' });
+    await user.click(remainingReview);
+    const modal = screen.getByRole('dialog', { name: /Review available updates/i });
+    expect(within(modal).getByText('KeepUpdate')).toBeInTheDocument();
+    expect(within(modal).queryByText('DeleteUpdate')).not.toBeInTheDocument();
+  });
+
   it('the ↻ re-audit icon button calls audit_mod_versions', async () => {
     seedMods([baseMod({ name: 'BaseLib', folder_name: 'BaseLib', github_url: 'https://github.com/foo/bar' })]);
     registerInvokeHandler('audit_mod_versions', () => [
@@ -3245,6 +3351,59 @@ describe('<ModsView>', () => {
       const link = await screen.findByRole('button', { name: /manage active modpack/i });
       await user.click(link);
       expect(onOpen).toHaveBeenCalledTimes(1);
+    });
+
+    it('hides archived-only profile versions from top-level installed rows', async () => {
+      seedMods([
+        baseMod({
+          name: 'Card Editor',
+          folder_name: 'CardEditor',
+          mod_id: 'card-editor',
+          mod_version_id: 'card-editor-543',
+          version: '5.4.3',
+        }),
+      ]);
+      registerInvokeHandler('get_active_profile', () => 'TestPack');
+      registerInvokeHandler('get_profile_memberships', () => ({
+        profiles: [{ name: 'TestPack', editable: true }],
+        mods: [
+          {
+            mod_version_id: 'better-spire-1831',
+            name: 'BetterSpire2',
+            version: '1.83.1',
+            folder_name: 'BetterSpire2-v1.83.1',
+            mod_id: 'better-spire-2',
+            installed: false,
+            installed_enabled: false,
+            cached: true,
+            profiles: [
+              { profile_name: 'TestPack', included: true, enabled: false, editable: true },
+            ],
+          },
+          {
+            mod_version_id: 'card-editor-543',
+            name: 'Card Editor',
+            version: '5.4.3',
+            folder_name: 'CardEditor',
+            mod_id: 'card-editor',
+            installed: true,
+            installed_enabled: true,
+            cached: true,
+            profiles: [
+              { profile_name: 'TestPack', included: true, enabled: true, editable: true },
+            ],
+          },
+        ],
+      }));
+
+      render(<Wrap />);
+
+      expect((await screen.findAllByText('Card Editor')).length).toBeGreaterThan(0);
+      await waitFor(() => {
+        expect(getInvokeCalls().some((call) => call.cmd === 'get_profile_memberships')).toBe(true);
+      });
+      expect(screen.queryByText('BetterSpire2')).not.toBeInTheDocument();
+      expect(screen.getAllByTestId('library-row')).toHaveLength(1);
     });
   });
 

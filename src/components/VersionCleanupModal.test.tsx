@@ -209,7 +209,7 @@ describe('<VersionCleanupModal>', () => {
     await chooseOption(
       user,
       /Replacement for \[BASE\] RitsuLib v0\.4\.56/i,
-      /v0\.4\.57.*Saved in Versions/i,
+      /v0\.4\.57.*Archived in Versions/i,
     );
     await user.click(screen.getByRole('button', { name: /Remove selected/i }));
     await user.click(await screen.findByRole('button', { name: /Remove versions/i }));
@@ -237,7 +237,7 @@ describe('<VersionCleanupModal>', () => {
     await chooseOption(
       user,
       /Replacement for \[BASE\] RitsuLib v0\.4\.56/i,
-      /v0\.4\.57.*Saved in Versions/i,
+      /v0\.4\.57.*Archived in Versions/i,
     );
 
     const githubNewest = screen.getAllByRole('checkbox', { name: /RitsuLib v0\.4\.57/i })
@@ -266,7 +266,7 @@ describe('<VersionCleanupModal>', () => {
     await chooseOption(
       user,
       /Version to keep for \[BASE\] RitsuLib/i,
-      /v0\.4\.57.*Steam Workshop.*Stored on disk/i,
+      /v0\.4\.57.*Steam Workshop.*Installed, inactive/i,
     );
     await user.click(screen.getByRole('button', { name: /Keep only this version/i }));
 

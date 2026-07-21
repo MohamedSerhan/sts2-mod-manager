@@ -1550,6 +1550,8 @@
     "workshopManagedTitle": "تديره ورشة Steam. استخدم إعدادات/ترتيب تحميل STS2 أو افتح صفحة الورشة؛ لن ينقل المدير أو يحذف ملفات تملكها Steam.",
     "workshopManagedDesc": "هذه الملفات يديرها Steam؛ استخدم ورشة Steam لتحديثها أو إلغاء الاشتراك أو إصلاحها.",
     "duplicateSourceWarning": "قد يفضل STS2 نسخة مجلد mods المحلي عندما يكون هذا المود ونسخة Steam Workshop مفعّلين معًا.",
+    "activeViaBundle": "مفعّل عبر {{bundle}}",
+    "activeViaBundleTitle": "هذه النسخة المثبتة غير مفعّلة لأن حزمة {{bundle}} المفعّلة تتضمن بالفعل تعديل اللعبة نفسه.",
     "modActions": "إجراءات المود",
     "copyVersion": "نسخ النسخة (v{{version}})",
     "customizeMenu": "تخصيص القائمة…",
@@ -1628,11 +1630,28 @@
       "upToDate": "محدَّث"
     },
     "updatePlan": {
-      "title": "مراجعة التحديثات المتاحة", "subtitle": "اختر تنزيلات GitHub وراجع التحديثات التي تديرها مصادر أخرى.",
-      "selectAll": "تحديد الكل", "selectNone": "إلغاء التحديد", "selectItem": "تحديد {{name}}", "versionChange": "v{{current}} ← v{{target}}", "openManual": "فتح صفحة التنزيل اليدوي", "unfreeze": "إلغاء التجميد",
-      "downloadSelected_one": "تنزيل تحديث GitHub المحدد إلى الإصدارات", "downloadSelected_other": "تنزيل {{count}} من تحديثات GitHub المحددة إلى الإصدارات",
-      "capability": { "downloadable": "تنزيل GitHub", "manual": "تنزيل يدوي", "steam-managed": "تديره Steam", "frozen": "مستبعد أثناء التجميد" },
-      "result": { "updated": "تم التنزيل إلى الإصدارات", "stale": "تغير المصدر — أعد المعاينة", "skipped": "تم التخطي", "failed": "فشل التنزيل" }
+      "title": "مراجعة التحديثات المتاحة",
+      "subtitle": "اختر تنزيلات GitHub وراجع التحديثات التي تديرها مصادر أخرى.",
+      "selectAll": "تحديد الكل",
+      "selectNone": "إلغاء التحديد",
+      "selectItem": "تحديد {{name}}",
+      "versionChange": "v{{current}} ← v{{target}}",
+      "openManual": "فتح صفحة التنزيل اليدوي",
+      "unfreeze": "إلغاء التجميد",
+      "downloadSelected_one": "تنزيل تحديث GitHub المحدد إلى الإصدارات",
+      "downloadSelected_other": "تنزيل {{count}} من تحديثات GitHub المحددة إلى الإصدارات",
+      "capability": {
+        "downloadable": "تنزيل GitHub",
+        "manual": "تنزيل يدوي",
+        "steam-managed": "تديره Steam",
+        "frozen": "مستبعد أثناء التجميد"
+      },
+      "result": {
+        "updated": "تم التنزيل إلى الإصدارات",
+        "stale": "تغير المصدر — أعد المعاينة",
+        "skipped": "تم التخطي",
+        "failed": "فشل التنزيل"
+      }
     },
     "rollbackNoSource": "لا يحتوي «{{name}}» على مصدر GitHub مرتبط — يجلب الإرجاع من GitHub. أضِف مصدرًا عبر «تعديل المصادر…» أولاً.",
     "rollbackConfirmTitle": "إرجاع «{{name}}»؟",
@@ -1671,6 +1690,7 @@
     "versionManageHeading": "إدارة إصدارات {{mod}}",
     "versionManageSub": "أزِل الإصدارات المخزنة القديمة التي لم تعد تحتاجها. الإصدارات النشطة أو المستخدمة في الحزم تفتح معالج إزالة.",
     "versionActiveStatus": "نشط في اللعبة",
+    "restoreArchivedAndEnable": "استعادة هذه النسخة المؤرشفة وتفعيلها في اللعبة",
     "versionStoredOnDiskStatus": "مخزن على القرص",
     "versionSavedStatus": "محفوظ في الإصدارات",
     "versionMissingStatus": "غير مثبت على القرص",
